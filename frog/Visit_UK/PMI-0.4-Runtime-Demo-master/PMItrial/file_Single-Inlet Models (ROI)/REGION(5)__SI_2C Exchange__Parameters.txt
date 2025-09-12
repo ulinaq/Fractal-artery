@@ -1,0 +1,29 @@
+Parameters
+
+Plasma Flow  (ml/100ml/min)
+Plasma Volume  (ml/100ml)
+Plasma MTT  (sec)
+Permeability-surface area product  (ml/100ml/min)
+Interstitial Volume  (ml/100ml)
+Interstitial MTT  (sec)
+Ktrans  (ml/100ml/min)
+kep  (ml/100ml/min)
+Extraction Fraction  (%)
+Extracellular Volume  (%)
+Extracellular MTT  (sec)
+Arterial Delay  (sec)
+
+Fitted Values
+
+       118.54442
+       3.2065652
+       1.5324617
+       7.0012379
+       14.722704
+       126.17230
+       6.6108036
+       44.902101
+       5.5766469
+       17.929269
+       9.0747096
+       1.7500000

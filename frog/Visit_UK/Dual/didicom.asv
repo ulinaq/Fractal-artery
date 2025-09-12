@@ -1,0 +1,35 @@
+name = [date,'-Co'];
+cS = writeDicom(cCombSave,500,size(I),time,name);
+name = [date,'-Coarse'];
+% cS = writeDicom(cSave,lm,size(Lores),time,name);
+% name = [date,'-Art'];
+% cS = writeDicom(cASave,lm,Grid,t,name);
+% name = [date,'-Vein'];
+% cS = writeDicom(cVSave,lm,Grid,t,name);
+
+function cS = writeDicom(C,lm,Sise,t,name)
+Amax = full(max(C(:)));
+Amin = full(min(C(:)));
+lm=lm-1;
+start = fix(now);
+folder = ['Result/',name];
+[~,~,~] = mkdir(folder);
+cCSave = mat2gray(reshape(C(:,1:lm),Sise(1)*Sise(2),lm),[Amin Amax]);
+i=1;
+cS=reshape(full(cCSave(:,i)),Sise);
+dicomwrite(cS,[folder '/',sprintf('%04d', i),'.dcm']);
+info = dicominfo([folder '/',sprintf('%04d', i),'.dcm']);
+info.PixelRepresentation = 1;
+info.InstanceNumber = 1;
+for i=1:lm
+waktu = datestr(start + t(i)/(60*60*24), 'HH:MM:SS');
+info.AcquisitionTime = waktu;
+info.ContentTime = waktu;
+info.SeriesNumber = i;
+info.SeriesTime = waktu;
+info.RescaleSlope = round((2^16)/(Amax-Amin));
+info.RescaleIntercept = 0;
+cS = reshape(full(cCSave(:,i)),Sise);
+dicomwrite(cS,[folder '/',sprintf('%04d', i),'.dcm'],info);
+end
+end

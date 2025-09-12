@@ -1,0 +1,29 @@
+% %% Domain Parameters (preparation)
+% % global node segment vnode vsegment Grid Trans prm;
+prm = Frog_parameter();
+[Trans,Grid] = FO_Darcy(prm);    % Load the image domain and create darcy domain. Then compute transmibility
+[node,segment,vnode,vsegment] = segOne(prm,Grid,0,0);
+[Xr,Grid] = FO_Capillary(node,vnode,Grid);
+x = Frog_LinEq(prm,node,segment,vnode,vsegment,Xr.P);
+% x = Xr.pvec(2*Grid.N+1:end);
+Co = node.n + vnode.n;
+Cv = Co + segment.n;
+in = x([Co+segment.num(segment.isterminal)]);
+out = x([Cv+vsegment.num(vsegment.isterminal)]);
+q = [in/sum(in)*sum(out);-1*out];
+P = Xr.pvec*q+x(end);
+Pa = reshape(P(1:Grid.N),Grid.Nx,Grid.Ny);
+
+% add flow rate as weight on graph plot
+GV=graph(vsegment.init,vsegment.end,abs(x(Cv+1:Cv+vsegment.n)));
+GA=graph(segment.init,segment.end,abs(x(Co+1:Cv)));
+GV.Edges.width=10*sqrt(abs(GV.Edges.Weight)/sum(out));
+GA.Edges.width=10*sqrt(abs(GA.Edges.Weight)/sum(in));
+% Compute Time of Flight
+% V = FluxSingle(prm,Pa,Grid,Trans,q,node,vnode,segment,x);
+V = Flux0(Pa,Grid,Trans,q);
+Pset = [min(P(Grid.B)) max(P(Grid.B))]*p;
+Tset = [min(V.Ti(Grid.B)) max(V.Ti(Grid.B))];
+save init.mat node segment vnode vsegment Grid Trans Pset Tset;
+%% Tree visualization
+analyze(prm,Pa,V,Grid,GA,GV,node,vnode,name, Pset, Tset)

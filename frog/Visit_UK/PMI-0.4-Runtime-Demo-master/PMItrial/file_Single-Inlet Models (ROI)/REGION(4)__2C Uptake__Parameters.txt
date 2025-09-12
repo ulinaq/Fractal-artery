@@ -1,0 +1,19 @@
+Parameters
+
+Plasma Flow  (ml/100ml/min)
+Plasma Volume  (ml/100ml)
+Plasma MTT  (sec)
+Permeability-surface area product  (ml/100ml/min)
+Ktrans  (ml/100ml/min)
+Extraction Fraction  (%)
+Arterial Delay  (sec)
+
+Fitted Values
+
+       83.207768
+       4.7092800
+       3.2087478
+       4.8505092
+       4.5833289
+       5.5082945
+       2.6000000

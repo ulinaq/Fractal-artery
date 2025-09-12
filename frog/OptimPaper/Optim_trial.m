@@ -1,0 +1,43 @@
+% name = ['Flux result'];
+% % Load the modelling parameters
+% prm = Frog_parameter();             
+% load('init.mat');
+% %% Optimization
+% n=node.n+segment.n+vnode.n+vsegment.n;
+% n = 15;
+% lb = -0.15*ones(n,1);
+% ub = 0.15*ones(n,1);
+% tic
+% optPSwpar = optimoptions('particleswarm', 'UseParallel', true, 'UseVectorized', false, 'MaxIterations', 300);
+% [var, val] = particleswarm(@FOptimFlux,n,lb,ub,optPSwpar);
+% toc
+var2 = var;
+
+%Update structure by x perturbation
+[OptimNode,Optimsegment]=FO_update(var2(1:round(n/4)),var2(round(n/4)+1:round(n/2)),node,segment,Grid);
+[OptimVnode,Optimvsegment]=FO_update(var2(round(n/2)+1:round(3*n/4)), var2(round(3*n/4)+1:end),vnode,vsegment,Grid);
+
+% [OptimNode,Optimsegment]=FO_update(var(1:node.n),var(node.n+1:node.n+segment.n),node,segment,Grid);
+% [OptimVnode,Optimvsegment]=FO_update(var(node.n+segment.n+1:node.n+segment.n+vnode.n), var(node.n+segment.n+vnode.n+1:end),vnode,vsegment,Grid);
+
+[Xr,Grid] = FO_Capillary(OptimNode,OptimVnode,Grid); 
+% Solve the linear system
+x = Frog_LinEq(prm,OptimNode,Optimsegment,OptimVnode,Optimvsegment,Xr.P);
+% Calculate pressure distribution in Darcy domain
+Co = OptimNode.n + OptimVnode.n;  Cv = Co + Optimsegment.n;
+in = x([Co+Optimsegment.num(Optimsegment.isterminal)]);
+out = x([Cv+Optimvsegment.num(Optimvsegment.isterminal)]);
+q = [in/sum(in)*sum(out);-1*out];
+P = Xr.pvec*q+x(end);
+Pa = reshape(P(1:Grid.N),Grid.Nx,Grid.Ny);
+
+% Visualization
+GV=graph(Optimvsegment.init,Optimvsegment.end,abs(x(Cv+Optimvsegment.num)));
+GA=graph(Optimsegment.init,Optimsegment.end,abs(x(Co+Optimsegment.num)));
+GV.Edges.width=10*sqrt(abs(GV.Edges.Weight)/sum(out));
+GA.Edges.width=10*sqrt(abs(GA.Edges.Weight)/sum(in));
+V = Flux0(Pa,Grid,Trans,q); 
+mean(V.Ti(Grid.B))
+std(V.Ti(Grid.B))
+analyze(prm,Pa,V,Grid,GA,GV,OptimNode,OptimVnode,name);    % Pressure distribution in Darcy domain
+yr = PlotPressure(prm,Optimsegment,Optimvsegment,OptimNode,x,name);
