@@ -1,0 +1,65 @@
+function analyze(prm,P,V,Grid,GA,GV,node,vnode,name)
+P = P*prm.mmHg;
+
+filename{1} = ['Fig/Pd',name];
+filename{2} = ['Fig/ToF',name];
+filename{2} = ['Fig/Flux',name];
+
+
+
+figure()
+% clf;
+imagesc([1 515]*prm.pixel,[1 634]*prm.pixel,P,'AlphaData',Grid.B); axis ij; title(['Pressure distribution [',name,']']); daspect([1 1 1]);
+caxis([8.85852614116889, 20.8166956273219]); set(gca,'color','w');
+% contourf(P); colormap(gray); colorbar; title('Pressure');
+hcb=colorbar;
+title(hcb,'P [mmHg]');
+xlabel('x [mm]')
+ylabel('y [mm]')
+hold on
+plot(GV,'b','YData',vnode.XData,'XData',vnode.YData,'LineWidth',GV.Edges.width,'DisplayName','Venal tree structure');
+plot(GA,'r','YData',node.XData,'XData',node.YData,'LineWidth',GA.Edges.width,'DisplayName','Arterial tree structure');
+daspect([1 1 1])
+set(gcf, 'Color', 'w'); 
+export_fig(filename{1},'-r300'); 
+
+
+
+figure()
+clf;
+imagesc([1 515]*prm.pixel,[1 634]*prm.pixel,V.Ti,'AlphaData',Grid.B); axis ij; title(['ToF distribution [',name,']']); daspect([1 1 1]);
+caxis([0.0177732039027040, 800]); set(gca,'color','w');
+% contourf(P); colormap(gray); colorbar; title('Pressure');
+hcb=colorbar;
+title(hcb,'ToF [s]');
+xlabel('x [mm]')
+ylabel('y [mm]')
+hold on
+plot(GV,'b','YData',vnode.XData,'XData',vnode.YData,'LineWidth',GV.Edges.width,'DisplayName','Venal tree structure');
+plot(GA,'r','YData',node.XData,'XData',node.YData,'LineWidth',GA.Edges.width,'DisplayName','Arterial tree structure');
+daspect([1 1 1])
+set(gcf, 'Color', 'w'); 
+export_fig(filename{2},'-r300'); 
+
+figure()
+clf;
+imagesc([1 515]*prm.pixel,[1 634]*prm.pixel,V.u*prm.mmHg,'AlphaData',Grid.B); axis ij; title(['Flux distribution [',name,']']); daspect([1 1 1]);
+caxis([0, 0.0621]); set(gca,'color','w');
+% contourf(P); colormap(gray); colorbar; title('Pressure');
+hcb=colorbar;
+title(hcb,'ToF [s]');
+xlabel('x [mm]')
+ylabel('y [mm]')
+hold on
+plot(GV,'b','YData',vnode.XData,'XData',vnode.YData,'LineWidth',GV.Edges.width,'DisplayName','Venal tree structure');
+plot(GA,'r','YData',node.XData,'XData',node.YData,'LineWidth',GA.Edges.width,'DisplayName','Arterial tree structure');
+daspect([1 1 1])
+set(gcf, 'Color', 'w'); 
+export_fig(filename{2},'-r300'); 
+
+
+
+
+
+
+end

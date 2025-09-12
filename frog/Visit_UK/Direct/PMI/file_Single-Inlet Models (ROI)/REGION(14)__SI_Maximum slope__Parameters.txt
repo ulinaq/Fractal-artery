@@ -1,0 +1,9 @@
+Parameters
+
+Plasma Flow  (ml/100ml/min)
+Arterial Delay  (sec)
+
+Fitted Values
+
+       36.563755
+      0.00000000

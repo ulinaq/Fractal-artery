@@ -1,0 +1,22 @@
+\begin{table}[H]
+\scriptsize
+\begin{center}
+\begin{tabular}{ l  l  l  l }
+Description & Symbol & Value & Unit\\
+\hline
+Field of view & FOV & $(9.00, 9.00, 1.00, )$ & \SI{}{\milli\meter}\\
+Voxel size & $h$ & $(0.31, 0.31, 1.00, )$ & \SI{}{\milli\meter}\\
+Matrix & $n x \times n y \times n z$ & $(29, 29, 1, )$ & -\\
+Viscosity blood & $\mu b$ & $0.00$ & \SI{}{\kilo\pascal\second}\\
+Average perm. arteries & $k a$ & $1.00e-06$ & \SI{}{\per\milli\meter\squared}\\
+Average perm. venules & $k v$ & $1.00e-06$ & \SI{}{\per\milli\meter\squared}\\
+Average perm. white matter & $k v$ & $1.00e-06$ & \SI{}{\per\milli\meter\squared}\\
+Average perm. gray matter & $k v$ & $2.00e-06$ & \SI{}{\per\milli\meter\squared}\\
+Average porosity arteries & $\phi a$ & $0.50$ & -\\
+Average porosity venules & $\phi v$ & $0.50$ & -\\
+\hline
+\end{tabular}
+\end{center}
+\caption{}
+\label{}
+\end{table}

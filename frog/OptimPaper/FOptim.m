@@ -1,0 +1,35 @@
+function val = FOptim(var)
+% function of x (perturbation on tree structure) to compute a value for
+% optimization solver
+% global node segment vnode vsegment Grid Trans prm;
+prm = Frog_parameter();             
+% Load the image domain and create darcy domain. Then compute transmibility
+load('initial.mat');
+%Update structure by x perturbation
+n = length(var);
+[nod,sgm]=FO_update(var(1:round(n/4)),var(round(n/4)+1:round(n/2)),node,segment,Grid);
+[vnod,vsgm]=FO_update(var(round(n/2)+1:round(3*n/4)), var(round(3*n/4)+1:end),vnode,vsegment,Grid);
+% [nod,sgm]=FO_update(var(1:node.n),var(node.n+1:node.n+segment.n),node,segment,Grid);
+% [vnod,vsgm]=FO_update(var(node.n+segment.n+1:node.n+segment.n+vnode.n), var(node.n+segment.n+vnode.n+1:end),vnode,vsegment,Grid);
+%Solve darcy domain
+if all(Grid.B([nod.input; vnod.output]))
+    [Xr,Grid] = FO_Capillary(nod,vnod,Grid);
+    x = Frog_LinEq(prm,nod,sgm,vnod,vsgm,Xr.P);
+    Co = node.n + vnode.n;
+    Cv = Co + segment.n;
+    in = x([Co+sgm.num(sgm.isterminal)]);
+    out = x([Cv+vsgm.num(vsgm.isterminal)]);
+    q = [in/sum(in)*sum(out);-1*out];
+    P = Xr.pvec*q+x(end);
+    Pa = reshape(P(1:Grid.N),Grid.Nx,Grid.Ny);
+
+    V = Flux0(Pa,Grid,Trans,q); 
+    
+%     val=norm((1./V.u(Grid.B)-mean(1/V.u(Grid.B))),2);
+    val=std(V.Ti(Grid.B));
+%     val=std(V.u(Grid.B)); 
+else
+    val = inf;
+end
+
+end

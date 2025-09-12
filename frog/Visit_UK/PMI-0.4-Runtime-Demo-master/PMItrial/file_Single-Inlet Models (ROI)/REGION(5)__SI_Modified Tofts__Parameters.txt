@@ -1,0 +1,19 @@
+Parameters
+
+Plasma Volume  (ml/100ml)
+Interstitial Volume  (ml/100ml)
+Interstitial MTT  (sec)
+Ktrans  (ml/100ml/min)
+kep  (ml/100ml/min)
+Extracellular Volume  (%)
+Arterial Delay  (sec)
+
+Fitted Values
+
+       4.9568716
+       19.726148
+       78.167213
+       15.141500
+       76.758525
+       24.683020
+       1.3500000

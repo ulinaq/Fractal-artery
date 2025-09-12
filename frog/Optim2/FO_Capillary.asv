@@ -1,0 +1,36 @@
+function [state,Grid,node,vnode] = FO_Capillary(node,vnode,Grid)
+
+X = ceil((node.XData(node.isterminal))./Grid.hx);
+Y = ceil(node.YData(node.isterminal)./Grid.hy);
+Xout = floor((vnode.XData(vnode.isterminal))./Grid.hx);
+Yout = floor((vnode.YData(vnode.isterminal))./Grid.hy);
+
+if max(Xout)>=Grid.Nx | max(Yout)>=Grid.Ny | min(Xout)<=0 | min(Yout)<=0 ...
+        | max(X)>=Grid.Nx | max(Y)>=Grid.Ny | min(X)<=0 | min(Y)<=0
+    state.P=NaN; state.pvec=NaN;
+    return;
+end
+
+node.input = sub2ind([Grid.Nx Grid.Ny],X,Y);
+vnode.output = sub2ind([Grid.Nx Grid.Ny],Xout,Yout);
+a = [node.input;vnode.output];
+zn = [];
+Grid.src.cell = [];
+Grid.src.rate = [];
+state.pvec = [];
+q=zeros(Grid.N,length(a));   % without source as default
+for i=1:length(a)
+    % Create circle region for spreading epsilon
+    area= [a(i)-2*Grid.Nx, a(i)-Grid.Nx-1, a(i)-Grid.Nx, a(i)-Grid.Nx+1, a(i)-2, a(i)-1, a(i), a(i)+1, a(i)+2, a(i)+Grid.Nx-1, a(i)+Grid.Nx, a(i)+Grid.Nx+1, a(i)+2*Grid.Nx]';
+    zn = [0.0561797752808989;0.0786516853932584;0.0898876404494382;0.0786516853932584;0.0561797752808989;0.0898876404494382;0.101123595505618;0.0898876404494382;0.0561797752808989;0.0786516853932584;0.0898876404494382;0.0786516853932584;0.0561797752808989];
+    q(area,i)=zn;
+    Grid.src.rate{i} = zn;
+    Grid.src.cell = [Grid.src.cell; area];
+end
+       
+    % Solve system equation
+    state.pvec = Grid.Amat\q;
+
+state.P=state.pvec(a,:);
+end
+

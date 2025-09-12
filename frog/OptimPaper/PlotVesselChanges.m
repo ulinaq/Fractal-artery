@@ -1,0 +1,88 @@
+name = ['Optimization1'];
+prm = Frog_parameter();
+[Trans,Grid] = FO_Darcy(prm);    % Load the image domain and create darcy domain. Then compute transmibility
+[Onode,Osegment,Ovnode,Ovsegment] = segOne(prm,Grid,0,0);
+[Xr,Grid] = FO_Capillary(Onode,Ovnode,Grid);
+x = Frog_LinEq(prm,Onode,Osegment,Ovnode,Ovsegment,Xr.P);
+Co = Onode.n + Ovnode.n;
+Cv = Co + Osegment.n;
+in = x([Co+Osegment.num(Osegment.isterminal)]);
+out = x([Cv+Ovsegment.num(Ovsegment.isterminal)]);
+q = [in/sum(in)*sum(out);-1*out];
+P = Xr.pvec*q+x(end);
+Pa = reshape(P(1:Grid.N),Grid.Nx,Grid.Ny);
+
+% add flow rate as weight on graph plot
+GVo=graph(Ovsegment.init,Ovsegment.end,abs(x(Cv+1:Cv+Ovsegment.n)));
+GAo=graph(Osegment.init,Osegment.end,abs(x(Co+1:Cv)));
+GVo.Edges.width=10*sqrt(abs(GVo.Edges.Weight)/sum(out));
+GAo.Edges.width=10*sqrt(abs(GAo.Edges.Weight)/sum(in));
+
+load('init.mat');
+[Xr,Grid] = FO_Capillary(node,vnode,Grid);
+x = Frog_LinEq(prm,node,segment,vnode,vsegment,Xr.P);
+in = x([Co+segment.num(segment.isterminal)]);
+out = x([Cv+vsegment.num(vsegment.isterminal)]);
+q = [in/sum(in)*sum(out);-1*out];
+P = Xr.pvec*q+x(end);
+Pa = reshape(P(1:Grid.N),Grid.Nx,Grid.Ny);
+
+% add flow rate as weight on graph plot
+GV=graph(vsegment.init,vsegment.end,abs(x(Cv+1:Cv+vsegment.n)));
+GA=graph(segment.init,segment.end,abs(x(Co+1:Cv)));
+GV.Edges.width=10*sqrt(abs(GV.Edges.Weight)/sum(out));
+GA.Edges.width=10*sqrt(abs(GA.Edges.Weight)/sum(in));
+
+value = var1;
+n = length(value);
+%Update structure by x perturbation
+[OptimNode,Optimsegment]=FO_update(value(1:round(n/4)), value(round(n/4)+1:round(n/2)),node,segment,Grid);
+[OptimVnode,Optimvsegment]=FO_update(value(round(n/2)+1:round(3*n/4)), value(round(3*n/4)+1:end),vnode,vsegment,Grid);
+
+[Xr,Grid] = FO_Capillary(OptimNode,OptimVnode,Grid); 
+% Solve the linear system
+x = Frog_LinEq(prm,OptimNode,Optimsegment,OptimVnode,Optimvsegment,Xr.P);
+% Calculate pressure distribution in Darcy domain
+Co = OptimNode.n + OptimVnode.n;  Cv = Co + Optimsegment.n;
+in = x([Co+Optimsegment.num(Optimsegment.isterminal)]);
+out = x([Cv+Optimvsegment.num(Optimvsegment.isterminal)]);
+q = [in/sum(in)*sum(out);-1*out];
+P = Xr.pvec*q+x(end);
+Pa = reshape(P(1:Grid.N),Grid.Nx,Grid.Ny);
+
+% Visualization
+GVn=graph(Optimvsegment.init,Optimvsegment.end,abs(x(Cv+Optimvsegment.num)));
+GAn=graph(Optimsegment.init,Optimsegment.end,abs(x(Co+Optimsegment.num)));
+GVn.Edges.width=10*sqrt(abs(GVn.Edges.Weight)/sum(out));
+GAn.Edges.width=10*sqrt(abs(GAn.Edges.Weight)/sum(in));
+V = Flux0(Pa,Grid,Trans,q); 
+
+figure('position', [0 0 600 800])
+% clf;
+imagesc([1 515]*prm.pixel,[1 634]*prm.pixel,Pa*prm.mmHg,'AlphaData',Grid.B); axis ij; title(['Arterial vessel in ',name]); daspect([1 1 1]);
+caxis([-10, 5.8166956273219]); set(gca,'color','w');
+colormap(gray);
+xlabel('x [mm]')
+ylabel('y [mm]')
+hold on
+plot(GA,'k','YData',node.XData,'XData',node.YData,'LineWidth',GA.Edges.width,'EdgeAlpha',0.3);
+plot(GAo,'g','YData',Onode.XData,'XData',Onode.YData,'LineWidth',GAo.Edges.width,'EdgeAlpha',0.3);
+plot(GAn,'r','YData',OptimNode.XData,'XData',OptimNode.YData,'LineWidth',GAn.Edges.width,'EdgeAlpha',0.3);
+daspect([1 1 1])
+set(gcf, 'Color', 'w'); 
+export_fig(['Fig/', name, ' artery'],'-r300'); 
+
+figure('position', [0 0 600 800])
+% clf;
+imagesc([1 515]*prm.pixel,[1 634]*prm.pixel,Pa*prm.mmHg,'AlphaData',Grid.B); axis ij; title(['Vein vessel in ',name]); daspect([1 1 1]);
+caxis([0, 10.8166956273219]); set(gca,'color','w');
+colormap(gray);
+xlabel('x [mm]')
+ylabel('y [mm]')
+hold on
+plot(GV,'k','YData',vnode.XData,'XData',vnode.YData,'LineWidth',GV.Edges.width);
+plot(GVo,'g','YData',Ovnode.XData,'XData',Ovnode.YData,'LineWidth',GVo.Edges.width);
+plot(GVn,'b','YData',OptimVnode.XData,'XData',OptimVnode.YData,'LineWidth',GVn.Edges.width);
+daspect([1 1 1])
+set(gcf, 'Color', 'w'); 
+export_fig(['Fig/new/', name, ' vein'],'-r300'); 
