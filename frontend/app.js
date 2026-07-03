@@ -422,7 +422,9 @@ $("btn-clear-tissue").addEventListener("click", clearTissue);
 $("btn-save-mask").addEventListener("click", () => saveMask().catch((e) => status(e.message, "err")));
 $("btn-grow").addEventListener("click", () => grow().catch((e) => status(e.message, "err")));
 $("btn-run").addEventListener("click", () => run().catch((e) => status(e.message, "err")));
-$("btn-export").addEventListener("click", () => { window.location = `/projects/${state.project}/export`; });
+$("btn-export").addEventListener("click", () => {
+  window.location = `/projects/${state.project}/export?fmt=${$("export-fmt").value}`;
+});
 $("mode-vessels").addEventListener("click", () => setMode("vessels"));
 $("mode-tissue").addEventListener("click", () => setMode("tissue"));
 $("mode-result").addEventListener("click", () => setMode("result"));

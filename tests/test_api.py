@@ -66,6 +66,17 @@ def test_run_results_and_export(client):
     assert export.status_code == 200
     assert len(export.content) > 1000
 
+    csv = client.get(f"/projects/{pid}/export", params={"fmt": "csv"})
+    assert csv.status_code == 200
+    assert csv.text.splitlines()[0] == "x,y,pressure,flux,tof"
+
+    vtk = client.get(f"/projects/{pid}/export", params={"fmt": "vtk"})
+    assert vtk.status_code == 200
+    assert vtk.text.lstrip().startswith("<?xml")
+    assert 'type="ImageData"' in vtk.text
+
+    assert client.get(f"/projects/{pid}/export", params={"fmt": "bogus"}).status_code == 422
+
 
 def test_run_with_hand_drawn_vessels(client):
     pid = client.post("/projects", json={

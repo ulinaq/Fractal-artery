@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import io
+import tempfile
 from pathlib import Path
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request
 
 from .. import growth
+from .. import io as perfio
 from ..core import tkm, transport
 from ..core.geometry import arterial_tree, network_from_polylines, rasterize_mask
 from ..core.pipeline import run_hybrid
@@ -262,14 +264,29 @@ def create_app(store: ProjectStore | None = None,
         return FieldResponse(name=name, shape=field.shape, data=data.tolist())
 
     @app.get("/projects/{pid}/export")
-    def export(pid: str):
+    def export(pid: str, fmt: str = "npz"):
         from fastapi.responses import FileResponse
 
         project = _project(pid)
         if not project.has_result:
             raise HTTPException(409, "no result yet; run the simulation first")
-        return FileResponse(store.result_path(pid), media_type="application/octet-stream",
-                            filename=f"{project.name or project.id}.npz")
+        name = project.name or project.id
+        if fmt == "npz":       # the stored blob is already the npz export
+            return FileResponse(store.result_path(pid), media_type="application/octet-stream",
+                                filename=f"{name}.npz")
+        if fmt not in ("csv", "vtk"):
+            raise HTTPException(422, "fmt must be 'npz', 'csv' or 'vtk'")
+        with np.load(store.result_path(pid)) as d:
+            dl, mask = tuple(d["domain_limit"]), d["mask"]
+            fields = {"pressure": d["pressure"], "flux": d["flux"], "tof": d["tof"]}
+        out = Path(tempfile.gettempdir()) / f"perfusion_{pid}.{fmt}"
+        if fmt == "csv":
+            perfio.fields_to_csv(out, dl, mask=mask, **fields)
+            media = "text/csv"
+        else:
+            perfio.fields_to_vtk(out, dl, mask=mask, **fields)
+            media = "application/xml"
+        return FileResponse(out, media_type=media, filename=f"{name}.{fmt}")
 
     @app.get("/projects/{pid}/network")
     def network_geometry(pid: str) -> dict:
