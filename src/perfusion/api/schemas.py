@@ -80,15 +80,22 @@ class RunRequest(BaseModel):
 
 
 class GrowRequest(BaseModel):
-    """Grow the arterial tree into the tissue by space colonisation."""
+    """Grow the arterial tree into the tissue.
 
-    n_points: int = Field(400, ge=1, le=20000)   # attraction points sampled in the mask
+    ``method="colonization"`` (default) uses space colonisation with ``n_points``
+    attraction points; ``method="cco"`` uses constrained constructive
+    optimisation, adding ``n_points`` terminals spaced at least ``d_min`` apart.
+    """
+
+    method: str = "colonization"                  # "colonization" | "cco"
+    n_points: int = Field(400, ge=1, le=20000)   # attraction points / CCO terminals
     seed: int = 0
-    step: float | None = None                    # None -> auto (fraction of extent)
+    step: float | None = None                    # colonisation: None -> auto
     influence_radius: float | None = None
     kill_radius: float | None = None
+    d_min: float | None = None                   # cco: min terminal spacing
     leaf_radius: float | None = None
-    from_segments: list[int] | None = None       # grow only from these segment tips
+    from_segments: list[int] | None = None       # colonisation: grow from these tips
 
 
 class GrowInfo(BaseModel):

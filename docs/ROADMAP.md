@@ -94,7 +94,7 @@ Every requested capability, and where it lives.
 | Load vessel drawing/image | ✅ file picker | ✅ `POST /projects/{id}/image` | ✅ `segmentation.segment_network` + `network_in_domain` |
 | Draw tissue (mask) by hand | paint canvas | `PUT /projects/{id}/tissue` | rasterise → `core.darcy.Grid.mask` |
 | Draw vessels by hand | polyline canvas | `PUT /projects/{id}/vessels` | **new** `core.geometry.network_from_polylines` |
-| Grow vessels from selected segments | pick + run | `POST /projects/{id}/grow` | **new** `growth` (CCO / space colonisation) |
+| Grow vessels from selected segments | ✅ method + run | ✅ `POST /projects/{id}/grow?…method=` | ✅ `growth` (space colonisation + CCO) |
 | Run simulation | run + progress | `POST /projects/{id}/run` (job) | `core.pipeline.run_hybrid` |
 | 2-D result views | canvas/Plotly | `GET /results/{id}/field/{name}` | `core` fields → JSON/PNG |
 | 3-D result views | vtk.js | `GET /results/{id}/mesh` | **new** VTK/glTF export (Phase 4) |
@@ -261,14 +261,18 @@ imports move to `perfusion.core.*`.
   fields as ParaView-readable VTK ImageData (`.vti`) or a long-format CSV (one
   row per active cell), alongside the raw `.npz` (`io.fields_to_vtk/_to_csv`).
   The UI has a format picker next to Export.
+- ✅ **CCO growth variant** — `growth.cco_grow` (constrained constructive
+  optimisation): terminals added one at a time by nearest-segment splitting,
+  spaced ≥ `d_min`, Murray radii. Selectable via `POST /grow` `method=cco` and a
+  method picker in the UI, beside space colonisation.
 
 **Next**
 
 1. **Task queue** — swap the in-process `ThreadPoolExecutor` for RQ/Celery +
    Redis workers (writing job state through the same store) for real multi-user
    hosting.
-2. **CCO growth variant**; server-side **mp4** (needs ffmpeg); then the optional
-   React/Vite rebuild and Phase 4 (3-D + vtk.js).
+2. Server-side **mp4** (needs ffmpeg); then the optional React/Vite rebuild and
+   Phase 4 (3-D + vtk.js).
 
 Each step is independently useful and testable; the API contract lets the
 front-end be built in parallel.

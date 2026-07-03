@@ -1,4 +1,13 @@
-"""Vessel growth by space colonisation (service layer).
+"""Vessel growth (service layer): space colonisation and CCO.
+
+Two methods grow new branches onto an existing rooted
+:class:`~perfusion.core.geometry.Network` so it fills a target tissue region:
+:func:`grow_network` (space colonisation, a frontier drawn toward a point cloud)
+and :func:`cco_grow` (constrained constructive optimisation, terminals added one
+at a time by nearest-segment splitting). Both assign Murray-law radii and return
+a solver-ready tree.
+
+--- space colonisation ---
 
 Grows new vessel branches onto an existing :class:`~perfusion.core.geometry.Network`
 so it fills a target tissue region, using the *space-colonisation* algorithm
@@ -203,6 +212,84 @@ def _assemble(base, pos, parent, *, exponent, leaf_radius):
             length = float(np.hypot(node_x[v] - node_x[p], node_y[v] - node_y[p]))
             edges.append((int(p), int(v), max(length, 1e-9), float(radius[v])))
     return network_from_edges(node_x, node_y, edges, root=base.root_node)
+
+
+def cco_grow(base: Network, candidates, *, n_terminals=200, d_min=None,
+             exponent=3.0, leaf_radius=None, seed=0) -> Network:
+    """Grow ``base`` by constrained constructive optimisation (CCO).
+
+    Terminals are added **one at a time**: each new terminal point (drawn from
+    ``candidates`` and kept only if it is at least ``d_min`` from every existing
+    terminal — the *constraint*) is connected to the point on the existing tree
+    nearest to it, splitting that segment with a new bifurcation (the greedy
+    minimum-length *construction*). Radii follow Murray's law. This is the
+    one-terminal-at-a-time counterpart to space-colonisation
+    (:func:`grow_network`).
+
+    Parameters
+    ----------
+    candidates : ``(M, 2)`` pool of possible terminal sites (see
+        :func:`sample_points_in_mask`); consumed in a random order.
+    n_terminals : how many terminals to add.
+    d_min : minimum spacing between terminals; defaults to half the
+        characteristic spacing ``sqrt(area / n_terminals)`` of the candidate box.
+    """
+    cand = np.asarray(candidates, dtype=float)
+    if cand.ndim != 2 or cand.shape[1] != 2:
+        raise ValueError("candidates must be an (M, 2) array")
+
+    pos = np.column_stack([base.node_x, base.node_y]).tolist()
+    parent = _parent_nodes(base).tolist()
+    term = [pos[i] for i in base.terminal_nodes.tolist()] or [pos[base.root_node]]
+    terminals = np.asarray(term, dtype=float)
+
+    if d_min is None:
+        area = max(np.ptp(cand[:, 0]) * np.ptp(cand[:, 1]), 1.0)
+        d_min = 0.5 * np.sqrt(area / max(n_terminals, 1))
+
+    rng = np.random.default_rng(seed)
+    added = 0
+    for idx in rng.permutation(len(cand)):
+        if added >= n_terminals:
+            break
+        p = cand[idx]
+        if np.min(np.hypot(terminals[:, 0] - p[0], terminals[:, 1] - p[1])) < d_min:
+            continue                                   # too close to a terminal
+
+        arr = np.asarray(pos)
+        child = np.array([v for v in range(len(pos)) if parent[v] >= 0])
+        if child.size == 0:                            # base is a lone node
+            new_parent = base.root_node
+        else:
+            a, b = arr[[parent[v] for v in child]], arr[child]
+            ab = b - a
+            denom = np.einsum("ij,ij->i", ab, ab)
+            s = np.clip(np.einsum("ij,ij->i", p - a, ab) / np.where(denom > 0, denom, 1), 0, 1)
+            m = a + s[:, None] * ab
+            j = int(np.argmin(np.hypot(m[:, 0] - p[0], m[:, 1] - p[1])))
+            v, pu, sj = int(child[j]), int(parent[child[j]]), float(s[j])
+            if sj <= 1e-6:
+                new_parent = pu
+            elif sj >= 1 - 1e-6:
+                new_parent = v
+            else:                                       # split pu->v at the foot m_j
+                new_parent = len(pos)
+                pos.append([float(m[j, 0]), float(m[j, 1])])
+                parent.append(pu)
+                parent[v] = new_parent
+        pos.append([float(p[0]), float(p[1])])
+        parent.append(new_parent)
+        terminals = np.vstack([terminals, p])
+        added += 1
+
+    return _assemble(base, pos, parent, exponent=exponent, leaf_radius=leaf_radius)
+
+
+def cco_grow_in_mask(base: Network, mask, domain_limit, *, n_terminals=200,
+                     n_pool=None, seed=0, **kwargs) -> Network:
+    """Convenience: sample a candidate pool in ``mask`` then :func:`cco_grow`."""
+    pool = sample_points_in_mask(mask, domain_limit, n_pool or 6 * n_terminals, seed=seed)
+    return cco_grow(base, pool, n_terminals=n_terminals, seed=seed, **kwargs)
 
 
 def grow_in_mask(base: Network, mask, domain_limit, *, n_points=400, seed=0,

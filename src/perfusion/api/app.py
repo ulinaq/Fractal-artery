@@ -204,22 +204,28 @@ def create_app(store: ProjectStore | None = None,
         """Grow the arterial tree into the tissue and store it for the next run."""
         project = _project(pid)
         req = body or GrowRequest()
+        if req.method not in ("colonization", "cco"):
+            raise HTTPException(422, "method must be 'colonization' or 'cco'")
         domain_limit = project.grid.domain_limit
         mask = (rasterize_mask(project.grid.nx, project.grid.ny, domain_limit, project.regions)
                 if project.regions else np.ones((project.grid.nx, project.grid.ny), bool))
 
         base = (_polylines_to_network(project.arteries)
                 if project.arteries else arterial_tree(project.params.to_core()))
-        seed_nodes = None
-        if req.from_segments:
-            seed_nodes = [int(base.seg_end[s]) for s in req.from_segments
-                          if 0 <= s < base.n_segments]
-
-        network = growth.grow_in_mask(
-            base, mask, domain_limit,
-            n_points=req.n_points, seed=req.seed, seed_nodes=seed_nodes,
-            step=req.step, influence_radius=req.influence_radius,
-            kill_radius=req.kill_radius, leaf_radius=req.leaf_radius)
+        if req.method == "cco":
+            network = growth.cco_grow_in_mask(
+                base, mask, domain_limit, n_terminals=req.n_points, seed=req.seed,
+                d_min=req.d_min, leaf_radius=req.leaf_radius)
+        else:
+            seed_nodes = None
+            if req.from_segments:
+                seed_nodes = [int(base.seg_end[s]) for s in req.from_segments
+                              if 0 <= s < base.n_segments]
+            network = growth.grow_in_mask(
+                base, mask, domain_limit,
+                n_points=req.n_points, seed=req.seed, seed_nodes=seed_nodes,
+                step=req.step, influence_radius=req.influence_radius,
+                kill_radius=req.kill_radius, leaf_radius=req.leaf_radius)
         project.artery_network = network
         store.clear_result(project)   # persist the tree; invalidate stale result
         return GrowInfo(id=project.id, n_segments=network.n_segments,

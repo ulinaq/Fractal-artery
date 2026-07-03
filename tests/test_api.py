@@ -112,6 +112,13 @@ def test_grow_then_run(client):
     assert len(net["segments"]) == grown["n_segments"]
     assert {"x0", "y0", "x1", "y1", "r", "kind"} <= set(net["segments"][0])
 
+    # the CCO method is also available and produces a usable tree
+    cco = client.post(f"/projects/{pid}/grow",
+                      json={"method": "cco", "n_points": 60, "seed": 1}).json()
+    assert cco["n_segments"] > 0
+    assert client.post(f"/projects/{pid}/grow",
+                       json={"method": "bogus"}).status_code == 422
+
     jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
     state = _wait_for_job(client, jid)
     assert state["state"] == "done", state

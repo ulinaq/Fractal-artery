@@ -26,8 +26,8 @@ no separate dev server.
 - **Draw tissue** — outline the organ in Tissue mode; the polygons become
   `Grid.mask`, so the Darcy bed and growth are organ-shaped
   (`PUT /projects/{id}/mask`).
-- **Grow** — grow the arterial tree into the tissue by space colonisation
-  (`POST /projects/{id}/grow`); the grown tree is overlaid on the result.
+- **Grow** — grow the arterial tree into the tissue (space colonisation or CCO,
+  via the method picker; `POST /projects/{id}/grow`); the grown tree is overlaid.
 - **Run** — solve the hybrid model as an async job (`POST …/run` + poll
   `/jobs/{id}`).
 - **Result** — view the pressure / flux / time-of-flight field as a

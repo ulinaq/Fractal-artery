@@ -30,7 +30,9 @@ imports use `perfusion.core.*`.
 
 - Dependency + venv management is **uv**. Do not use pip/conda directly.
   - `uv sync` / `uv sync --extra image` / `uv sync --extra api` — install.
-  - `uv run pytest` — tests.  `uv run ruff check src tests scripts` — lint.
+  - `uv run pytest` — tests (api/image tests `importorskip` and are skipped
+    unless their extras are synced; for the full suite:
+    `uv run --extra api --extra image pytest`). `uv run ruff check src tests scripts` — lint.
   - `uv run perfusion-api` — start the FastAPI back-end.
   - `uv run <cmd>` — run anything inside the project venv.
 - Target Python ≥ 3.10. The package is importable as `perfusion` (src layout).
