@@ -59,6 +59,17 @@ class MaskIn(BaseModel):
     regions: list[list[tuple[float, float]]] = Field(default_factory=list)
 
 
+class IOIn(BaseModel):
+    """Inlet (arterial, p_in) and outlet (venous, p_out) points, in domain coords.
+
+    Each point is snapped to the nearest vessel end; list several for multiple
+    inlets/outlets. Empty falls back to the single root inlet/outlet.
+    """
+
+    inlets: list[tuple[float, float]] = Field(default_factory=list)
+    outlets: list[tuple[float, float]] = Field(default_factory=list)
+
+
 class ProjectCreate(BaseModel):
     name: str
     params: ParametersIn = Field(default_factory=ParametersIn)

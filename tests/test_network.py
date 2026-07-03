@@ -25,6 +25,23 @@ def test_layout_offsets(art, ven):
     assert np.all(signs[len(ta):] == -1)
 
 
+def test_multiple_inlets_outlets_conserve_mass(art, ven, grid):
+    import dataclasses
+
+    ta, tv = art.terminal_nodes, ven.terminal_nodes
+    # promote extra leaves to boundary nodes: 3 arterial inlets, 2 venous outlets
+    art2 = dataclasses.replace(art, inlet_nodes=np.array([art.root_node, int(ta[0]), int(ta[1])]))
+    ven2 = dataclasses.replace(ven, inlet_nodes=np.array([ven.root_node, int(tv[0])]))
+    response, _, _ = _response(grid, art2, ven2)
+    sol = network.solve_linear(art2, ven2, response, p_in=10.0, p_out=0.0)
+
+    assert np.allclose(sol.p_a[art2.inlet_nodes], 10.0)     # every inlet at p_in
+    assert np.allclose(sol.p_v[ven2.inlet_nodes], 0.0)      # every outlet at p_out
+    assert np.isclose(sol.terminal_flux.sum(), 0.0, atol=1e-8)
+    # promoted leaves are no longer Darcy terminals
+    assert set(art2.terminal_nodes.tolist()).isdisjoint(art2.inlet_nodes.tolist())
+
+
 def test_linear_solve_conserves_mass(art, ven, grid):
     response, _, _ = _response(grid, art, ven)
     sol = network.solve_linear(art, ven, response, p_in=10.0, p_out=0.0)

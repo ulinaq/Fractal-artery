@@ -77,6 +77,18 @@
       </section>
 
       <section class="card">
+        <h2>Inlets / Outlets</h2>
+        <p class="muted">In <b>Inlets/Outlets</b> mode, click near a vessel end to
+          set a boundary: with <span class="dot art"></span>artery selected it
+          becomes an <b>inlet</b> (▲, p_in); with <span class="dot ven"></span>vein
+          an <b>outlet</b> (▼, p_out). Click a marker again to remove it. Add
+          several for multiple inputs/outputs. Default (none) = the single root.</p>
+        <button id="btn-clear-io">Clear</button>
+        <button id="btn-save-io">Save inlets/outlets</button>
+        <p class="muted" id="io-info"></p>
+      </section>
+
+      <section class="card">
         <h2>Grow</h2>
         <p class="muted">Grow the arterial tree into the tissue. Uses hand-drawn
           arteries as the seed if present, else the fractal trunk.</p>
@@ -108,6 +120,7 @@
         <div class="modes" role="tablist">
           <button id="mode-vessels" class="mode active" role="tab">Vessels</button>
           <button id="mode-tissue" class="mode" role="tab">Tissue</button>
+          <button id="mode-io" class="mode" role="tab">Inlets/Outlets</button>
           <button id="mode-result" class="mode" role="tab">Result</button>
         </div>
         <div class="fields" id="field-picker">

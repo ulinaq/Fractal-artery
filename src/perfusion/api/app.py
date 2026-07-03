@@ -12,13 +12,19 @@ from fastapi import FastAPI, HTTPException, Request
 from .. import growth
 from .. import io as perfio
 from ..core import tkm, transport
-from ..core.geometry import arterial_tree, network_from_polylines, rasterize_mask
+from ..core.geometry import (
+    arterial_tree,
+    network_from_polylines,
+    rasterize_mask,
+    venous_tree,
+)
 from ..core.pipeline import run_hybrid
 from .jobs import JobManager
 from .schemas import (
     FieldResponse,
     GrowInfo,
     GrowRequest,
+    IOIn,
     JobInfo,
     MaskIn,
     ProjectCreate,
@@ -60,22 +66,40 @@ def _build_networks(project: Project, use_vessels: bool):
     return art, ven
 
 
-def _run_project(store: ProjectStore, project: Project, req: RunRequest) -> None:
-    """Execute the hybrid simulation for a project and persist the result."""
+def _snap_io(net, points):
+    """Nearest vessel end (leaf or root) to each point -> unique node indices."""
+    if net is None or not points:
+        return None
+    cand = np.append(net.terminal_nodes, net.root_node)
+    cx, cy = net.node_x[cand], net.node_y[cand]
+    idx = [int(cand[int(np.argmin((cx - x) ** 2 + (cy - y) ** 2))]) for x, y in points]
+    return np.unique(idx)
+
+
+def _solve(project: Project, *, use_vessels: bool, nonlinear: bool = False):
+    """Build the model (grid, trees, inlet/outlet nodes) and run the hybrid solve."""
     prm = project.params.to_core()
     grid, domain_limit = _build_grid(project)
-    art, ven = _build_networks(project, req.use_vessels)
-    result = run_hybrid(prm, grid, domain_limit=domain_limit,
-                        nonlinear=req.nonlinear, art=art, ven=ven)
+    art, ven = _build_networks(project, use_vessels)
+    if project.inlets and art is None:      # custom inlets on the default tree
+        art = arterial_tree(prm)
+    if project.outlets and ven is None:
+        ven = venous_tree(prm)
+    return run_hybrid(prm, grid, domain_limit=domain_limit, nonlinear=nonlinear,
+                      art=art, ven=ven,
+                      art_inlets=_snap_io(art, project.inlets),
+                      ven_outlets=_snap_io(ven, project.outlets))
+
+
+def _run_project(store: ProjectStore, project: Project, req: RunRequest) -> None:
+    """Execute the hybrid simulation for a project and persist the result."""
+    result = _solve(project, use_vessels=req.use_vessels, nonlinear=req.nonlinear)
     store.save_result(project, result)
 
 
 def _run_tracer(store: ProjectStore, project: Project, req: TracerRequest) -> None:
     """Solve the flow, then advect a contrast bolus and persist the frames."""
-    prm = project.params.to_core()
-    grid, domain_limit = _build_grid(project)
-    art, ven = _build_networks(project, use_vessels=True)
-    result = run_hybrid(prm, grid, domain_limit=domain_limit, art=art, ven=ven)
+    result = _solve(project, use_vessels=True)
 
     # Time-scale from a characteristic transit time; leave a long tail for washout
     # so the animation shows inflow -> peak -> washout rather than cutting off.
@@ -159,6 +183,20 @@ def create_app(store: ProjectStore | None = None,
     @app.get("/projects/{pid}/mask")
     def get_mask(pid: str) -> dict:
         return {"regions": _project(pid).regions}
+
+    @app.put("/projects/{pid}/io", response_model=ProjectInfo)
+    def set_io(pid: str, body: IOIn) -> ProjectInfo:
+        """Set arterial inlet / venous outlet points (snapped to vessel ends on run)."""
+        project = _project(pid)
+        project.inlets = [list(p) for p in body.inlets]
+        project.outlets = [list(p) for p in body.outlets]
+        store.save(project)
+        return _info(project)
+
+    @app.get("/projects/{pid}/io")
+    def get_io(pid: str) -> dict:
+        project = _project(pid)
+        return {"inlets": project.inlets, "outlets": project.outlets}
 
     @app.post("/projects/{pid}/image", response_model=ProjectInfo)
     async def upload_image(pid: str, request: Request,

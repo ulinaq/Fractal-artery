@@ -40,6 +40,10 @@ class Network:
     seg_radius: np.ndarray        # segment radius
     seg_angle: np.ndarray         # segment angle w.r.t. the x-axis (rad)
     root_node: int = 0
+    # Prescribed-pressure boundary nodes (arterial inlets / venous outlets). Blood
+    # enters/leaves here rather than coupling to the Darcy bed. Defaults to the
+    # single root, reproducing the original one-inlet/one-outlet model.
+    inlet_nodes: np.ndarray | None = None
 
     # derived, filled in __post_init__
     incoming_segment: np.ndarray = field(init=False)  # segment feeding each node (-1 at root)
@@ -47,6 +51,10 @@ class Network:
     def __post_init__(self) -> None:
         self.incoming_segment = np.full(self.n_nodes, -1, dtype=int)
         self.incoming_segment[self.seg_end] = np.arange(self.n_segments)
+        if self.inlet_nodes is None:
+            self.inlet_nodes = np.array([self.root_node], dtype=int)
+        else:
+            self.inlet_nodes = np.unique(np.asarray(self.inlet_nodes, dtype=int))
 
     @property
     def n_nodes(self) -> int:
@@ -57,16 +65,28 @@ class Network:
         return len(self.seg_length)
 
     @property
+    def node_degree(self) -> np.ndarray:
+        """Number of segments incident to each node."""
+        return np.bincount(np.concatenate([self.seg_start, self.seg_end]),
+                           minlength=self.n_nodes)
+
+    @property
     def terminal_nodes(self) -> np.ndarray:
-        """Indices of leaf nodes (excluding the root)."""
-        is_terminal = self.node_role == NodeRole.TERMINAL
-        is_terminal[self.root_node] = False
-        return np.flatnonzero(is_terminal)
+        """Leaf nodes (degree 1) that couple to the Darcy bed, minus inlet/outlet nodes.
+
+        Classified by degree, not role, so any leaf -- including the BFS root when
+        it is *not* an inlet -- correctly becomes a Darcy terminal.
+        """
+        leaf = self.node_degree == 1
+        leaf[self.inlet_nodes] = False
+        return np.flatnonzero(leaf)
 
     @property
     def bifurcation_nodes(self) -> np.ndarray:
-        """Indices of interior branch-point nodes."""
-        return np.flatnonzero(self.node_role == NodeRole.BIFURCATION)
+        """Interior nodes (degree >= 2) that need mass conservation, minus inlets."""
+        interior = self.node_degree >= 2
+        interior[self.inlet_nodes] = False
+        return np.flatnonzero(interior)
 
     def resistance(self, viscosity: float | np.ndarray) -> np.ndarray:
         """Poiseuille hydraulic resistance per segment, R = 8 mu L / (pi r^4)."""

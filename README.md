@@ -47,8 +47,8 @@ uv run perfusion-api         # start the FastAPI back-end (http://127.0.0.1:8000
 `uv run perfusion-api` starts the FastAPI back-end **and** serves a zero-build
 2-D workspace (no Node/npm) at `http://127.0.0.1:8000/`: create a project, draw
 vessels (or **segment them from an uploaded image**), **outline the tissue** (so
-the Darcy bed is organ-shaped), grow the arterial tree into it, run the
-simulation, and view the
+the Darcy bed is organ-shaped), **place inlets/outlets** (any number, ▲/▼), grow
+the arterial tree into it, run the simulation, and view the
 pressure/flux/time-of-flight field as a heatmap with the network overlaid — or
 play a **flow video** of a contrast bolus washing through the tissue (with GIF
 download). Projects are shareable by URL (`/?project=<id>`) and **persist across restarts**
@@ -77,6 +77,7 @@ Endpoints: `health`, `projects` (CRUD), `projects/{id}/vessels` (hand-drawn
 polylines → networks), `projects/{id}/image?kind=artery|vein` (segment an
 uploaded vessel image),
 `projects/{id}/mask` (tissue outline → `Grid.mask`),
+`projects/{id}/io` (inlet/outlet points → `p_in`/`p_out` boundary nodes),
 `projects/{id}/grow` (grow the arterial tree into the tissue),
 `projects/{id}/run` (job), `jobs` (durable registry) + `jobs/{id}`,
 `projects/{id}/results[/field/{name}]`,
@@ -208,9 +209,11 @@ drawing, and flow video.
   translation. The many duplicated MATLAB experiment folders
   (`Optim/`, `Optim2/`, `OptimPaper/`, `Visit_UK/`, …) are collapsed into single
   parametrised modules. The originals remain in `legacy/` for reference.
-- The hybrid solver uses **Dirichlet–Dirichlet** root boundary conditions
-  (`p_in`, `p_out`); the Darcy datum is fixed by pinning one cell, and terminal
-  fluxes are rebalanced so the pin carries no net flux (as in the thesis).
+- The hybrid solver uses **Dirichlet–Dirichlet** boundary conditions: `p_in` is
+  prescribed at the arterial inlet node(s) and `p_out` at the venous outlet
+  node(s) — any number of each (`Network.inlet_nodes`, default the root); the
+  Darcy datum is fixed by pinning one cell, and terminal fluxes are rebalanced so
+  the pin carries no net flux (as in the thesis).
 - The frog example runs synthetic trees over the real domain mask. Loading the
   hand-segmented networks (`data/frog_trees.mat`) is supported via
   `perfusion.io.load_frog_trees`; wiring them into `Network` is left as an

@@ -7,7 +7,7 @@ coupled flow, and return pressures, fluxes and time-of-flight in one call.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -105,7 +105,8 @@ def run_hybrid(prm: Parameters, grid: Grid,
                domain_limit: tuple[float, float, float, float] = (-70, 70, 0, 160),
                eps: float = 4.0, nonlinear: bool = False,
                strict_domain: bool = False,
-               art: Network | None = None, ven: Network | None = None) -> HybridResult:
+               art: Network | None = None, ven: Network | None = None,
+               art_inlets=None, ven_outlets=None) -> HybridResult:
     """Build trees (or use the given ones), couple to Darcy, solve, post-process.
 
     Pass ``art``/``ven`` to use pre-built networks -- e.g. segmented from images
@@ -113,11 +114,20 @@ def run_hybrid(prm: Parameters, grid: Grid,
     fractal trees from ``prm``. ``prm`` still supplies the flow boundary
     conditions and viscosity. ``strict_domain=True`` raises ``ValueError`` if a
     terminal falls outside the grid (see :func:`_terminal_cells`).
+
+    ``art_inlets`` / ``ven_outlets`` are node-index arrays overriding which nodes
+    carry the prescribed ``p_in`` / ``p_out`` (default: each tree's root). List
+    several to model **multiple inlets/outlets**; the remaining leaves stay Darcy
+    terminals.
     """
     if art is None:
         art = geometry.arterial_tree(prm)
     if ven is None:
         ven = geometry.venous_tree(prm)
+    if art_inlets is not None:
+        art = replace(art, inlet_nodes=np.asarray(art_inlets, dtype=int))
+    if ven_outlets is not None:
+        ven = replace(ven, inlet_nodes=np.asarray(ven_outlets, dtype=int))
 
     terminal_cells = _terminal_cells(grid, art, ven, domain_limit, strict=strict_domain)
     response, field_response, sources = darcy.terminal_response(grid, terminal_cells, eps)

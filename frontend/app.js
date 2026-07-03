@@ -42,6 +42,8 @@ const state = {
   stroke: [],                // current in-progress vessel polyline (domain coords)
   regions: [],               // saved tissue outline polygons (domain coords)
   regionStroke: [],          // current in-progress tissue polygon
+  inlets: [],                // arterial inlet points (domain coords)
+  outlets: [],               // venous outlet points (domain coords)
   network: null,             // {segments:[...]} overlaid in result mode
   fieldData: null,           // {name, shape, data, vmin, vmax}
   tracer: null,              // {shape, times, vmax, frames:[...]}
@@ -68,6 +70,7 @@ async function newProject() {
   state.project = p.id;
   state.vessels = { arteries: [], veins: [] };
   state.stroke = []; state.regions = []; state.regionStroke = [];
+  state.inlets = []; state.outlets = [];
   state.network = null; state.fieldData = null;
   stopFlow(); state.tracer = null;
   $("proj-id").textContent = `project ${p.id}`;
@@ -92,8 +95,18 @@ canvas.addEventListener("pointerdown", (e) => {
   const pt = toDomain(px, py);
   if (state.mode === "vessels") state.stroke.push(pt);
   else if (state.mode === "tissue") state.regionStroke.push(pt);
+  else if (state.mode === "io") markIO(pt);
   redraw();
 });
+
+// place/remove an inlet (artery selected) or outlet (vein) near the click
+function markIO(pt) {
+  const list = vtype() === "artery" ? state.inlets : state.outlets;
+  const tol = 4;   // domain units: click a marker again to remove it
+  const hit = list.findIndex(([x, y]) => Math.hypot(x - pt[0], y - pt[1]) < tol);
+  if (hit >= 0) list.splice(hit, 1);
+  else list.push([pt[0], pt[1]]);
+}
 
 function endStroke() {
   if (state.stroke.length >= 2) {
@@ -146,6 +159,25 @@ async function loadMask() {
   catch { state.regions = []; }
 }
 
+// ── inlets / outlets ──────────────────────────────────────────────────────────
+function clearIO() { state.inlets = []; state.outlets = []; redraw(); }
+
+async function saveIO() {
+  requireProject();
+  await api("PUT", `/projects/${state.project}/io`,
+            { inlets: state.inlets, outlets: state.outlets });
+  $("io-info").textContent = `${state.inlets.length} inlet(s), ${state.outlets.length} outlet(s)`;
+  status("inlets/outlets saved", "ok");
+}
+
+async function loadIO() {
+  try {
+    const io = await api("GET", `/projects/${state.project}/io`);
+    state.inlets = io.inlets || [];
+    state.outlets = io.outlets || [];
+  } catch { state.inlets = []; state.outlets = []; }
+}
+
 async function uploadImage(file) {
   requireProject();
   const kind = vtype();                    // artery/vein selector governs the target
@@ -179,6 +211,7 @@ async function run() {
   requireProject();
   if (state.vessels.arteries.length || state.vessels.veins.length) await saveVessels();
   if (state.regions.length || state.regionStroke.length >= 3) await saveMask();
+  if (state.inlets.length || state.outlets.length) await saveIO();
   const job = await api("POST", `/projects/${state.project}/run`,
     { nonlinear: $("nonlinear").checked, use_vessels: $("use-vessels").checked });
   status("running…");
@@ -284,6 +317,23 @@ function redraw() {
   drawNetworkOverlay();
   drawVessels();
   drawStroke();
+  drawIO();
+}
+
+function drawIO() {
+  // inlets ▲ (arterial, red), outlets ▼ (venous, blue); shown in I/O and Result
+  if (state.mode !== "io" && state.mode !== "result") return;
+  const marker = (x, y, up, color) => {
+    const [px, py] = toCanvas(x, y), s = 7;
+    ctx.beginPath();
+    if (up) { ctx.moveTo(px, py - s); ctx.lineTo(px - s, py + s); ctx.lineTo(px + s, py + s); }
+    else { ctx.moveTo(px, py + s); ctx.lineTo(px - s, py - s); ctx.lineTo(px + s, py - s); }
+    ctx.closePath();
+    ctx.fillStyle = color; ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = "#fff"; ctx.stroke();
+  };
+  state.inlets.forEach(([x, y]) => marker(x, y, true, getCss("--art")));
+  state.outlets.forEach(([x, y]) => marker(x, y, false, getCss("--ven")));
 }
 
 function tracePath(points) {
@@ -398,6 +448,7 @@ function setMode(mode) {
   state.mode = mode;
   $("mode-vessels").classList.toggle("active", mode === "vessels");
   $("mode-tissue").classList.toggle("active", mode === "tissue");
+  $("mode-io").classList.toggle("active", mode === "io");
   $("mode-result").classList.toggle("active", mode === "result");
   $("field-picker").classList.toggle("show", mode === "result");
   $("flowbar").classList.toggle("show", mode === "result");
@@ -426,8 +477,11 @@ $("btn-run").addEventListener("click", () => run().catch((e) => status(e.message
 $("btn-export").addEventListener("click", () => {
   window.location = `/projects/${state.project}/export?fmt=${$("export-fmt").value}`;
 });
+$("btn-clear-io").addEventListener("click", clearIO);
+$("btn-save-io").addEventListener("click", () => saveIO().catch((e) => status(e.message, "err")));
 $("mode-vessels").addEventListener("click", () => setMode("vessels"));
 $("mode-tissue").addEventListener("click", () => setMode("tissue"));
+$("mode-io").addEventListener("click", () => setMode("io"));
 $("mode-result").addEventListener("click", () => setMode("result"));
 canvas.addEventListener("dblclick", () => (state.mode === "tissue" ? endRegion() : endStroke()));
 document.querySelectorAll(".field").forEach((b) => b.addEventListener("click", () => {
@@ -450,7 +504,7 @@ async function openProject(id) {
   $("proj-name").value = info.name;
   $("proj-id").textContent = `project ${info.id}`;
   stopFlow(); state.tracer = null;
-  await Promise.all([loadNetwork(), loadMask()]);
+  await Promise.all([loadNetwork(), loadMask(), loadIO()]);
   if (info.has_result) {
     await Promise.all([showSummary(), loadField(state.field)]);
     $("btn-export").disabled = false;

@@ -265,13 +265,21 @@ imports move to `perfusion.core.*`.
   optimisation): terminals added one at a time by nearest-segment splitting,
   spaced ≥ `d_min`, Murray radii. Selectable via `POST /grow` `method=cco` and a
   method picker in the UI, beside space colonisation.
+- ✅ **Multiple inlets / outlets** — the solver prescribes `p_in`/`p_out` at a
+  *set* of boundary nodes (`Network.inlet_nodes`), not just the root; node
+  roles are classified by **degree** so any leaf can be an inlet/terminal.
+  `PUT/GET /projects/{id}/io` stores inlet/outlet points (snapped to vessel ends
+  on run); the UI's **Inlets/Outlets** mode marks them (▲ inlet / ▼ outlet).
 
 **Next**
 
-1. **Task queue** — swap the in-process `ThreadPoolExecutor` for RQ/Celery +
-   Redis workers (writing job state through the same store) for real multi-user
-   hosting.
-2. Server-side **mp4** (needs ffmpeg); then the optional React/Vite rebuild and
+1. **Separate feeding trees** — support fully disconnected arterial/venous
+   components (multi-component `network_from_edges`/`_polylines`, each rooted at
+   its own inlet) sharing one Darcy bed. (Multi-node inlets on one connected
+   network are done; this generalises to several networks.)
+2. **Task queue** — swap the in-process `ThreadPoolExecutor` for RQ/Celery +
+   Redis for real multi-user hosting.
+3. Server-side **mp4** (needs ffmpeg); then the optional React/Vite rebuild and
    Phase 4 (3-D + vtk.js).
 
 Each step is independently useful and testable; the API contract lets the
