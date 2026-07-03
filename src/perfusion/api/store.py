@@ -16,6 +16,7 @@ class Project:
     grid: GridIn
     arteries: list[Polyline] = field(default_factory=list)
     veins: list[Polyline] = field(default_factory=list)
+    artery_network: object | None = None  # grown perfusion.core.geometry.Network
     result: object | None = None          # perfusion.core.pipeline.HybridResult
     summary: dict | None = None
 
