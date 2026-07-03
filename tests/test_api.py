@@ -94,10 +94,23 @@ def test_grow_then_run(client):
     assert grown["n_segments"] > 0
     assert grown["n_terminals"] > 0
 
+    # the grown tree is exposed as segment geometry for the front-end overlay
+    net = client.get(f"/projects/{pid}/network").json()
+    assert len(net["segments"]) == grown["n_segments"]
+    assert {"x0", "y0", "x1", "y1", "r", "kind"} <= set(net["segments"][0])
+
     jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
     state = _wait_for_job(client, jid)
     assert state["state"] == "done", state
     assert client.get(f"/projects/{pid}/results").json()["arterial_inflow"] > 0
+
+
+def test_frontend_is_served(client):
+    root = client.get("/")
+    assert root.status_code == 200
+    assert "perfusion" in root.text.lower()
+    assert client.get("/app.js").status_code == 200
+    assert client.get("/style.css").status_code == 200
 
 
 def test_missing_project_and_result(client):

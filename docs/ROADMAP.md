@@ -146,7 +146,7 @@ self-contained and testable against the existing physics checks.
 |---|---|---|
 | **0. Reorganise** *(this change)* | Maintainable, layered source | `perfusion.core` split out; stable public API; docs updated |
 | **1. Back-end API** | Headless service | FastAPI `perfusion.api`: projects, jobs, run/segment/export endpoints; SQLite + blob store; OpenAPI contract; result exporters (`io`) |
-| **2. Web front-end** | Usable 2-D app | React workspace: image upload, tissue/vessel **drawing**, run + progress, 2-D field views + **flow video**, export |
+| **2. Web front-end** | Usable 2-D app | ✅ *v1 shipped* — zero-build workspace (`frontend/`, served at `/`): vessel **drawing**, grow, run + poll, 2-D field heatmap + network overlay, export, shareable URLs. *Next:* tissue-mask drawing, **flow video**, optional React/Vite rebuild |
 | **3. Research features** | Publishable depth | monolithic sparse solve + AMG (scale), heterogeneous permeability, **vessel growth** from selections, elasticity |
 | **4. 3-D** | 3-D modelling + views | 3-D grids/trees/segmentation, vtk.js rendering, 3-D flow video, VTK export |
 | **5. Research tooling** | Studies at scale | parameter sweeps, inverse estimation, UQ, reproducible "experiments", batch jobs |
@@ -228,17 +228,23 @@ imports move to `perfusion.core.*`.
 - ✅ **`growth`** — vessel growth by space colonisation (`grow_network`,
   `grow_in_mask`), seeded from selected segment tips, with Murray-law radii;
   exposed as `POST /projects/{id}/grow` (the grown tree feeds the next run).
+- ✅ **Phase 2 front-end (v1)** — a **zero-build** 2-D workspace (plain
+  HTML/CSS/ES-modules in `frontend/`, served at `/` by the API): create project,
+  draw vessels, grow, run (async job + poll), view pressure/flux/TOF as a viridis
+  heatmap with the network overlaid, export, and open a project by shareable
+  `?project=<id>` URL. Added `GET /projects/{id}/network` for the overlay.
 
 **Next**
 
 1. **Persistence** — back the project store with SQLite + a blob store; add a
-   task queue (RQ/Celery) for real multi-user hosting.
-2. **Image upload + segmentation endpoint** — `POST /projects/{id}/image` →
+   task queue (RQ/Celery) for real multi-user hosting (so shared URLs survive a
+   restart).
+2. **Draw the tissue mask** — paint the active domain on the canvas → `Grid.mask`.
+3. **Image upload + segmentation endpoint** — `POST /projects/{id}/image` →
    `segmentation.segment_network` (behind the `image` extra).
-3. **CCO growth variant** — constrained constructive optimisation as a second
-   `growth` method alongside space colonisation.
-4. **VTK/CSV export** and server-side flow-video (mp4) for 3-D readiness.
-5. **Phase 2 front-end** — React workspace against the OpenAPI contract.
+4. **Flow video** — `transport` frames streamed/exported (mp4) and played in the UI.
+5. **CCO growth variant**; **VTK/CSV export**; then the optional React/Vite
+   rebuild and Phase 4 (3-D + vtk.js).
 
 Each step is independently useful and testable; the API contract lets the
 front-end be built in parallel.
