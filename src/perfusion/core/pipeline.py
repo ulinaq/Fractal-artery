@@ -1,0 +1,141 @@
+"""End-to-end convenience pipeline tying the hybrid model together.
+
+Given :class:`~perfusion.parameters.Parameters` and a :class:`~perfusion.darcy.Grid`,
+build the arterial/venous trees, compute the Darcy terminal response, solve the
+coupled flow, and return pressures, fluxes and time-of-flight in one call.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+import numpy as np
+
+from . import darcy, geometry, network, timeofflight
+from .darcy import Grid
+from .geometry import Network
+from .parameters import Parameters
+from .viscosity import apparent_viscosity
+
+
+def _segment_viscosity(net: Network, prm: Parameters):
+    """Per-segment viscosity: Fahraeus-Lindqvist if enabled, else the scalar mu."""
+    if not prm.fahraeus_lindqvist:
+        return prm.mu
+    diameter_um = 2.0 * net.seg_radius * prm.radius_to_um
+    return apparent_viscosity(diameter_um, prm.hematocrit, prm.mu)
+
+
+@dataclass
+class HybridResult:
+    art: Network
+    ven: Network
+    grid: Grid
+    solution: network.HybridSolution
+    pressure: np.ndarray          # (nx, ny) capillary bed pressure field
+    flux: np.ndarray              # (nx, ny) Darcy flux magnitude
+    tof: np.ndarray               # (nx, ny) time-of-flight
+    domain_limit: tuple[float, float, float, float] = (-70, 70, 0, 160)  # (xmin,xmax,ymin,ymax)
+    # Intermediates reused by tracer transport (see perfusion.transport):
+    fx: np.ndarray | None = None  # staggered x-face fluxes
+    fy: np.ndarray | None = None  # staggered y-face fluxes
+    sources: list = field(default_factory=list)  # per-terminal (cells, weights)
+
+
+def _terminal_cells(grid: Grid, art: Network, ven: Network,
+                    domain_limit: tuple[float, float, float, float],
+                    strict: bool = False):
+    """Map terminal node coordinates to Darcy grid cells (column-major linear).
+
+    With ``strict=True`` a terminal falling outside the grid raises ``ValueError``
+    (used by the optimiser to penalise ill-fitting trees); otherwise indices are
+    clipped to the grid, which keeps general runs robust.
+    """
+    xmin, _, ymin, _ = domain_limit
+    ta, tv = art.terminal_nodes, ven.terminal_nodes
+    ix_a = np.ceil((art.node_x[ta] - xmin) / grid.hx).astype(int)
+    iy_a = np.ceil((art.node_y[ta] - ymin) / grid.hy).astype(int)
+    ix_v = np.floor((ven.node_x[tv] - xmin) / grid.hx).astype(int)
+    iy_v = np.floor((ven.node_y[tv] - ymin) / grid.hy).astype(int)
+    if strict:
+        for ix, iy in ((ix_a, iy_a), (ix_v, iy_v)):
+            if ix.min() < 0 or ix.max() >= grid.nx or iy.min() < 0 or iy.max() >= grid.ny:
+                raise ValueError("terminal node falls outside the Darcy grid")
+    ix_a, ix_v = np.clip(ix_a, 0, grid.nx - 1), np.clip(ix_v, 0, grid.nx - 1)
+    iy_a, iy_v = np.clip(iy_a, 0, grid.ny - 1), np.clip(iy_v, 0, grid.ny - 1)
+    cells = np.concatenate([grid.sub2ind(ix_a, iy_a), grid.sub2ind(ix_v, iy_v)])
+    return _spread_coincident(grid, cells)
+
+
+def _spread_coincident(grid: Grid, cells: np.ndarray) -> np.ndarray:
+    """Nudge coincident terminal cells to nearby free active cells.
+
+    Two terminals mapping to the same cell give identical Darcy response columns
+    (a singular coupling), so duplicates are moved to the nearest unused active
+    neighbour (spiral search).
+    """
+    cells = cells.copy()
+    taken = set()
+    active = grid.mask.ravel(order="F")
+    for i, c in enumerate(cells):
+        if c not in taken:
+            taken.add(int(c))
+            continue
+        ix, iy = int(c % grid.nx), int(c // grid.nx)
+        for radius in range(1, max(grid.nx, grid.ny)):
+            found = None
+            for dx in range(-radius, radius + 1):
+                for dy in range(-radius, radius + 1):
+                    jx, jy = ix + dx, iy + dy
+                    if 0 <= jx < grid.nx and 0 <= jy < grid.ny:
+                        j = int(grid.sub2ind(jx, jy))
+                        if active[j] and j not in taken:
+                            found = j
+                            break
+                if found is not None:
+                    break
+            if found is not None:
+                cells[i] = found
+                taken.add(found)
+                break
+    return cells
+
+
+def run_hybrid(prm: Parameters, grid: Grid,
+               domain_limit: tuple[float, float, float, float] = (-70, 70, 0, 160),
+               eps: float = 4.0, nonlinear: bool = False,
+               strict_domain: bool = False,
+               art: Network | None = None, ven: Network | None = None) -> HybridResult:
+    """Build trees (or use the given ones), couple to Darcy, solve, post-process.
+
+    Pass ``art``/``ven`` to use pre-built networks -- e.g. segmented from images
+    via :func:`perfusion.segmentation.load_frog_system` -- instead of growing
+    fractal trees from ``prm``. ``prm`` still supplies the flow boundary
+    conditions and viscosity. ``strict_domain=True`` raises ``ValueError`` if a
+    terminal falls outside the grid (see :func:`_terminal_cells`).
+    """
+    if art is None:
+        art = geometry.arterial_tree(prm)
+    if ven is None:
+        ven = geometry.venous_tree(prm)
+
+    terminal_cells = _terminal_cells(grid, art, ven, domain_limit, strict=strict_domain)
+    response, field_response, sources = darcy.terminal_response(grid, terminal_cells, eps)
+
+    # Per-segment viscosity (radius-dependent when Fahraeus-Lindqvist is enabled).
+    viscosity = (_segment_viscosity(art, prm), _segment_viscosity(ven, prm))
+    if nonlinear:
+        sol = network.solve_nonlinear(art, ven, response, prm.p_in, prm.p_out, prm, viscosity)
+    else:
+        sol = network.solve_linear(art, ven, response, prm.p_in, prm.p_out, viscosity)
+
+    pressure = darcy.reconstruct_field(field_response, sol.terminal_flux, balance=True)
+    pressure = pressure.reshape(grid.nx, grid.ny, order="F")
+    _, tx, ty = darcy.tpfa_operator(grid)
+    fx, fy = darcy.face_fluxes(grid, pressure, tx, ty)
+    tof = timeofflight.time_of_flight(grid, fx, fy, sources, sol.terminal_flux)
+    flux = timeofflight.flux_magnitude(grid, fx, fy)
+
+    return HybridResult(art=art, ven=ven, grid=grid, solution=sol,
+                        pressure=pressure, flux=flux, tof=tof,
+                        domain_limit=domain_limit, fx=fx, fy=fy, sources=sources)

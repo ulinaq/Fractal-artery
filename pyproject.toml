@@ -1,0 +1,52 @@
+[project]
+name = "perfusion"
+version = "0.1.0"
+description = "Multiscale blood circulation and perfusion models (Python port of U. N. A. Qohar's PhD thesis)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "license.txt" }
+authors = [
+    { name = "Ulin Nuha Abdul Qohar" },
+]
+keywords = ["blood-flow", "perfusion", "darcy", "vascular-network", "multiscale", "DCE-MRI"]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "matplotlib>=3.7",
+]
+
+[project.optional-dependencies]
+image = ["imageio>=2.30", "scikit-image>=0.21"]
+api = ["fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2.5"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+    "httpx>=0.27",   # FastAPI TestClient
+]
+
+[project.scripts]
+perfusion-frog = "perfusion.examples.frog_hybrid:main"
+perfusion-tree = "perfusion.examples.tree_optimize:main"
+perfusion-api = "perfusion.api.app:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/perfusion"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# E/F pycodestyle+pyflakes, I import order, UP pyupgrade, B bugbear,
+# SIM simplify, RUF ruff-specific, PERF perflint, NPY numpy, PT pytest style.
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "PERF", "NPY", "PT"]
+ignore = ["E741"]  # ambiguous variable names (l, I) are common in the math here
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
