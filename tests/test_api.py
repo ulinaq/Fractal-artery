@@ -86,6 +86,20 @@ def test_run_with_hand_drawn_vessels(client):
     assert client.get(f"/projects/{pid}/results").json()["arterial_inflow"] > 0
 
 
+def test_grow_then_run(client):
+    pid = client.post("/projects", json={"name": "grow", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    grown = client.post(f"/projects/{pid}/grow",
+                        json={"n_points": 80, "seed": 0, "step": 6.0}).json()
+    assert grown["n_segments"] > 0
+    assert grown["n_terminals"] > 0
+
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    state = _wait_for_job(client, jid)
+    assert state["state"] == "done", state
+    assert client.get(f"/projects/{pid}/results").json()["arterial_inflow"] > 0
+
+
 def test_missing_project_and_result(client):
     assert client.get("/projects/nope").status_code == 404
     assert client.get("/jobs/nope").status_code == 404

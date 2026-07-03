@@ -71,6 +71,24 @@ class RunRequest(BaseModel):
     use_vessels: bool = False
 
 
+class GrowRequest(BaseModel):
+    """Grow the arterial tree into the tissue by space colonisation."""
+
+    n_points: int = Field(400, ge=1, le=20000)   # attraction points sampled in the mask
+    seed: int = 0
+    step: float | None = None                    # None -> auto (fraction of extent)
+    influence_radius: float | None = None
+    kill_radius: float | None = None
+    leaf_radius: float | None = None
+    from_segments: list[int] | None = None       # grow only from these segment tips
+
+
+class GrowInfo(BaseModel):
+    id: str
+    n_segments: int
+    n_terminals: int
+
+
 class JobInfo(BaseModel):
     id: str
     state: str                 # pending | running | done | error

@@ -223,17 +223,20 @@ imports move to `perfusion.core.*`.
 - ✅ **`network_from_polylines`** — build a `Network` from hand-drawn/edited vessel
   polylines (shared `network_from_edges` builder, reused by segmentation).
 - ✅ **`perfusion.api` skeleton** — FastAPI app (`health`, `projects`, `vessels`,
-  `run` as an async job, `jobs`, `results`, `field`, `export`); in-process job
-  runner; OpenAPI contract generated. Run with `uv run perfusion-api`.
+  `grow`, `run` as an async job, `jobs`, `results`, `field`, `export`); in-process
+  job runner; OpenAPI contract generated. Run with `uv run perfusion-api`.
+- ✅ **`growth`** — vessel growth by space colonisation (`grow_network`,
+  `grow_in_mask`), seeded from selected segment tips, with Murray-law radii;
+  exposed as `POST /projects/{id}/grow` (the grown tree feeds the next run).
 
 **Next**
 
-1. **`growth`** — first vessel-growth method (space colonisation / CCO) seeded
-   from selected segments; expose as `POST /projects/{id}/grow`.
-2. **Persistence** — back the project store with SQLite + a blob store; add a
+1. **Persistence** — back the project store with SQLite + a blob store; add a
    task queue (RQ/Celery) for real multi-user hosting.
-3. **Image upload + segmentation endpoint** — `POST /projects/{id}/image` →
+2. **Image upload + segmentation endpoint** — `POST /projects/{id}/image` →
    `segmentation.segment_network` (behind the `image` extra).
+3. **CCO growth variant** — constrained constructive optimisation as a second
+   `growth` method alongside space colonisation.
 4. **VTK/CSV export** and server-side flow-video (mp4) for 3-D readiness.
 5. **Phase 2 front-end** — React workspace against the OpenAPI contract.
 

@@ -8,12 +8,14 @@ from pathlib import Path
 import numpy as np
 from fastapi import FastAPI, HTTPException
 
-from .. import io
-from ..core.geometry import network_from_polylines
+from .. import growth, io
+from ..core.geometry import arterial_tree, network_from_polylines
 from ..core.pipeline import run_hybrid
 from .jobs import JobManager
 from .schemas import (
     FieldResponse,
+    GrowInfo,
+    GrowRequest,
     JobInfo,
     ProjectCreate,
     ProjectInfo,
@@ -41,6 +43,8 @@ def _run_project(project: Project, req: RunRequest) -> None:
     if req.use_vessels and project.has_vessels:
         art = _polylines_to_network(project.arteries)
         ven = _polylines_to_network(project.veins)
+    if project.artery_network is not None:   # a grown tree takes precedence
+        art = project.artery_network
 
     result = run_hybrid(prm, grid, domain_limit=domain_limit,
                         nonlinear=req.nonlinear, art=art, ven=ven)
@@ -90,6 +94,30 @@ def create_app(store: ProjectStore | None = None,
         project = _project(pid)
         project.arteries, project.veins = body.arteries, body.veins
         return _info(project)
+
+    @app.post("/projects/{pid}/grow", response_model=GrowInfo)
+    def grow_vessels(pid: str, body: GrowRequest | None = None) -> GrowInfo:
+        """Grow the arterial tree into the tissue and store it for the next run."""
+        project = _project(pid)
+        req = body or GrowRequest()
+        grid = project.grid.to_core()
+
+        base = (_polylines_to_network(project.arteries)
+                if project.arteries else arterial_tree(project.params.to_core()))
+        seed_nodes = None
+        if req.from_segments:
+            seed_nodes = [int(base.seg_end[s]) for s in req.from_segments
+                          if 0 <= s < base.n_segments]
+
+        network = growth.grow_in_mask(
+            base, grid.mask, project.grid.domain_limit,
+            n_points=req.n_points, seed=req.seed, seed_nodes=seed_nodes,
+            step=req.step, influence_radius=req.influence_radius,
+            kill_radius=req.kill_radius, leaf_radius=req.leaf_radius)
+        project.artery_network = network
+        project.result = project.summary = None   # invalidate the stale result
+        return GrowInfo(id=project.id, n_segments=network.n_segments,
+                        n_terminals=int(network.terminal_nodes.size))
 
     @app.post("/projects/{pid}/run", response_model=JobInfo)
     def run_project(pid: str, body: RunRequest | None = None) -> JobInfo:

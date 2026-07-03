@@ -61,7 +61,8 @@ curl -s localhost:8000/projects/$pid/results
 ```
 
 Endpoints: `health`, `projects` (CRUD), `projects/{id}/vessels` (hand-drawn
-polylines → networks), `projects/{id}/run` (job), `jobs/{id}`,
+polylines → networks), `projects/{id}/grow` (grow the arterial tree into the
+tissue), `projects/{id}/run` (job), `jobs/{id}`,
 `projects/{id}/results[/field/{name}]`, `projects/{id}/export`. The generated
 OpenAPI contract is what the planned web front-end will target.
 
@@ -108,6 +109,19 @@ res = run_hybrid(Parameters(), system.grid, domain_limit=system.domain_limit,
 net = seg.segment_network(image, root_xy=(x0, y0))     # -> a rooted Network
 ```
 
+Grow a vascular tree into a tissue region (space colonisation) and solve it:
+
+```python
+import numpy as np
+from perfusion import Grid, Parameters, growth, run_hybrid
+from perfusion.core.geometry import network_from_polylines
+
+trunk = network_from_polylines([[(50, 2), (50, 40)]], radii=2.0, root_xy=(50, 2))
+grid = Grid(nx=40, ny=50, lx=100, ly=100)
+tree = growth.grow_in_mask(trunk, grid.mask, (0, 100, 0, 100), n_points=300)
+res = run_hybrid(Parameters(), grid, domain_limit=(0, 100, 0, 100), art=tree)
+```
+
 Direct-connection model + tracer-kinetic fitting:
 
 ```python
@@ -152,6 +166,7 @@ src/perfusion/          # the package
     timeofflight.py     #   flux magnitude + upwind time-of-flight
     pipeline.py         #   one-call end-to-end hybrid run
   segmentation.py       # image → vascular Network (skeletonise + graph trace)
+  growth.py             # grow vessels into tissue (space colonisation)
   optimize.py           # vascular-structure optimisation objectives (Paper D)
   io.py, viz.py         # .mat/PNG loaders + result exporters, matplotlib helpers
   api/                  # FastAPI back-end (Phase 1): projects, jobs, results
@@ -165,8 +180,9 @@ legacy/                 # original MATLAB source (reference only)
 The public API is unchanged — `from perfusion import Grid, Parameters,
 run_hybrid, arterial_tree, venous_tree, Network` and the module handles
 (`perfusion.darcy`, `perfusion.geometry`, …) still work; deep imports live under
-`perfusion.core.*`. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the plan to add a
-FastAPI back-end (`api/`), vessel **growth**, and a web front-end.
+`perfusion.core.*`. The FastAPI back-end (`api/`) and vessel **growth**
+(`growth.py`) are in place; see [`docs/ROADMAP.md`](docs/ROADMAP.md) for the plan
+to add persistence and a web front-end.
 
 ## Notes & scope
 

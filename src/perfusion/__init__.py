@@ -13,12 +13,14 @@ Layout
 - :mod:`perfusion.io`  -- data loaders / exporters.
 - :mod:`perfusion.viz` -- matplotlib figures.
 - :mod:`perfusion.segmentation` -- image -> vascular network.
+- :mod:`perfusion.growth` -- vessel growth by space colonisation.
 - :mod:`perfusion.optimize` -- vascular-structure optimisation (Paper D).
 
-See ``docs/ROADMAP.md`` for the planned ``api`` (FastAPI back-end), ``growth``
-(vessel growth) and web front-end layers.
+See ``docs/ROADMAP.md`` for the ``api`` (FastAPI back-end) and the planned web
+front-end layers.
 """
 
+from . import growth
 from .core import (
     darcy,
     direct,
@@ -47,6 +49,7 @@ __all__ = [
     "darcy",
     "direct",
     "geometry",
+    "growth",
     "network",
     "parameters",
     "pipeline",
