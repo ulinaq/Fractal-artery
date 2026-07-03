@@ -119,6 +119,21 @@ def test_arterial_and_venous_trees(params):
     assert art.root_node not in art.terminal_nodes
 
 
+def test_network_from_polylines_multi_component():
+    # two disconnected Y-trees -> one Network with two components
+    net = network_from_polylines([
+        [(20, 6), (20, 30)], [(20, 30), (8, 60)], [(20, 30), (32, 60)],
+        [(80, 6), (80, 30)], [(80, 30), (68, 60)], [(80, 30), (92, 60)],
+    ], radii=2.0)
+    labels = net.node_components()
+    assert len(set(labels.tolist())) == 2                 # two separate trees
+    # one inlet (root) per component, on distinct components
+    assert len(net.inlet_nodes) == 2
+    assert len({int(labels[r]) for r in net.inlet_nodes}) == 2
+    # still a forest: segments == nodes - components
+    assert net.n_segments == net.n_nodes - 2
+
+
 def test_rasterize_mask_matches_a_polygon():
     # a centred square covering [2,8] x [2,8] of a 10x10 domain, 2 cells / unit
     m = rasterize_mask(20, 20, (0, 10, 0, 10), [[(2, 2), (8, 2), (8, 8), (2, 8)]])

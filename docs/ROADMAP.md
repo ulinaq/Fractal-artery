@@ -271,15 +271,20 @@ imports move to `perfusion.core.*`.
   `PUT/GET /projects/{id}/io` stores inlet/outlet points (snapped to vessel ends
   on run); the UI's **Inlets/Outlets** mode marks them (▲ inlet / ▼ outlet).
 
+- ✅ **Separate feeding trees (multi-component)** — `network_from_edges`/
+  `_polylines` orient each connected component from its own root and seed
+  `inlet_nodes` with one root per component, so several disconnected arterial/
+  venous trees share one Darcy bed. `Network.node_components()` + the API ensure
+  every component keeps ≥1 inlet (auto-topped-up) so no block is singular.
+- ✅ **MCP server + dev guidance** — `perfusion.mcp_server` exposes the engine as
+  MCP tools; `.mcp.json` + `mcp` extra; `docs/DEVELOPING.md` extension guide.
+  Convention: new features also get an MCP tool.
+
 **Next**
 
-1. **Separate feeding trees** — support fully disconnected arterial/venous
-   components (multi-component `network_from_edges`/`_polylines`, each rooted at
-   its own inlet) sharing one Darcy bed. (Multi-node inlets on one connected
-   network are done; this generalises to several networks.)
-2. **Task queue** — swap the in-process `ThreadPoolExecutor` for RQ/Celery +
+1. **Task queue** — swap the in-process `ThreadPoolExecutor` for RQ/Celery +
    Redis for real multi-user hosting.
-3. Server-side **mp4** (needs ffmpeg); then the optional React/Vite rebuild and
+2. Server-side **mp4** (needs ffmpeg); then the optional React/Vite rebuild and
    Phase 4 (3-D + vtk.js).
 
 Each step is independently useful and testable; the API contract lets the
