@@ -51,8 +51,10 @@ def _build_networks(project: Project, use_vessels: bool):
     if use_vessels and project.has_vessels:
         art = _polylines_to_network(project.arteries) if project.arteries else None
         ven = _polylines_to_network(project.veins) if project.veins else None
-    if project.artery_network is not None:
+    if project.artery_network is not None:   # a grown/segmented tree wins
         art = project.artery_network
+    if project.vein_network is not None:
+        ven = project.vein_network
     return art, ven
 
 
@@ -157,13 +159,17 @@ def create_app(store: ProjectStore | None = None,
         return {"regions": _project(pid).regions}
 
     @app.post("/projects/{pid}/image", response_model=ProjectInfo)
-    async def upload_image(pid: str, request: Request, min_size: int = 20) -> ProjectInfo:
-        """Segment an uploaded vessel image into the project's arterial network.
+    async def upload_image(pid: str, request: Request,
+                           kind: str = "artery", min_size: int = 20) -> ProjectInfo:
+        """Segment an uploaded vessel image into the arterial or venous network.
 
-        The raw image bytes are the request body (any imageio-readable format).
-        Needs the ``image`` extra. The segmented tree is placed in the project's
-        domain and used on the next run (like a grown tree).
+        The raw image bytes are the request body (any imageio-readable format);
+        ``kind`` is ``artery`` (default) or ``vein``. Needs the ``image`` extra.
+        The segmented tree is placed in the project's domain and used on the next
+        run (like a grown tree).
         """
+        if kind not in ("artery", "vein"):
+            raise HTTPException(422, "kind must be 'artery' or 'vein'")
         project = _project(pid)
         data = await request.body()
         if not data:
@@ -183,7 +189,11 @@ def create_app(store: ProjectStore | None = None,
             net = seg.segment_network(img, min_size=min_size)
         except ValueError as exc:  # e.g. no vessel skeleton at this threshold
             raise HTTPException(422, str(exc)) from None
-        project.artery_network = seg.network_in_domain(net, img.shape, project.grid.domain_limit)
+        placed = seg.network_in_domain(net, img.shape, project.grid.domain_limit)
+        if kind == "artery":
+            project.artery_network = placed
+        else:
+            project.vein_network = placed
         store.clear_result(project)   # persist the tree; invalidate stale result
         return _info(project)
 
@@ -279,7 +289,9 @@ def create_app(store: ProjectStore | None = None,
             _add(project.artery_network, "artery")
         elif project.arteries:
             _add(_polylines_to_network(project.arteries), "artery")
-        if project.veins:
+        if project.vein_network is not None:
+            _add(project.vein_network, "vein")
+        elif project.veins:
             _add(_polylines_to_network(project.veins), "vein")
         return {"segments": segments}
 

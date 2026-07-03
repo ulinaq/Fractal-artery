@@ -245,18 +245,17 @@ imports move to `perfusion.core.*`.
   frames as a 2-D flow animation with a robust (99th-pct) colour scale, and an
   animated GIF can be downloaded. `POST/GET /projects/{id}/tracer` (job) +
   `GET /projects/{id}/tracer.gif` (needs the `image` extra).
-- ✅ **Image upload + segmentation** — `POST /projects/{id}/image` segments an
-  uploaded vessel image (`segmentation.segment_network`) and places it in the
-  project's domain (`segmentation.network_in_domain`) as the arterial tree; the
-  UI has a file picker and shows the segmented tree. Needs the `image` extra.
+- ✅ **Image upload + segmentation (artery & vein)** — `POST /projects/{id}/image?kind=artery|vein`
+  segments an uploaded vessel image (`segmentation.segment_network`) and places
+  it in the project's domain (`segmentation.network_in_domain`) as the arterial
+  or venous network; both are persisted, overlaid in the UI (red/blue), and
+  coupled on the next run. Needs the `image` extra.
 
 **Next**
 
 1. **Task queue** — move jobs from the in-process thread pool to RQ/Celery +
    Redis for real multi-user hosting.
-2. **Segment veins too** — a second uploaded image → the venous network (needs a
-   `vein_network` alongside the arterial one).
-3. **CCO growth variant**; **VTK/CSV export**; server-side **mp4** (needs
+2. **CCO growth variant**; **VTK/CSV export**; server-side **mp4** (needs
    ffmpeg); then the optional React/Vite rebuild and Phase 4 (3-D + vtk.js).
 
 Each step is independently useful and testable; the API contract lets the
