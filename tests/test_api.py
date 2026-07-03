@@ -140,6 +140,37 @@ def test_tracer_gif_export(client):
     assert gif.content[:6] in (b"GIF87a", b"GIF89a")
 
 
+def test_image_upload_segments_a_network(client):
+    pytest.importorskip("skimage")
+    pytest.importorskip("imageio")
+    from perfusion.io import DATA_DIR
+
+    img = (DATA_DIR / "frog_art_low.png").read_bytes()
+    pid = client.post("/projects", json={"name": "img", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    r = client.post(f"/projects/{pid}/image", content=img, params={"min_size": 30})
+    assert r.status_code == 200
+
+    segs = client.get(f"/projects/{pid}/network").json()["segments"]
+    assert len(segs) > 10
+    xs = [c for s in segs for c in (s["x0"], s["x1"])]
+    ys = [c for s in segs for c in (s["y0"], s["y1"])]
+    assert min(xs) >= -70                          # placed inside the domain window
+    assert max(xs) <= 70
+    assert min(ys) >= 0
+    assert max(ys) <= 160
+    # the segmented tree is usable by the solver
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+
+
+def test_image_upload_rejects_bad_payload(client):
+    pytest.importorskip("imageio")
+    pid = client.post("/projects", json={"name": "bad", "grid": SMALL_GRID}).json()["id"]
+    assert client.post(f"/projects/{pid}/image", content=b"").status_code == 400
+    assert client.post(f"/projects/{pid}/image", content=b"not-an-image").status_code == 422
+
+
 def test_frontend_is_served(client):
     root = client.get("/")
     assert root.status_code == 200

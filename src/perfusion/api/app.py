@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 
 from .. import growth
 from ..core import tkm, transport
@@ -154,6 +155,37 @@ def create_app(store: ProjectStore | None = None,
     @app.get("/projects/{pid}/mask")
     def get_mask(pid: str) -> dict:
         return {"regions": _project(pid).regions}
+
+    @app.post("/projects/{pid}/image", response_model=ProjectInfo)
+    async def upload_image(pid: str, request: Request, min_size: int = 20) -> ProjectInfo:
+        """Segment an uploaded vessel image into the project's arterial network.
+
+        The raw image bytes are the request body (any imageio-readable format).
+        Needs the ``image`` extra. The segmented tree is placed in the project's
+        domain and used on the next run (like a grown tree).
+        """
+        project = _project(pid)
+        data = await request.body()
+        if not data:
+            raise HTTPException(400, "empty request body; POST the image bytes")
+        try:
+            import imageio.v3 as iio
+
+            from .. import segmentation as seg
+        except ImportError:
+            raise HTTPException(501, "image segmentation needs the 'image' extra: "
+                                     "uv sync --extra image") from None
+        try:
+            img = iio.imread(io.BytesIO(data))
+        except Exception as exc:  # unreadable / non-image payload
+            raise HTTPException(422, f"could not decode image: {exc}") from None
+        try:
+            net = seg.segment_network(img, min_size=min_size)
+        except ValueError as exc:  # e.g. no vessel skeleton at this threshold
+            raise HTTPException(422, str(exc)) from None
+        project.artery_network = seg.network_in_domain(net, img.shape, project.grid.domain_limit)
+        store.clear_result(project)   # persist the tree; invalidate stale result
+        return _info(project)
 
     @app.post("/projects/{pid}/grow", response_model=GrowInfo)
     def grow_vessels(pid: str, body: GrowRequest | None = None) -> GrowInfo:

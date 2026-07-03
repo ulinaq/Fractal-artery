@@ -20,6 +20,9 @@ no separate dev server.
 - **Project** — create a project (name, parameters, grid).
 - **Draw vessels** — sketch arteries/veins on the canvas; each stroke is one
   segment, shared endpoints snap into branches (`PUT /projects/{id}/vessels`).
+- **Segment an image** — upload a vessel image; it is skeletonised into an
+  arterial network placed in the domain (`POST /projects/{id}/image`, `image`
+  extra).
 - **Draw tissue** — outline the organ in Tissue mode; the polygons become
   `Grid.mask`, so the Darcy bed and growth are organ-shaped
   (`PUT /projects/{id}/mask`).

@@ -135,6 +135,10 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   `perfusion-frog` now reproduces Paper A on the *real* segmented vasculature.
   The tracer keeps the largest connected component and renumbers nodes so the
   solver stays non-singular; venous graphs legitimately contain loops.
+  `network_in_domain(net, image_shape, domain_limit)` places a pixel-space
+  segmented network into a physical box (column→x, row→y flipped so it reads
+  upright); the API's `POST /projects/{id}/image` uses it to turn an upload into
+  the arterial tree.
 
 ## Gotchas
 

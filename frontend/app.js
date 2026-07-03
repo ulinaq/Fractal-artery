@@ -146,6 +146,19 @@ async function loadMask() {
   catch { state.regions = []; }
 }
 
+async function uploadImage(file) {
+  requireProject();
+  status("segmenting image…");
+  const r = await fetch(`/projects/${state.project}/image`, { method: "POST", body: file });
+  if (!r.ok) { status(`segment failed (${r.status}): ${(await r.text()).slice(0, 140)}`, "err"); return; }
+  stopFlow(); state.tracer = null; state.fieldData = null;
+  await loadNetwork();
+  const n = state.network ? state.network.segments.length : 0;
+  $("img-info").textContent = `segmented → ${n} segments (arterial tree)`;
+  status("image segmented → arterial tree", "ok");
+  redraw();
+}
+
 // ── grow / run ─────────────────────────────────────────────────────────────────
 async function grow() {
   requireProject();
@@ -322,7 +335,7 @@ function drawTracerFrame(idx) {
 }
 
 function drawNetworkOverlay() {
-  if (state.mode !== "result" || !state.network) return;
+  if (!state.network) return;    // show the current (grown/segmented) tree in any mode
   for (const s of state.network.segments) {
     const [x0, y0] = toCanvas(s.x0, s.y0), [x1, y1] = toCanvas(s.x1, s.y1);
     ctx.strokeStyle = s.kind === "vein" ? "rgba(191,219,254,.95)" : "rgba(254,202,202,.95)";
@@ -398,6 +411,10 @@ $("btn-endseg").addEventListener("click", endStroke);
 $("btn-undo").addEventListener("click", undo);
 $("btn-clear").addEventListener("click", clearVessels);
 $("btn-save-vessels").addEventListener("click", () => saveVessels().catch((e) => status(e.message, "err")));
+$("img-file").addEventListener("change", (e) => {
+  const f = e.target.files[0];
+  if (f) uploadImage(f).catch((err) => status(err.message, "err"));
+});
 $("btn-endregion").addEventListener("click", endRegion);
 $("btn-undo-region").addEventListener("click", undoRegion);
 $("btn-clear-tissue").addEventListener("click", clearTissue);
