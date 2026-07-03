@@ -78,7 +78,8 @@ polylines → networks), `projects/{id}/image?kind=artery|vein` (segment an
 uploaded vessel image),
 `projects/{id}/mask` (tissue outline → `Grid.mask`),
 `projects/{id}/grow` (grow the arterial tree into the tissue),
-`projects/{id}/run` (job), `jobs/{id}`, `projects/{id}/results[/field/{name}]`,
+`projects/{id}/run` (job), `jobs` (durable registry) + `jobs/{id}`,
+`projects/{id}/results[/field/{name}]`,
 `projects/{id}/network` (overlay geometry), `projects/{id}/tracer` (flow-video
 frames, job) + `tracer.gif`, `projects/{id}/export`.
 

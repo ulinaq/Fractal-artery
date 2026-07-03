@@ -74,9 +74,10 @@ Principles:
 - **Sessions & projects**: each user has projects; a project bundles geometry,
   parameters, and results. Start with SQLite + a filesystem blob store; the store
   interface stays swappable (→ Postgres + object storage when scaling).
-- **Jobs**: simulations can take seconds-to-minutes. Run them as background jobs
-  with progress over WebSocket. Start with in-process `BackgroundTasks`; move to a
-  task queue (RQ/Celery + Redis) for real multi-user hosting.
+- **Jobs**: simulations can take seconds-to-minutes. Run them as background jobs.
+  ✅ *Now:* an in-process thread pool with a **durable SQLite job registry**
+  (survives restarts; stale jobs reaped). *Next:* a task queue (RQ/Celery + Redis)
+  behind the same store seam, with progress over WebSocket.
 - **Statelessness of compute**: the core takes explicit inputs and returns
   results — no globals — so it parallelises across workers cleanly.
 - **Auth**: out of scope initially (single lab); design endpoints so an auth
@@ -251,10 +252,17 @@ imports move to `perfusion.core.*`.
   or venous network; both are persisted, overlaid in the UI (red/blue), and
   coupled on the next run. Needs the `image` extra.
 
+- ✅ **Durable job registry** — jobs (id, project, kind, state, error,
+  timestamps) are recorded in SQLite, so status/history survive a restart and
+  stale in-flight jobs are marked `interrupted` on startup. `GET /jobs[?project_id=]`
+  lists them. The `JobManager` writes lifecycle through the store, which is the
+  seam a real task queue slots into.
+
 **Next**
 
-1. **Task queue** — move jobs from the in-process thread pool to RQ/Celery +
-   Redis for real multi-user hosting.
+1. **Task queue** — swap the in-process `ThreadPoolExecutor` for RQ/Celery +
+   Redis workers (writing job state through the same store) for real multi-user
+   hosting.
 2. **CCO growth variant**; **VTK/CSV export**; server-side **mp4** (needs
    ffmpeg); then the optional React/Vite rebuild and Phase 4 (3-D + vtk.js).
 
