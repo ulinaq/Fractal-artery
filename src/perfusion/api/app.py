@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
 
-from .. import growth, io
+from .. import growth
 from ..core.geometry import arterial_tree, network_from_polylines
 from ..core.pipeline import run_hybrid
 from .jobs import JobManager
@@ -33,8 +32,8 @@ def _polylines_to_network(polylines, root_xy=None):
     return network_from_polylines(lines, radii=radii, root_xy=root_xy)
 
 
-def _run_project(project: Project, req: RunRequest) -> None:
-    """Execute the hybrid simulation for a project and store the result."""
+def _run_project(store: ProjectStore, project: Project, req: RunRequest) -> None:
+    """Execute the hybrid simulation for a project and persist the result."""
     prm = project.params.to_core()
     grid = project.grid.to_core()
     domain_limit = project.grid.domain_limit
@@ -48,8 +47,7 @@ def _run_project(project: Project, req: RunRequest) -> None:
 
     result = run_hybrid(prm, grid, domain_limit=domain_limit,
                         nonlinear=req.nonlinear, art=art, ven=ven)
-    project.result = result
-    project.summary = io.results_summary(result)
+    store.save_result(project, result)
 
 
 def _info(project: Project) -> ProjectInfo:
@@ -93,6 +91,7 @@ def create_app(store: ProjectStore | None = None,
     def set_vessels(pid: str, body: VesselsIn) -> ProjectInfo:
         project = _project(pid)
         project.arteries, project.veins = body.arteries, body.veins
+        store.save(project)
         return _info(project)
 
     @app.post("/projects/{pid}/grow", response_model=GrowInfo)
@@ -115,7 +114,7 @@ def create_app(store: ProjectStore | None = None,
             step=req.step, influence_radius=req.influence_radius,
             kill_radius=req.kill_radius, leaf_radius=req.leaf_radius)
         project.artery_network = network
-        project.result = project.summary = None   # invalidate the stale result
+        store.clear_result(project)   # persist the tree; invalidate stale result
         return GrowInfo(id=project.id, n_segments=network.n_segments,
                         n_terminals=int(network.terminal_nodes.size))
 
@@ -123,7 +122,7 @@ def create_app(store: ProjectStore | None = None,
     def run_project(pid: str, body: RunRequest | None = None) -> JobInfo:
         project = _project(pid)
         req = body or RunRequest()
-        jid = jobs.submit(lambda: _run_project(project, req), project.id)
+        jid = jobs.submit(lambda: _run_project(store, project, req), project.id)
         state = jobs.get(jid)
         return JobInfo(id=jid, state=state["state"], error=state["error"],
                        project_id=project.id)
@@ -146,11 +145,11 @@ def create_app(store: ProjectStore | None = None,
     @app.get("/projects/{pid}/results/field/{name}", response_model=FieldResponse)
     def result_field(pid: str, name: str) -> FieldResponse:
         project = _project(pid)
-        if project.result is None:
+        if not project.has_result:
             raise HTTPException(409, "no result yet; run the simulation first")
         if name not in _FIELDS:
             raise HTTPException(404, f"unknown field {name!r}; use {list(_FIELDS)}")
-        field = getattr(project.result, _FIELDS[name])
+        field = store.result_field(pid, _FIELDS[name])
         data = np.where(np.isfinite(field), field, None)  # NaN -> null (valid JSON)
         return FieldResponse(name=name, shape=field.shape, data=data.tolist())
 
@@ -159,11 +158,9 @@ def create_app(store: ProjectStore | None = None,
         from fastapi.responses import FileResponse
 
         project = _project(pid)
-        if project.result is None:
+        if not project.has_result:
             raise HTTPException(409, "no result yet; run the simulation first")
-        path = Path(tempfile.gettempdir()) / f"perfusion_{project.id}.npz"
-        io.save_results(project.result, path)
-        return FileResponse(path, media_type="application/octet-stream",
+        return FileResponse(store.result_path(pid), media_type="application/octet-stream",
                             filename=f"{project.name or project.id}.npz")
 
     @app.get("/projects/{pid}/network")
@@ -210,6 +207,9 @@ def main() -> None:
     """Run the dev server (``perfusion-api``)."""
     import uvicorn
 
+    from .store import _default_root
+    print(f"perfusion-api: persisting projects under {_default_root()}  "
+          f"(set PERFUSION_DATA to change)")
     uvicorn.run("perfusion.api.app:app", host="127.0.0.1", port=8000, reload=False)
 
 

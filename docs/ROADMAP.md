@@ -145,7 +145,7 @@ self-contained and testable against the existing physics checks.
 | Phase | Goal | Key deliverables |
 |---|---|---|
 | **0. Reorganise** *(this change)* | Maintainable, layered source | `perfusion.core` split out; stable public API; docs updated |
-| **1. Back-end API** | Headless service | FastAPI `perfusion.api`: projects, jobs, run/segment/export endpoints; SQLite + blob store; OpenAPI contract; result exporters (`io`) |
+| **1. Back-end API** | Headless service | ✅ FastAPI `perfusion.api`: projects, async jobs, vessels/grow/run/results/field/network/export; ✅ SQLite + blob store; OpenAPI contract; result exporters (`io`) |
 | **2. Web front-end** | Usable 2-D app | ✅ *v1 shipped* — zero-build workspace (`frontend/`, served at `/`): vessel **drawing**, grow, run + poll, 2-D field heatmap + network overlay, export, shareable URLs. *Next:* tissue-mask drawing, **flow video**, optional React/Vite rebuild |
 | **3. Research features** | Publishable depth | monolithic sparse solve + AMG (scale), heterogeneous permeability, **vessel growth** from selections, elasticity |
 | **4. 3-D** | 3-D modelling + views | 3-D grids/trees/segmentation, vtk.js rendering, 3-D flow video, VTK export |
@@ -233,12 +233,15 @@ imports move to `perfusion.core.*`.
   draw vessels, grow, run (async job + poll), view pressure/flux/TOF as a viridis
   heatmap with the network overlaid, export, and open a project by shareable
   `?project=<id>` URL. Added `GET /projects/{id}/network` for the overlay.
+- ✅ **Persistence** — `ProjectStore` is now SQLite (metadata) + a filesystem
+  blob store (grown network + result `.npz`), rooted at `$PERFUSION_DATA`.
+  Projects and results survive a process restart, so shared URLs keep working;
+  the store interface stays swappable (→ Postgres + object storage).
 
 **Next**
 
-1. **Persistence** — back the project store with SQLite + a blob store; add a
-   task queue (RQ/Celery) for real multi-user hosting (so shared URLs survive a
-   restart).
+1. **Task queue** — move jobs from the in-process thread pool to RQ/Celery +
+   Redis for real multi-user hosting.
 2. **Draw the tissue mask** — paint the active domain on the canvas → `Grid.mask`.
 3. **Image upload + segmentation endpoint** — `POST /projects/{id}/image` →
    `segmentation.segment_network` (behind the `image` extra).
