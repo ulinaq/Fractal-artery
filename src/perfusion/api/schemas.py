@@ -71,6 +71,7 @@ class ProjectInfo(BaseModel):
     has_vessels: bool = False
     has_mask: bool = False
     has_result: bool = False
+    has_tracer: bool = False
 
 
 class RunRequest(BaseModel):
@@ -94,6 +95,23 @@ class GrowInfo(BaseModel):
     id: str
     n_segments: int
     n_terminals: int
+
+
+class TracerRequest(BaseModel):
+    """Animate a contrast-agent bolus washing through the tissue."""
+
+    n_frames: int = Field(48, ge=2, le=200)
+    duration: float | None = None   # total time; auto from time-of-flight if None
+    aif_t0: float | None = None      # bolus arrival time; auto (~8% of duration)
+
+
+class TracerInfo(BaseModel):
+    id: str
+    n_frames: int
+    shape: tuple[int, int]
+    times: list[float]
+    vmax: float
+    frames: list[list[list[float | None]]]   # (n_frames, nx, ny); masked -> null
 
 
 class JobInfo(BaseModel):

@@ -30,6 +30,9 @@ no separate dev server.
 - **Result** — view the pressure / flux / time-of-flight field as a
   colour-blind-safe *viridis* heatmap with the vascular network overlaid and a
   colour bar; read the inflow/outflow summary; **export** the raw `.npz`.
+- **Flow video** — play/scrub an animation of a contrast bolus washing through
+  the tissue (`POST/GET /projects/{id}/tracer`), and download it as an animated
+  GIF (`tracer.gif`, needs the `image` extra).
 - **Share** — `?project=<id>` opens an existing project (and its result) by id.
 
 ## Files

@@ -8,6 +8,7 @@ import numpy as np
 from fastapi import FastAPI, HTTPException
 
 from .. import growth
+from ..core import tkm, transport
 from ..core.geometry import arterial_tree, network_from_polylines, rasterize_mask
 from ..core.pipeline import run_hybrid
 from .jobs import JobManager
@@ -20,6 +21,8 @@ from .schemas import (
     ProjectCreate,
     ProjectInfo,
     RunRequest,
+    TracerInfo,
+    TracerRequest,
     VesselsIn,
 )
 from .store import Project, ProjectStore
@@ -33,30 +36,73 @@ def _polylines_to_network(polylines, root_xy=None):
     return network_from_polylines(lines, radii=radii, root_xy=root_xy)
 
 
-def _run_project(store: ProjectStore, project: Project, req: RunRequest) -> None:
-    """Execute the hybrid simulation for a project and persist the result."""
-    prm = project.params.to_core()
+def _build_grid(project: Project):
+    """Grid (with the tissue mask, if any) + its domain window."""
     domain_limit = project.grid.domain_limit
     mask = (rasterize_mask(project.grid.nx, project.grid.ny, domain_limit, project.regions)
             if project.regions else None)
-    grid = project.grid.to_core(mask=mask)
+    return project.grid.to_core(mask=mask), domain_limit
 
+
+def _build_networks(project: Project, use_vessels: bool):
+    """Arterial/venous networks: a grown tree wins, else hand-drawn, else defaults."""
     art = ven = None
-    if req.use_vessels and project.has_vessels:
-        art = _polylines_to_network(project.arteries)
-        ven = _polylines_to_network(project.veins)
-    if project.artery_network is not None:   # a grown tree takes precedence
+    if use_vessels and project.has_vessels:
+        art = _polylines_to_network(project.arteries) if project.arteries else None
+        ven = _polylines_to_network(project.veins) if project.veins else None
+    if project.artery_network is not None:
         art = project.artery_network
+    return art, ven
 
+
+def _run_project(store: ProjectStore, project: Project, req: RunRequest) -> None:
+    """Execute the hybrid simulation for a project and persist the result."""
+    prm = project.params.to_core()
+    grid, domain_limit = _build_grid(project)
+    art, ven = _build_networks(project, req.use_vessels)
     result = run_hybrid(prm, grid, domain_limit=domain_limit,
                         nonlinear=req.nonlinear, art=art, ven=ven)
     store.save_result(project, result)
 
 
+def _run_tracer(store: ProjectStore, project: Project, req: TracerRequest) -> None:
+    """Solve the flow, then advect a contrast bolus and persist the frames."""
+    prm = project.params.to_core()
+    grid, domain_limit = _build_grid(project)
+    art, ven = _build_networks(project, use_vessels=True)
+    result = run_hybrid(prm, grid, domain_limit=domain_limit, art=art, ven=ven)
+
+    # Time-scale from a characteristic transit time; leave a long tail for washout
+    # so the animation shows inflow -> peak -> washout rather than cutting off.
+    finite = result.tof[np.isfinite(result.tof)]
+    t_char = float(np.percentile(finite, 80)) if finite.size else 5.0
+    duration = req.duration or 5.0 * max(t_char, 1e-3)
+    t0 = req.aif_t0 if req.aif_t0 is not None else 0.08 * duration
+
+    # Integrate finely (implicit, unconditionally stable), then subsample frames.
+    n_steps = max(req.n_frames, 500)
+    dt = duration / n_steps
+    t = np.arange(n_steps) * dt
+    aif = tkm.gamma_variate_aif(t, t0=t0, A=3.0, B=max(0.06 * duration, dt))
+    peak = float(aif.max())
+    if peak > 0:
+        aif = aif / peak          # unit-peak bolus so concentrations stay O(1)
+    full = transport.transport_forward(
+        result.grid, result.fx, result.fy, result.sources,
+        result.solution.terminal_flux, aif, dt, theta=1.0)
+    stride = max(1, n_steps // req.n_frames)
+    frames, times = full[::stride][:req.n_frames], t[::stride][:req.n_frames]
+    # Robust colour scale: the arterial injection cells spike far above the tissue,
+    # so clip to the 99th percentile over active cells to reveal the perfusion front.
+    active = frames[:, result.grid.mask]
+    vmax = float(np.nanpercentile(active, 99)) if active.size else 0.0
+    store.save_tracer(project, frames, times, vmax if vmax > 0 else 1.0, result.grid.mask)
+
+
 def _info(project: Project) -> ProjectInfo:
     return ProjectInfo(id=project.id, name=project.name,
-                       has_vessels=project.has_vessels,
-                       has_mask=bool(project.regions), has_result=project.has_result)
+                       has_vessels=project.has_vessels, has_mask=bool(project.regions),
+                       has_result=project.has_result, has_tracer=project.has_tracer)
 
 
 def create_app(store: ProjectStore | None = None,
@@ -205,8 +251,63 @@ def create_app(store: ProjectStore | None = None,
             _add(_polylines_to_network(project.veins), "vein")
         return {"segments": segments}
 
+    @app.post("/projects/{pid}/tracer", response_model=JobInfo)
+    def run_tracer(pid: str, body: TracerRequest | None = None) -> JobInfo:
+        project = _project(pid)
+        req = body or TracerRequest()
+        jid = jobs.submit(lambda: _run_tracer(store, project, req), project.id)
+        state = jobs.get(jid)
+        return JobInfo(id=jid, state=state["state"], error=state["error"],
+                       project_id=project.id)
+
+    @app.get("/projects/{pid}/tracer", response_model=TracerInfo)
+    def tracer_frames(pid: str) -> TracerInfo:
+        project = _project(pid)
+        if not project.has_tracer:
+            raise HTTPException(409, "no tracer yet; POST to /tracer first")
+        data = store.load_tracer(pid)
+        mask, frames = data["mask"], data["frames"]
+        # mask inactive cells and serialise NaN -> null
+        out = [np.where(mask & np.isfinite(f), f, None).tolist() for f in frames]
+        return TracerInfo(id=pid, n_frames=len(frames), shape=mask.shape,
+                          times=data["times"].tolist(), vmax=float(data["vmax"]), frames=out)
+
+    @app.get("/projects/{pid}/tracer.gif")
+    def tracer_gif(pid: str):
+        from fastapi.responses import Response
+
+        project = _project(pid)
+        if not project.has_tracer:
+            raise HTTPException(409, "no tracer yet; POST to /tracer first")
+        try:
+            gif = _render_gif(store.load_tracer(pid))
+        except ImportError:
+            raise HTTPException(501, "GIF export needs the 'image' extra: "
+                                     "uv sync --extra image") from None
+        return Response(gif, media_type="image/gif",
+                        headers={"content-disposition": f'attachment; filename="{pid}.gif"'})
+
     _mount_frontend(app)
     return app
+
+
+def _render_gif(tracer: dict, fps: int = 12) -> bytes:
+    """Colour-map tracer frames (viridis) into an animated GIF (needs imageio)."""
+    import io as _io
+
+    import imageio.v2 as imageio
+    from matplotlib import colormaps
+
+    frames, mask, vmax = tracer["frames"], tracer["mask"], float(tracer["vmax"]) or 1.0
+    cmap = colormaps["viridis"]
+    images = []
+    for f in frames:
+        rgb = (cmap(np.clip(f / vmax, 0.0, 1.0))[..., :3] * 255).astype(np.uint8)
+        rgb[~mask] = 245                        # inactive tissue -> light grey
+        images.append(np.transpose(rgb, (1, 0, 2))[::-1])   # (nx,ny)->image (row=y down)
+    buf = _io.BytesIO()
+    imageio.mimsave(buf, images, format="GIF", fps=fps, loop=0)
+    return buf.getvalue()
 
 
 def _mount_frontend(app: FastAPI) -> None:

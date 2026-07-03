@@ -40,6 +40,7 @@ class Project:
     artery_network: object | None = None  # grown perfusion.core.geometry.Network
     summary: dict | None = None
     has_result: bool = False              # set from blob existence on load
+    has_tracer: bool = False              # set from blob existence on load
 
     @property
     def has_vessels(self) -> bool:
@@ -92,6 +93,9 @@ class ProjectStore:
     def result_path(self, pid: str) -> Path:
         return self.blobs / f"{pid}.result.npz"
 
+    def tracer_path(self, pid: str) -> Path:
+        return self.blobs / f"{pid}.tracer.npz"
+
     # -- (de)serialisation of a row ----------------------------------------- #
     def _row_to_project(self, row: sqlite3.Row) -> Project:
         pid = row["id"]
@@ -108,6 +112,7 @@ class ProjectStore:
         if artery.exists():
             project.artery_network = io.load_network(artery)
         project.has_result = self.result_path(pid).exists()
+        project.has_tracer = self.tracer_path(pid).exists()
         return project
 
     # -- CRUD --------------------------------------------------------------- #
@@ -156,20 +161,35 @@ class ProjectStore:
             artery.unlink(missing_ok=True)
 
     def save_result(self, project: Project, result) -> None:
-        """Write the result blob + summary and persist."""
+        """Write the result blob + summary and persist (invalidating any tracer)."""
         io.save_results(result, self.result_path(project.id))
+        self.tracer_path(project.id).unlink(missing_ok=True)   # stale
         project.summary = io.results_summary(result)
         project.has_result = True
+        project.has_tracer = False
         self.save(project)
 
     def clear_result(self, project: Project) -> None:
-        """Invalidate a stale result (e.g. after regrowing the tree)."""
+        """Invalidate a stale result + tracer (e.g. after regrowing the tree)."""
         self.result_path(project.id).unlink(missing_ok=True)
+        self.tracer_path(project.id).unlink(missing_ok=True)
         project.summary = None
-        project.has_result = False
+        project.has_result = project.has_tracer = False
         self.save(project)
 
     def result_field(self, pid: str, name: str) -> np.ndarray:
         """Load one field (``pressure`` / ``flux`` / ``tof``) from the result blob."""
         with np.load(self.result_path(pid)) as data:
             return data[name]
+
+    def save_tracer(self, project: Project, frames, times, vmax, mask) -> None:
+        """Persist the tracer animation frames as a blob."""
+        np.savez(self.tracer_path(project.id), frames=np.asarray(frames, dtype=np.float32),
+                 times=np.asarray(times, dtype=float), vmax=float(vmax),
+                 mask=np.asarray(mask, dtype=bool))
+        project.has_tracer = True
+
+    def load_tracer(self, pid: str) -> dict:
+        """Load the tracer blob (frames, times, vmax, mask) as a dict of arrays."""
+        with np.load(self.tracer_path(pid)) as data:
+            return {k: data[k] for k in data.files}

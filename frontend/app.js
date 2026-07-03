@@ -44,6 +44,8 @@ const state = {
   regionStroke: [],          // current in-progress tissue polygon
   network: null,             // {segments:[...]} overlaid in result mode
   fieldData: null,           // {name, shape, data, vmin, vmax}
+  tracer: null,              // {shape, times, vmax, frames:[...]}
+  flow: { active: false, idx: 0, timer: null },
 };
 
 // ── status helpers ────────────────────────────────────────────────────────────
@@ -67,6 +69,7 @@ async function newProject() {
   state.vessels = { arteries: [], veins: [] };
   state.stroke = []; state.regions = []; state.regionStroke = [];
   state.network = null; state.fieldData = null;
+  stopFlow(); state.tracer = null;
   $("proj-id").textContent = `project ${p.id}`;
   $("btn-export").disabled = true;
   $("grow-info").textContent = ""; $("run-info").textContent = "";
@@ -204,10 +207,64 @@ async function loadField(name) {
   redraw();
 }
 
+// ── tracer flow video ─────────────────────────────────────────────────────────
+function stopTimer() {
+  if (state.flow.timer) { clearInterval(state.flow.timer); state.flow.timer = null; }
+}
+
+async function computeFlow() {
+  requireProject();
+  if (!state.tracer) {
+    try {
+      await loadTracer();                 // reuse a previously computed tracer
+    } catch {
+      status("computing flow… (this solves + advects a bolus)");
+      const job = await api("POST", `/projects/${state.project}/tracer`, { n_frames: 48 });
+      const final = await pollJob(job.id);
+      if (final.state === "error") { status(final.error || "flow failed", "err"); return; }
+      await loadTracer();
+      status("flow ready", "ok");
+    }
+  }
+  state.flow.active = true;
+  ["flow-play", "flow-scrub", "flow-time", "flow-gif"].forEach((id) => ($(id).hidden = false));
+  playFlow();
+}
+
+async function loadTracer() {
+  const t = await api("GET", `/projects/${state.project}/tracer`);
+  state.tracer = t;
+  state.flow.idx = 0;
+  $("flow-scrub").max = t.n_frames - 1;
+  $("flow-gif").href = `/projects/${state.project}/tracer.gif`;
+}
+
+function playFlow() {
+  stopTimer();
+  state.flow.timer = setInterval(() => {
+    state.flow.idx = (state.flow.idx + 1) % state.tracer.n_frames;
+    syncFlowUI(); redraw();
+  }, 90);
+  $("flow-play").textContent = "⏸";
+}
+function pauseFlow() { stopTimer(); $("flow-play").textContent = "▶"; }
+function toggleFlowPlay() { state.flow.timer ? pauseFlow() : playFlow(); }
+function stopFlow() {
+  pauseFlow(); state.flow.active = false;
+  ["flow-play", "flow-scrub", "flow-time"].forEach((id) => ($(id).hidden = true));
+}
+function syncFlowUI() {
+  $("flow-scrub").value = state.flow.idx;
+  $("flow-time").textContent = `t = ${state.tracer.times[state.flow.idx].toFixed(2)}`;
+}
+
 // ── rendering ──────────────────────────────────────────────────────────────────
 function redraw() {
   ctx.clearRect(0, 0, W, H);
-  if (state.mode === "result" && state.fieldData) drawField();
+  if (state.mode === "result") {
+    if (state.flow.active && state.tracer) drawTracerFrame(state.flow.idx);
+    else if (state.fieldData) drawField();
+  }
   drawRegions();
   drawNetworkOverlay();
   drawVessels();
@@ -231,9 +288,7 @@ function drawRegions() {
   }
 }
 
-function drawField() {
-  const { shape, data, vmin, vmax } = state.fieldData;
-  const [nx, ny] = shape;
+function paintHeatmap(data, nx, ny, vmin, vmax) {
   const off = document.createElement("canvas");
   off.width = nx; off.height = ny;
   const octx = off.getContext("2d");
@@ -252,7 +307,18 @@ function drawField() {
   octx.putImageData(img, 0, 0);
   ctx.imageSmoothingEnabled = true;
   ctx.drawImage(off, 0, 0, W, H);
-  updateColorbar(vmin, vmax);
+}
+
+function drawField() {
+  const { shape, data, vmin, vmax } = state.fieldData;
+  paintHeatmap(data, shape[0], shape[1], vmin, vmax);
+  updateColorbar(vmin, vmax, state.field);
+}
+
+function drawTracerFrame(idx) {
+  const t = state.tracer;
+  paintHeatmap(t.frames[idx], t.shape[0], t.shape[1], 0, t.vmax);
+  updateColorbar(0, t.vmax, "tracer");
 }
 
 function drawNetworkOverlay() {
@@ -301,13 +367,13 @@ function drawStroke() {
   }
 }
 
-function updateColorbar(vmin, vmax) {
+function updateColorbar(vmin, vmax, label) {
   const cb = $("colorbar"); cb.hidden = false;
   const stops = VIRIDIS.map((c, i) => `rgb(${c[0]},${c[1]},${c[2]}) ${(100 * i / (VIRIDIS.length - 1)).toFixed(0)}%`);
   $("cb-ramp").style.background = `linear-gradient(to top, ${stops.join(",")})`;
   const fmt = (v) => (Math.abs(v) < 1e-3 || Math.abs(v) > 1e4) ? v.toExponential(1) : v.toFixed(2);
   $("cb-max").textContent = fmt(vmax); $("cb-min").textContent = fmt(vmin);
-  $("cb-title").textContent = state.field;
+  $("cb-title").textContent = label;
 }
 
 const getCss = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -319,7 +385,9 @@ function setMode(mode) {
   $("mode-tissue").classList.toggle("active", mode === "tissue");
   $("mode-result").classList.toggle("active", mode === "result");
   $("field-picker").classList.toggle("show", mode === "result");
-  $("colorbar").hidden = mode !== "result" || !state.fieldData;
+  $("flowbar").classList.toggle("show", mode === "result");
+  $("colorbar").hidden = mode !== "result";
+  if (mode !== "result") stopTimer();
   canvas.style.cursor = mode === "result" ? "default" : "crosshair";
   redraw();
 }
@@ -344,8 +412,15 @@ canvas.addEventListener("dblclick", () => (state.mode === "tissue" ? endRegion()
 document.querySelectorAll(".field").forEach((b) => b.addEventListener("click", () => {
   document.querySelectorAll(".field").forEach((x) => x.classList.remove("active"));
   b.classList.add("active");
+  stopFlow();                              // switch from animation back to a static field
   if (state.project) loadField(b.dataset.field).catch((e) => status(e.message, "err"));
 }));
+
+$("btn-flow").addEventListener("click", () => computeFlow().catch((e) => status(e.message, "err")));
+$("flow-play").addEventListener("click", toggleFlowPlay);
+$("flow-scrub").addEventListener("input", (e) => {
+  pauseFlow(); state.flow.idx = Number(e.target.value); syncFlowUI(); redraw();
+});
 
 // Open an existing project by id (shareable URL: ?project=<id>).
 async function openProject(id) {
@@ -353,6 +428,7 @@ async function openProject(id) {
   state.project = info.id;
   $("proj-name").value = info.name;
   $("proj-id").textContent = `project ${info.id}`;
+  stopFlow(); state.tracer = null;
   await Promise.all([loadNetwork(), loadMask()]);
   if (info.has_result) {
     await Promise.all([showSummary(), loadField(state.field)]);

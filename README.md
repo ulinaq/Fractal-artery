@@ -48,8 +48,9 @@ uv run perfusion-api         # start the FastAPI back-end (http://127.0.0.1:8000
 2-D workspace (no Node/npm) at `http://127.0.0.1:8000/`: create a project, draw
 vessels, **outline the tissue** (so the Darcy bed is organ-shaped), grow the
 arterial tree into it, run the simulation, and view the
-pressure/flux/time-of-flight field as a heatmap with the network overlaid.
-Projects are shareable by URL (`/?project=<id>`) and **persist across restarts**
+pressure/flux/time-of-flight field as a heatmap with the network overlaid — or
+play a **flow video** of a contrast bolus washing through the tissue (with GIF
+download). Projects are shareable by URL (`/?project=<id>`) and **persist across restarts**
 (SQLite + a blob store under `$PERFUSION_DATA`). Interactive API docs are at
 `/docs`. See [`frontend/`](frontend/README.md) for the UI.
 
@@ -75,7 +76,8 @@ Endpoints: `health`, `projects` (CRUD), `projects/{id}/vessels` (hand-drawn
 polylines → networks), `projects/{id}/mask` (tissue outline → `Grid.mask`),
 `projects/{id}/grow` (grow the arterial tree into the tissue),
 `projects/{id}/run` (job), `jobs/{id}`, `projects/{id}/results[/field/{name}]`,
-`projects/{id}/network` (overlay geometry), `projects/{id}/export`.
+`projects/{id}/network` (overlay geometry), `projects/{id}/tracer` (flow-video
+frames, job) + `tracer.gif`, `projects/{id}/export`.
 
 Example figures are written to `outputs/`.
 

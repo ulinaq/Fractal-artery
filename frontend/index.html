@@ -104,6 +104,13 @@
           <button class="field" data-field="flux">flux</button>
           <button class="field" data-field="tof">time-of-flight</button>
         </div>
+        <div class="flowbar" id="flowbar">
+          <button id="btn-flow" class="ghost">▶ Flow video</button>
+          <button id="flow-play" class="ghost" hidden>⏸</button>
+          <input id="flow-scrub" type="range" min="0" max="0" value="0" hidden />
+          <span id="flow-time" class="muted" hidden></span>
+          <a id="flow-gif" class="ghost" hidden>↓ GIF</a>
+        </div>
         <button id="btn-export" class="ghost" disabled>Export .npz</button>
       </div>
 

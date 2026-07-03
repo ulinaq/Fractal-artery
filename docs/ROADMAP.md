@@ -98,7 +98,7 @@ Every requested capability, and where it lives.
 | Run simulation | run + progress | `POST /projects/{id}/run` (job) | `core.pipeline.run_hybrid` |
 | 2-D result views | canvas/Plotly | `GET /results/{id}/field/{name}` | `core` fields → JSON/PNG |
 | 3-D result views | vtk.js | `GET /results/{id}/mesh` | **new** VTK/glTF export (Phase 4) |
-| Flow video (2-D/3-D) | player | `GET /results/{id}/tracer` (frames/mp4) | `core.transport` + `io` video |
+| Flow video (2-D/3-D) | ✅ player + scrubber | ✅ `POST/GET /projects/{id}/tracer`, `…/tracer.gif` | `core.transport` (bolus advection) + GIF |
 | Export results | download | `GET /results/{id}/export?fmt=` | **new** `io` exporters (npz/CSV/VTK/JSON/MP4) |
 | Parameter sweeps / experiments | forms | `POST /experiments` (batch jobs) | `optimize`, batch runner |
 
@@ -241,6 +241,11 @@ imports move to `perfusion.core.*`.
   `core.geometry.rasterize_mask` turns the polygons into `Grid.mask`, so both the
   Darcy solve and vessel growth are organ-shaped (not the bounding box). Regions
   persist with the project; `PUT/GET /projects/{id}/mask`.
+- ✅ **Flow video** — a contrast bolus is advected through the tissue
+  (`core.transport`, timed off the time-of-flight); the UI plays/scrubs the
+  frames as a 2-D flow animation with a robust (99th-pct) colour scale, and an
+  animated GIF can be downloaded. `POST/GET /projects/{id}/tracer` (job) +
+  `GET /projects/{id}/tracer.gif` (needs the `image` extra).
 
 **Next**
 
@@ -248,9 +253,8 @@ imports move to `perfusion.core.*`.
    Redis for real multi-user hosting.
 2. **Image upload + segmentation endpoint** — `POST /projects/{id}/image` →
    `segmentation.segment_network` (behind the `image` extra).
-3. **Flow video** — `transport` frames streamed/exported (mp4) and played in the UI.
-4. **CCO growth variant**; **VTK/CSV export**; then the optional React/Vite
-   rebuild and Phase 4 (3-D + vtk.js).
+3. **CCO growth variant**; **VTK/CSV export**; server-side **mp4** (needs
+   ffmpeg); then the optional React/Vite rebuild and Phase 4 (3-D + vtk.js).
 
 Each step is independently useful and testable; the API contract lets the
 front-end be built in parallel.
