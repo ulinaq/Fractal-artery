@@ -99,7 +99,7 @@ Every requested capability, and where it lives.
 | 2-D result views | canvas/Plotly | `GET /results/{id}/field/{name}` | `core` fields → JSON/PNG |
 | 3-D result views | vtk.js | `GET /results/{id}/mesh` | **new** VTK/glTF export (Phase 4) |
 | Flow video (2-D/3-D) | ✅ player + scrubber | ✅ `POST/GET /projects/{id}/tracer`, `…/tracer.gif` | `core.transport` (bolus advection) + GIF |
-| Export results | download | `GET /results/{id}/export?fmt=` | **new** `io` exporters (npz/CSV/VTK/JSON/MP4) |
+| Export results | ✅ download + format picker | ✅ `GET /projects/{id}/export?fmt=npz\|csv\|vtk` | ✅ `io` exporters (npz/CSV/VTK); MP4 pending |
 | Parameter sweeps / experiments | forms | `POST /experiments` (batch jobs) | `optimize`, batch runner |
 
 New back-end pieces flagged **new** are scheduled in the phases below.
@@ -257,14 +257,18 @@ imports move to `perfusion.core.*`.
   stale in-flight jobs are marked `interrupted` on startup. `GET /jobs[?project_id=]`
   lists them. The `JobManager` writes lifecycle through the store, which is the
   seam a real task queue slots into.
+- ✅ **VTK / CSV export** — `GET /projects/{id}/export?fmt=npz|csv|vtk`: the
+  fields as ParaView-readable VTK ImageData (`.vti`) or a long-format CSV (one
+  row per active cell), alongside the raw `.npz` (`io.fields_to_vtk/_to_csv`).
+  The UI has a format picker next to Export.
 
 **Next**
 
 1. **Task queue** — swap the in-process `ThreadPoolExecutor` for RQ/Celery +
    Redis workers (writing job state through the same store) for real multi-user
    hosting.
-2. **CCO growth variant**; **VTK/CSV export**; server-side **mp4** (needs
-   ffmpeg); then the optional React/Vite rebuild and Phase 4 (3-D + vtk.js).
+2. **CCO growth variant**; server-side **mp4** (needs ffmpeg); then the optional
+   React/Vite rebuild and Phase 4 (3-D + vtk.js).
 
 Each step is independently useful and testable; the API contract lets the
 front-end be built in parallel.

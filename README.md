@@ -81,7 +81,7 @@ uploaded vessel image),
 `projects/{id}/run` (job), `jobs` (durable registry) + `jobs/{id}`,
 `projects/{id}/results[/field/{name}]`,
 `projects/{id}/network` (overlay geometry), `projects/{id}/tracer` (flow-video
-frames, job) + `tracer.gif`, `projects/{id}/export`.
+frames, job) + `tracer.gif`, `projects/{id}/export?fmt=npz|csv|vtk`.
 
 Example figures are written to `outputs/`.
 

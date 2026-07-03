@@ -54,6 +54,27 @@ def test_results_summary_is_json_serialisable(hybrid_result):
     json.dumps(summary)          # must contain only plain floats/ints
 
 
+def test_save_results_csv(tmp_path, hybrid_result):
+    path = io.save_results_csv(hybrid_result, tmp_path / "fields.csv")
+    lines = path.read_text().splitlines()
+    assert lines[0] == "x,y,pressure,flux,tof"
+    assert len(lines) - 1 == int(hybrid_result.grid.mask.sum())   # one row per active cell
+    assert len(lines[1].split(",")) == 5
+
+
+def test_save_results_vtk_is_valid_imagedata(tmp_path, hybrid_result):
+    import xml.etree.ElementTree as ET
+
+    path = io.save_results_vtk(hybrid_result, tmp_path / "fields.vti")
+    root = ET.fromstring(path.read_text())          # must be well-formed XML
+    assert root.attrib["type"] == "ImageData"
+    names = {da.attrib["Name"] for da in root.iter("DataArray")}
+    assert {"pressure", "flux", "tof", "active"} <= names
+    nx, ny = hybrid_result.pressure.shape
+    pressure = next(da for da in root.iter("DataArray") if da.attrib["Name"] == "pressure")
+    assert len(pressure.text.split()) == nx * ny    # one value per cell
+
+
 def test_save_results_npz(tmp_path, hybrid_result):
     path = io.save_results(hybrid_result, tmp_path / "result.npz")
     assert path.exists()

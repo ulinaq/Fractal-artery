@@ -100,6 +100,87 @@ def save_results(result: HybridResult, path: str | Path) -> Path:
     return path if path.suffix else path.with_suffix(".npz")
 
 
+def _cell_centres(nx: int, ny: int, domain_limit):
+    """Column-major (x-fastest) cell-centre coordinates over the domain window."""
+    xmin, xmax, ymin, ymax = domain_limit
+    xc = xmin + (np.arange(nx) + 0.5) * (xmax - xmin) / nx
+    yc = ymin + (np.arange(ny) + 0.5) * (ymax - ymin) / ny
+    x, y = np.meshgrid(xc, yc, indexing="ij")
+    return x, y
+
+
+def fields_to_csv(path: str | Path, domain_limit, *, pressure, flux, tof,
+                  mask=None) -> Path:
+    """Write the fields as a long-format CSV: one row per (active) cell.
+
+    Columns ``x,y,pressure,flux,tof`` at cell centres in the ``domain_limit``
+    frame. With ``mask`` given, only active cells are written (organ-shaped).
+    """
+    nx, ny = pressure.shape
+    x, y = _cell_centres(nx, ny, domain_limit)
+    cols = [x, y, pressure, flux, tof]
+    flat = np.column_stack([c.ravel(order="F") for c in cols])
+    if mask is not None:
+        flat = flat[np.asarray(mask, dtype=bool).ravel(order="F")]
+    path = Path(path)
+    np.savetxt(path, flat, delimiter=",", header="x,y,pressure,flux,tof",
+               comments="", fmt="%.6g")
+    return path
+
+
+def fields_to_vtk(path: str | Path, domain_limit, *, pressure, flux, tof,
+                  mask=None) -> Path:
+    """Write a VTK ImageData (``.vti``) file (ASCII) that opens in ParaView.
+
+    Fields become cell data on a uniform grid over ``domain_limit``; non-finite
+    values are zeroed and an ``active`` array (from ``mask``) marks the organ so
+    inactive cells can be thresholded out.
+    """
+    nx, ny = pressure.shape
+    xmin, _, ymin, _ = domain_limit
+    sx, sy = (domain_limit[1] - xmin) / nx, (domain_limit[3] - ymin) / ny
+    active = (np.ones((nx, ny), bool) if mask is None else np.asarray(mask, bool))
+
+    def _array(name, a, dtype="Float64"):
+        vals = np.nan_to_num(np.asarray(a, dtype=float), nan=0.0, posinf=0.0, neginf=0.0)
+        text = " ".join(f"{v:.6g}" for v in vals.ravel(order="F"))
+        return (f'        <DataArray type="{dtype}" Name="{name}" format="ascii">'
+                f"{text}</DataArray>")
+
+    body = "\n".join([
+        _array("pressure", pressure), _array("flux", flux), _array("tof", tof),
+        _array("active", active.astype(int), "Int32"),
+    ])
+    xml = (
+        '<?xml version="1.0"?>\n'
+        '<VTKFile type="ImageData" version="1.0" byte_order="LittleEndian">\n'
+        f'  <ImageData WholeExtent="0 {nx} 0 {ny} 0 1" '
+        f'Origin="{xmin} {ymin} 0" Spacing="{sx:.6g} {sy:.6g} 1">\n'
+        f'    <Piece Extent="0 {nx} 0 {ny} 0 1">\n'
+        '      <CellData Scalars="pressure">\n'
+        f"{body}\n"
+        "      </CellData>\n"
+        "    </Piece>\n"
+        "  </ImageData>\n"
+        "</VTKFile>\n"
+    )
+    path = Path(path)
+    path.write_text(xml)
+    return path
+
+
+def save_results_csv(result: HybridResult, path: str | Path) -> Path:
+    """Long-format CSV of a hybrid result's fields (see :func:`fields_to_csv`)."""
+    return fields_to_csv(path, result.domain_limit, pressure=result.pressure,
+                         flux=result.flux, tof=result.tof, mask=result.grid.mask)
+
+
+def save_results_vtk(result: HybridResult, path: str | Path) -> Path:
+    """VTK ImageData of a hybrid result's fields (see :func:`fields_to_vtk`)."""
+    return fields_to_vtk(path, result.domain_limit, pressure=result.pressure,
+                         flux=result.flux, tof=result.tof, mask=result.grid.mask)
+
+
 def save_network(net, path: str | Path) -> Path:
     """Serialise a :class:`~perfusion.core.geometry.Network` to a ``.npz`` file."""
     path = Path(path)

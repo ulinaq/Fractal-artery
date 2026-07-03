@@ -116,7 +116,14 @@
           <span id="flow-time" class="muted" hidden></span>
           <a id="flow-gif" class="ghost" hidden>↓ GIF</a>
         </div>
-        <button id="btn-export" class="ghost" disabled>Export .npz</button>
+        <span class="export">
+          <select id="export-fmt" title="export format">
+            <option value="npz">.npz</option>
+            <option value="csv">.csv</option>
+            <option value="vtk">.vti (ParaView)</option>
+          </select>
+          <button id="btn-export" class="ghost" disabled>Export</button>
+        </span>
       </div>
 
       <div class="canvas-wrap">
