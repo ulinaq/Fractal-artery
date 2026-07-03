@@ -48,7 +48,8 @@ uv run perfusion-api         # start the FastAPI back-end (http://127.0.0.1:8000
 2-D workspace (no Node/npm) at `http://127.0.0.1:8000/`: create a project, draw
 vessels, grow the arterial tree, run the simulation, and view the
 pressure/flux/time-of-flight field as a heatmap with the network overlaid.
-Projects are shareable by URL (`/?project=<id>`). Interactive API docs are at
+Projects are shareable by URL (`/?project=<id>`) and **persist across restarts**
+(SQLite + a blob store under `$PERFUSION_DATA`). Interactive API docs are at
 `/docs`. See [`frontend/`](frontend/README.md) for the UI.
 
 ### Back-end API

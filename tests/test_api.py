@@ -10,6 +10,7 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
 from perfusion.api.app import create_app
+from perfusion.api.store import ProjectStore
 
 SMALL_GRID = {"nx": 60, "ny": 70, "lx": 140, "ly": 160,
               "domain_limit": [-70, 70, 0, 160]}
@@ -17,8 +18,9 @@ FAST_PARAMS = {"r_min_frac": 0.5, "seed": 0}   # shallow tree -> quick solve
 
 
 @pytest.fixture
-def client():
-    return TestClient(create_app())
+def client(tmp_path):
+    # each test gets an isolated on-disk store under its tmp_path
+    return TestClient(create_app(store=ProjectStore(tmp_path)))
 
 
 def _wait_for_job(client, jid, timeout=30.0):
@@ -111,6 +113,27 @@ def test_frontend_is_served(client):
     assert "perfusion" in root.text.lower()
     assert client.get("/app.js").status_code == 200
     assert client.get("/style.css").status_code == 200
+
+
+def test_projects_persist_across_store_reopen(tmp_path):
+    # Run a project through one store instance...
+    c1 = TestClient(create_app(store=ProjectStore(tmp_path)))
+    pid = c1.post("/projects", json={"name": "persist", "grid": SMALL_GRID,
+                                     "params": FAST_PARAMS}).json()["id"]
+    c1.post(f"/projects/{pid}/grow", json={"n_points": 80, "step": 6.0})
+    jid = c1.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(c1, jid)["state"] == "done"
+
+    # ...then reopen a *fresh* store at the same location (simulates a restart).
+    c2 = TestClient(create_app(store=ProjectStore(tmp_path)))
+    info = c2.get(f"/projects/{pid}").json()
+    assert info["name"] == "persist"
+    assert info["has_result"] is True
+    assert info["has_vessels"] is False           # grown, not hand-drawn
+    assert c2.get(f"/projects/{pid}/results").json()["arterial_inflow"] > 0
+    assert tuple(c2.get(f"/projects/{pid}/results/field/pressure").json()["shape"]) == (60, 70)
+    assert len(c2.get(f"/projects/{pid}/network").json()["segments"]) > 0   # tree survived
+    assert any(p["id"] == pid for p in c2.get("/projects").json())
 
 
 def test_missing_project_and_result(client):

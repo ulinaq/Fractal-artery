@@ -97,3 +97,29 @@ def save_results(result: HybridResult, path: str | Path) -> Path:
         terminal_flux=result.solution.terminal_flux,
     )
     return path if path.suffix else path.with_suffix(".npz")
+
+
+def save_network(net, path: str | Path) -> Path:
+    """Serialise a :class:`~perfusion.core.geometry.Network` to a ``.npz`` file."""
+    path = Path(path)
+    np.savez(
+        path,
+        node_x=net.node_x, node_y=net.node_y, node_role=net.node_role,
+        seg_start=net.seg_start, seg_end=net.seg_end, seg_length=net.seg_length,
+        seg_radius=net.seg_radius, seg_angle=net.seg_angle,
+        root_node=np.asarray(net.root_node),
+    )
+    return path if path.suffix else path.with_suffix(".npz")
+
+
+def load_network(path: str | Path):
+    """Reconstruct a :class:`~perfusion.core.geometry.Network` saved by :func:`save_network`."""
+    from .core.geometry import Network
+
+    with np.load(path) as d:
+        return Network(
+            node_x=d["node_x"], node_y=d["node_y"], node_role=d["node_role"],
+            seg_start=d["seg_start"], seg_end=d["seg_end"], seg_length=d["seg_length"],
+            seg_radius=d["seg_radius"], seg_angle=d["seg_angle"],
+            root_node=int(d["root_node"]),
+        )
