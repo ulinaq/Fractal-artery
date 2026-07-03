@@ -33,6 +33,7 @@ This project uses [uv](https://docs.astral.sh/uv/) for dependency management.
 uv sync                      # core deps into .venv
 uv sync --extra image        # + imageio/scikit-image (for image segmentation)
 uv sync --extra api          # + fastapi/uvicorn/pydantic (for the web back-end)
+uv sync --extra mcp          # + the MCP SDK (to expose the engine as MCP tools)
 
 uv run pytest                # run the test suite
 uv run perfusion-tree        # Paper D: hybrid on a synthetic fractal tree
@@ -40,6 +41,7 @@ uv run perfusion-frog        # Paper A: hybrid on the frog-tongue domain
 uv run python -m perfusion.examples.tkm_demo   # Paper C: TKM comparison
 uv run python scripts/generate_data.py         # regenerate bundled datasets
 uv run perfusion-api         # start the FastAPI back-end (http://127.0.0.1:8000)
+uv run --extra mcp perfusion-mcp   # start the MCP server (stdio)
 ```
 
 ### Web app
@@ -83,6 +85,15 @@ uploaded vessel image),
 `projects/{id}/results[/field/{name}]`,
 `projects/{id}/network` (overlay geometry), `projects/{id}/tracer` (flow-video
 frames, job) + `tracer.gif`, `projects/{id}/export?fmt=npz|csv|vtk`.
+
+### MCP server
+
+`uv run --extra mcp perfusion-mcp` starts a [Model Context
+Protocol](https://modelcontextprotocol.io) server (stdio) that exposes the engine
+as tools — `run_simulation` and `describe_model` — so any MCP client (Claude
+Desktop, Claude Code, an agent) can drive the model. The bundled
+[`.mcp.json`](.mcp.json) registers it for Claude Code automatically when working
+in this repo.
 
 Example figures are written to `outputs/`.
 
@@ -162,6 +173,8 @@ fit = tkm.fit(t, ca, C, model="2CXM")             # recover Fp, vp, PS, ve
   reference explaining the concepts, equations and numerical methods, with a
   concept → equation → code map. Source: `docs/MODEL_REFERENCE.md` (rebuild the
   PDF with the pandoc → Chrome recipe in `CLAUDE.md`).
+- **[`docs/DEVELOPING.md`](docs/DEVELOPING.md)** — how to extend the platform: a
+  feature → files → pattern → tests map, conventions, and how to run the pieces.
 - **[`docs/ROADMAP.md`](docs/ROADMAP.md)** — the development plan: target
   architecture (FastAPI back-end + web front-end, hosted), feature roadmap
   (2-D → 3-D, vessel growth, larger systems), and the source layout.
@@ -187,7 +200,8 @@ src/perfusion/          # the package
   growth.py             # grow vessels into tissue (space colonisation)
   optimize.py           # vascular-structure optimisation objectives (Paper D)
   io.py, viz.py         # .mat/PNG loaders + result exporters, matplotlib helpers
-  api/                  # FastAPI back-end (Phase 1): projects, jobs, results
+  api/                  # FastAPI back-end: projects, jobs, results (extra: api)
+  mcp_server.py         # MCP server exposing the engine as tools (extra: mcp)
   examples/             # runnable drivers for Papers A/C/D
 tests/                  # pytest suite (physics sanity checks + API)
 data/                   # example assets (frog domain, segmented trees)

@@ -18,6 +18,7 @@ dependencies = [
 [project.optional-dependencies]
 image = ["imageio>=2.30", "scikit-image>=0.21"]
 api = ["fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2.5"]
+mcp = ["mcp>=1.0"]
 
 [dependency-groups]
 dev = [
@@ -30,6 +31,7 @@ dev = [
 perfusion-frog = "perfusion.examples.frog_hybrid:main"
 perfusion-tree = "perfusion.examples.tree_optimize:main"
 perfusion-api = "perfusion.api.app:main"
+perfusion-mcp = "perfusion.mcp_server:main"
 
 [build-system]
 requires = ["hatchling"]
