@@ -36,6 +36,7 @@ class Project:
     grid: GridIn
     arteries: list[Polyline] = field(default_factory=list)
     veins: list[Polyline] = field(default_factory=list)
+    regions: list = field(default_factory=list)  # tissue outline polygons
     artery_network: object | None = None  # grown perfusion.core.geometry.Network
     summary: dict | None = None
     has_result: bool = False              # set from blob existence on load
@@ -66,8 +67,12 @@ class ProjectStore:
                        id TEXT PRIMARY KEY, name TEXT NOT NULL,
                        params TEXT NOT NULL, grid TEXT NOT NULL,
                        arteries TEXT NOT NULL, veins TEXT NOT NULL,
-                       summary TEXT )"""
+                       regions TEXT NOT NULL DEFAULT '[]', summary TEXT )"""
             )
+            # migrate DBs created before `regions` existed
+            cols = {r["name"] for r in con.execute("PRAGMA table_info(projects)")}
+            if "regions" not in cols:
+                con.execute("ALTER TABLE projects ADD COLUMN regions TEXT NOT NULL DEFAULT '[]'")
 
     # -- connections / blob paths ------------------------------------------- #
     @contextmanager
@@ -96,6 +101,7 @@ class ProjectStore:
             grid=GridIn(**json.loads(row["grid"])),
             arteries=[Polyline(**d) for d in json.loads(row["arteries"])],
             veins=[Polyline(**d) for d in json.loads(row["veins"])],
+            regions=json.loads(row["regions"]) if row["regions"] else [],
             summary=json.loads(row["summary"]) if row["summary"] else None,
         )
         artery = self._artery_path(pid)
@@ -126,17 +132,20 @@ class ProjectStore:
         """Persist metadata + vessels, and sync the artery-network blob."""
         with self._lock, self._txn() as con:
             con.execute(
-                """INSERT INTO projects (id, name, params, grid, arteries, veins, summary)
-                       VALUES (:id, :name, :params, :grid, :arteries, :veins, :summary)
+                """INSERT INTO projects
+                       (id, name, params, grid, arteries, veins, regions, summary)
+                       VALUES (:id, :name, :params, :grid, :arteries, :veins,
+                               :regions, :summary)
                    ON CONFLICT(id) DO UPDATE SET
-                       name=:name, params=:params, grid=:grid,
-                       arteries=:arteries, veins=:veins, summary=:summary""",
+                       name=:name, params=:params, grid=:grid, arteries=:arteries,
+                       veins=:veins, regions=:regions, summary=:summary""",
                 {
                     "id": project.id, "name": project.name,
                     "params": project.params.model_dump_json(),
                     "grid": project.grid.model_dump_json(),
                     "arteries": json.dumps([p.model_dump() for p in project.arteries]),
                     "veins": json.dumps([p.model_dump() for p in project.veins]),
+                    "regions": json.dumps(project.regions),
                     "summary": json.dumps(project.summary) if project.summary else None,
                 },
             )

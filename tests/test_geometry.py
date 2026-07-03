@@ -9,6 +9,7 @@ from perfusion.core.geometry import (
     NodeRole,
     grow_tree,
     network_from_polylines,
+    rasterize_mask,
 )
 
 
@@ -114,3 +115,19 @@ def test_arterial_and_venous_trees(params):
     assert art.terminal_nodes.size >= 2
     # root is excluded from the terminal set
     assert art.root_node not in art.terminal_nodes
+
+
+def test_rasterize_mask_matches_a_polygon():
+    # a centred square covering [2,8] x [2,8] of a 10x10 domain, 2 cells / unit
+    m = rasterize_mask(20, 20, (0, 10, 0, 10), [[(2, 2), (8, 2), (8, 8), (2, 8)]])
+    assert m.dtype == bool
+    assert m.shape == (20, 20)
+    assert m[10, 10]        # centre is inside
+    assert not m[0, 0]      # corners are outside
+    assert not m[19, 19]
+    assert m.sum() == 12 * 12    # 6x6 domain units at 2 cells/unit
+
+
+def test_rasterize_mask_empty_is_all_active():
+    assert rasterize_mask(4, 5, (0, 1, 0, 1), []).shape == (4, 5)
+    assert rasterize_mask(4, 5, (0, 1, 0, 1), []).all()

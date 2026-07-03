@@ -115,11 +115,28 @@ def test_frontend_is_served(client):
     assert client.get("/style.css").status_code == 200
 
 
+def test_mask_makes_the_solved_domain_organ_shaped(client):
+    pid = client.post("/projects", json={"name": "mask", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    # a polygon inside the (-70,70,0,160) domain that clips its borders
+    region = [[-60, 8], [60, 8], [60, 150], [-60, 150]]
+    assert client.put(f"/projects/{pid}/mask", json={"regions": [region]}).json()["has_mask"]
+    assert client.get(f"/projects/{pid}/mask").json()["regions"]
+
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    flat = [v for row in client.get(f"/projects/{pid}/results/field/pressure").json()["data"]
+            for v in row]
+    assert any(v is None for v in flat)       # border cells are inactive (masked out)
+    assert any(v is not None for v in flat)   # the organ interior is solved
+
+
 def test_projects_persist_across_store_reopen(tmp_path):
-    # Run a project through one store instance...
+    # Run a project (with a hand-drawn tissue mask) through one store instance...
     c1 = TestClient(create_app(store=ProjectStore(tmp_path)))
     pid = c1.post("/projects", json={"name": "persist", "grid": SMALL_GRID,
                                      "params": FAST_PARAMS}).json()["id"]
+    c1.put(f"/projects/{pid}/mask", json={"regions": [[[-60, 8], [60, 8], [60, 150], [-60, 150]]]})
     c1.post(f"/projects/{pid}/grow", json={"n_points": 80, "step": 6.0})
     jid = c1.post(f"/projects/{pid}/run", json={}).json()["id"]
     assert _wait_for_job(c1, jid)["state"] == "done"
@@ -129,7 +146,9 @@ def test_projects_persist_across_store_reopen(tmp_path):
     info = c2.get(f"/projects/{pid}").json()
     assert info["name"] == "persist"
     assert info["has_result"] is True
+    assert info["has_mask"] is True               # tissue outline survived
     assert info["has_vessels"] is False           # grown, not hand-drawn
+    assert c2.get(f"/projects/{pid}/mask").json()["regions"]
     assert c2.get(f"/projects/{pid}/results").json()["arterial_inflow"] > 0
     assert tuple(c2.get(f"/projects/{pid}/results/field/pressure").json()["shape"]) == (60, 70)
     assert len(c2.get(f"/projects/{pid}/network").json()["segments"]) > 0   # tree survived

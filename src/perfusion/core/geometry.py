@@ -308,3 +308,45 @@ def venous_tree(prm) -> Network:
     return grow_tree(prm.v_init, prm.v_theta, prm.rv0, prm.rv_min,
                      prm.length_to_radius, prm.vphi, prm.vratio,
                      mirror_children=False)
+
+
+def _points_in_polygon(px: np.ndarray, py: np.ndarray, polygon) -> np.ndarray:
+    """Even-odd ray-casting test, vectorised over the query points ``(px, py)``."""
+    poly = np.asarray(polygon, dtype=float)
+    if poly.shape[0] < 3:
+        return np.zeros(px.shape, dtype=bool)
+    x, y = poly[:, 0], poly[:, 1]
+    inside = np.zeros(px.shape, dtype=bool)
+    j = poly.shape[0] - 1
+    for i in range(poly.shape[0]):
+        crosses = (y[i] > py) != (y[j] > py)
+        # x-coordinate of the edge at height py (guard against a horizontal edge)
+        x_at = (x[j] - x[i]) * (py - y[i]) / (y[j] - y[i] + 1e-30) + x[i]
+        inside ^= crosses & (px < x_at)
+        j = i
+    return inside
+
+
+def rasterize_mask(nx: int, ny: int,
+                   domain_limit: tuple[float, float, float, float],
+                   polygons) -> np.ndarray:
+    """Rasterise tissue outline ``polygons`` onto a ``(nx, ny)`` grid mask.
+
+    Each polygon is a list of ``(x, y)`` vertices in the ``domain_limit``
+    (``xmin, xmax, ymin, ymax``) frame; a cell is active if its centre lies
+    inside the union of the polygons. With no polygons the whole grid is active
+    (the bounding-box default). Cell centres match the grid convention used by
+    ``run_hybrid`` (``lx = xmax - xmin``), so the mask aligns with the network
+    coordinates.
+    """
+    if not polygons:
+        return np.ones((nx, ny), dtype=bool)
+    xmin, xmax, ymin, ymax = domain_limit
+    xc = xmin + (np.arange(nx) + 0.5) * (xmax - xmin) / nx
+    yc = ymin + (np.arange(ny) + 0.5) * (ymax - ymin) / ny
+    gx, gy = np.meshgrid(xc, yc, indexing="ij")   # (nx, ny), column-major friendly
+    px, py = gx.ravel(), gy.ravel()
+    inside = np.zeros(px.shape, dtype=bool)
+    for poly in polygons:
+        inside |= _points_in_polygon(px, py, poly)
+    return inside.reshape(nx, ny)

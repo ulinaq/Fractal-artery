@@ -20,6 +20,9 @@ no separate dev server.
 - **Project** — create a project (name, parameters, grid).
 - **Draw vessels** — sketch arteries/veins on the canvas; each stroke is one
   segment, shared endpoints snap into branches (`PUT /projects/{id}/vessels`).
+- **Draw tissue** — outline the organ in Tissue mode; the polygons become
+  `Grid.mask`, so the Darcy bed and growth are organ-shaped
+  (`PUT /projects/{id}/mask`).
 - **Grow** — grow the arterial tree into the tissue by space colonisation
   (`POST /projects/{id}/grow`); the grown tree is overlaid on the result.
 - **Run** — solve the hybrid model as an async job (`POST …/run` + poll
