@@ -107,6 +107,39 @@ def test_grow_then_run(client):
     assert client.get(f"/projects/{pid}/results").json()["arterial_inflow"] > 0
 
 
+def test_tracer_animation(client):
+    pid = client.post("/projects", json={"name": "flow", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    jid = client.post(f"/projects/{pid}/tracer", json={"n_frames": 16}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    assert client.get(f"/projects/{pid}").json()["has_tracer"] is True
+
+    info = client.get(f"/projects/{pid}/tracer").json()
+    assert info["n_frames"] == 16
+    assert len(info["frames"]) == 16
+    assert len(info["times"]) == 16
+    assert tuple(info["shape"]) == (60, 70)
+    # the bolus builds up: the peak per-frame concentration is not in the first frame
+    def frame_peak(f):
+        return max((v for row in f for v in row if v is not None), default=0.0)
+
+    peaks = [frame_peak(f) for f in info["frames"]]
+    assert max(peaks) > 0
+    assert peaks.index(max(peaks)) > 0
+
+
+def test_tracer_gif_export(client):
+    pytest.importorskip("imageio")
+    pid = client.post("/projects", json={"name": "gif", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    jid = client.post(f"/projects/{pid}/tracer", json={"n_frames": 8}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    gif = client.get(f"/projects/{pid}/tracer.gif")
+    assert gif.status_code == 200
+    assert gif.headers["content-type"] == "image/gif"
+    assert gif.content[:6] in (b"GIF87a", b"GIF89a")
+
+
 def test_frontend_is_served(client):
     root = client.get("/")
     assert root.status_code == 200
