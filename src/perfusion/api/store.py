@@ -42,6 +42,8 @@ class Project:
     arteries: list[Polyline] = field(default_factory=list)
     veins: list[Polyline] = field(default_factory=list)
     regions: list = field(default_factory=list)  # tissue outline polygons
+    inlets: list = field(default_factory=list)    # arterial inlet points (p_in)
+    outlets: list = field(default_factory=list)   # venous outlet points (p_out)
     artery_network: object | None = None  # grown/segmented perfusion.core.geometry.Network
     vein_network: object | None = None    # segmented venous network
     summary: dict | None = None
@@ -74,7 +76,9 @@ class ProjectStore:
                        id TEXT PRIMARY KEY, name TEXT NOT NULL,
                        params TEXT NOT NULL, grid TEXT NOT NULL,
                        arteries TEXT NOT NULL, veins TEXT NOT NULL,
-                       regions TEXT NOT NULL DEFAULT '[]', summary TEXT )"""
+                       regions TEXT NOT NULL DEFAULT '[]',
+                       inlets TEXT NOT NULL DEFAULT '[]',
+                       outlets TEXT NOT NULL DEFAULT '[]', summary TEXT )"""
             )
             con.execute(
                 """CREATE TABLE IF NOT EXISTS jobs (
@@ -82,10 +86,11 @@ class ProjectStore:
                        kind TEXT NOT NULL, state TEXT NOT NULL, error TEXT,
                        created_at TEXT NOT NULL, updated_at TEXT NOT NULL )"""
             )
-            # migrate DBs created before `regions` existed
+            # migrate DBs created before these columns existed
             cols = {r["name"] for r in con.execute("PRAGMA table_info(projects)")}
-            if "regions" not in cols:
-                con.execute("ALTER TABLE projects ADD COLUMN regions TEXT NOT NULL DEFAULT '[]'")
+            for col in ("regions", "inlets", "outlets"):
+                if col not in cols:
+                    con.execute(f"ALTER TABLE projects ADD COLUMN {col} TEXT NOT NULL DEFAULT '[]'")
             # a restart killed any in-flight jobs -> mark them interrupted
             con.execute("UPDATE jobs SET state='interrupted', updated_at=? "
                         "WHERE state IN ('pending','running')", (_now(),))
@@ -124,6 +129,8 @@ class ProjectStore:
             arteries=[Polyline(**d) for d in json.loads(row["arteries"])],
             veins=[Polyline(**d) for d in json.loads(row["veins"])],
             regions=json.loads(row["regions"]) if row["regions"] else [],
+            inlets=json.loads(row["inlets"]) if row["inlets"] else [],
+            outlets=json.loads(row["outlets"]) if row["outlets"] else [],
             summary=json.loads(row["summary"]) if row["summary"] else None,
         )
         artery = self._artery_path(pid)
@@ -159,12 +166,14 @@ class ProjectStore:
         with self._lock, self._txn() as con:
             con.execute(
                 """INSERT INTO projects
-                       (id, name, params, grid, arteries, veins, regions, summary)
+                       (id, name, params, grid, arteries, veins, regions,
+                        inlets, outlets, summary)
                        VALUES (:id, :name, :params, :grid, :arteries, :veins,
-                               :regions, :summary)
+                               :regions, :inlets, :outlets, :summary)
                    ON CONFLICT(id) DO UPDATE SET
                        name=:name, params=:params, grid=:grid, arteries=:arteries,
-                       veins=:veins, regions=:regions, summary=:summary""",
+                       veins=:veins, regions=:regions, inlets=:inlets,
+                       outlets=:outlets, summary=:summary""",
                 {
                     "id": project.id, "name": project.name,
                     "params": project.params.model_dump_json(),
@@ -172,6 +181,8 @@ class ProjectStore:
                     "arteries": json.dumps([p.model_dump() for p in project.arteries]),
                     "veins": json.dumps([p.model_dump() for p in project.veins]),
                     "regions": json.dumps(project.regions),
+                    "inlets": json.dumps(project.inlets),
+                    "outlets": json.dumps(project.outlets),
                     "summary": json.dumps(project.summary) if project.summary else None,
                 },
             )

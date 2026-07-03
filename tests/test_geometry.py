@@ -1,5 +1,7 @@
 """Tests for the vascular network representation and fractal-tree growth."""
 
+import dataclasses
+
 import numpy as np
 import pytest
 
@@ -126,6 +128,25 @@ def test_rasterize_mask_matches_a_polygon():
     assert not m[0, 0]      # corners are outside
     assert not m[19, 19]
     assert m.sum() == 12 * 12    # 6x6 domain units at 2 cells/unit
+
+
+def test_inlets_and_degree_based_terminals():
+    # a Y: root at (0,0) is a leaf; two other leaf tips.
+    net = network_from_polylines(
+        [[(0, 0), (0, 10)], [(0, 10), (-5, 20)], [(0, 10), (5, 20)]],
+        radii=1.0, root_xy=(0, 0))
+    # default: the root is the sole inlet, the other two leaves are Darcy terminals
+    assert net.inlet_nodes.tolist() == [net.root_node]
+    assert net.root_node not in net.terminal_nodes.tolist()
+    assert len(net.terminal_nodes) == 2
+
+    tip = int(net.terminal_nodes[0])
+    net2 = dataclasses.replace(net, inlet_nodes=np.array([net.root_node, tip]))
+    assert tip not in net2.terminal_nodes.tolist()      # a marked inlet leaves the set
+    assert len(net2.terminal_nodes) == 1
+
+    net3 = dataclasses.replace(net, inlet_nodes=np.array([tip]))
+    assert net.root_node in net3.terminal_nodes.tolist()  # non-inlet root -> terminal
 
 
 def test_rasterize_mask_empty_is_all_active():

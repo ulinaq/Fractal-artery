@@ -115,11 +115,13 @@ def _coupling_and_balance(lay: _Layout, response: np.ndarray,
 
 def _network_blocks(net: Network, R: np.ndarray, lay: _Layout,
                     is_arterial: bool):
-    """Root-pressure, Poiseuille and conservation rows for one tree.
+    """Boundary-pressure, Poiseuille and conservation rows for one tree.
 
-    Returns ``(root_row, poiseuille, conservation)`` sparse blocks of width
-    ``lay.size``. The venous Poiseuille uses ``-S`` (flow positive toward the
-    root); conservation is ``S.T`` restricted to bifurcation nodes for both.
+    Returns ``(dirichlet, poiseuille, conservation)`` sparse blocks of width
+    ``lay.size``. ``dirichlet`` has one row per inlet/outlet node (``p = p_in`` /
+    ``p_out``), so any number of prescribed-pressure boundary nodes is supported.
+    The venous Poiseuille uses ``-S`` (flow positive toward the root);
+    conservation is ``S.T`` restricted to bifurcation nodes for both.
     """
     S = net.incidence()
     m, n = net.n_segments, net.n_nodes
@@ -131,14 +133,17 @@ def _network_blocks(net: Network, R: np.ndarray, lay: _Layout,
                           sp.csr_matrix((block.shape[0], lay.size - col_off - width))],
                          format="csr")
 
-    root = sp.csr_matrix(([1.0], ([0], [p_off + net.root_node])), shape=(1, lay.size))
+    inlets = net.inlet_nodes
+    k = len(inlets)
+    dirichlet = sp.csr_matrix((np.ones(k), (np.arange(k), p_off + inlets)),
+                              shape=(k, lay.size))
 
     sign = 1.0 if is_arterial else -1.0
     pois = pad(sign * S, p_off, n) + pad(-sp.diags(R), q_off, m)
 
     cons_full = S.T.tocsr()[net.bifurcation_nodes, :]
     cons = pad(cons_full, q_off, m)
-    return root, pois, cons
+    return dirichlet, pois, cons
 
 
 @dataclass
@@ -160,19 +165,21 @@ def _assemble(art: Network, ven: Network, response: np.ndarray, p_in: float,
     lay = _Layout(art, ven)
     columns, signs, ta, tv = lay.terminal_flux_columns()
 
-    root_a, pois_a, cons_a = _network_blocks(art, Ra, lay, is_arterial=True)
-    root_v, pois_v, cons_v = _network_blocks(ven, Rv, lay, is_arterial=False)
+    dir_a, pois_a, cons_a = _network_blocks(art, Ra, lay, is_arterial=True)
+    dir_v, pois_v, cons_v = _network_blocks(ven, Rv, lay, is_arterial=False)
     coupling, balance = _coupling_and_balance(lay, response, columns, signs, ta, tv)
 
-    A = sp.vstack([root_a, pois_a, cons_a, root_v, pois_v, cons_v, coupling, balance],
+    A = sp.vstack([dir_a, pois_a, cons_a, dir_v, pois_v, cons_v, coupling, balance],
                   format="csr")
     b = np.zeros(lay.size)
+    ka, kv = art.inlet_nodes.size, ven.inlet_nodes.size
     nbif_a = len(art.bifurcation_nodes)
-    b[0] = p_in                                   # root_a is the first row
-    b[1 + lay.ma + nbif_a] = p_out                # root_v row offset
+    b[:ka] = p_in                                 # dir_a: one row per arterial inlet
+    v_dir = ka + lay.ma + nbif_a                  # start of the venous Dirichlet block
+    b[v_dir:v_dir + kv] = p_out                   # dir_v: one row per venous outlet
 
-    pois_a_rows = slice(1, 1 + lay.ma)
-    v0 = 1 + lay.ma + nbif_a + 1
+    pois_a_rows = slice(ka, ka + lay.ma)
+    v0 = v_dir + kv
     pois_v_rows = slice(v0, v0 + lay.mv)
     return _System(A, b, lay, columns, signs, pois_a_rows, pois_v_rows)
 

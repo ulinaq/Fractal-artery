@@ -67,6 +67,12 @@ network with resistive links instead of a porous bed.
 - **Network arrays are 0-based** (MATLAB was 1-based). `seg_start`/`seg_end` hold
   node indices; `incoming_segment[node]` is the feeding segment (−1 at the root);
   `node_role` uses the `NodeRole` enum (ROOT / BIFURCATION / TERMINAL).
+- **Node classification is by degree, not role.** `terminal_nodes` = degree-1
+  leaves minus `inlet_nodes`; `bifurcation_nodes` = degree≥2 interior minus
+  `inlet_nodes`. `Network.inlet_nodes` (default `[root_node]`) is the set of
+  prescribed-pressure boundary nodes — so any leaf can be an inlet/outlet and the
+  BFS root, if *not* marked, correctly becomes a Darcy terminal. Don't reintroduce
+  role-based (`role==TERMINAL`) classification — it strands the root.
 - **Incidence-matrix assembly**: Poiseuille and mass conservation are built from
   the signed segment-node incidence `Network.incidence()` (`S`), not per-node
   loops. `(S @ p)[s] = p_start − p_end`; `(S.T @ q)[node]` is net outflow. Both
@@ -76,10 +82,11 @@ network with resistive links instead of a porous bed.
   venous Poiseuille row is `−(S @ p_v)[s] − R q = 0` (i.e. `p_v[end] − p_v[start] = R q`).
 - **Shared upwind connectivity**: `darcy.upwind_operator` returns the net-inflow
   operator + per-cell outflow; both `timeofflight` and `transport` build on it.
-- **Boundary conditions**: Dirichlet `p_in` (arterial root) and `p_out` (venous
-  root). The Darcy operator is singular; one cell is pinned and terminal fluxes
-  are rebalanced (`reconstruct_field(balance=True)`) so the pin carries no net
-  flux.
+- **Boundary conditions**: Dirichlet `p_in` at the arterial `inlet_nodes` and
+  `p_out` at the venous outlet nodes (one row per node, so multiple inlets/outlets
+  are supported; `run_hybrid(art_inlets=, ven_outlets=)`). The Darcy operator is
+  singular; one cell is pinned and terminal fluxes are rebalanced
+  (`reconstruct_field(balance=True)`) so the pin carries no net flux.
 - **Thesis equation numbers** are cited in docstrings — preserve them when
   editing so the code stays traceable to the source.
 

@@ -241,6 +241,42 @@ def test_stale_jobs_are_reaped_on_restart(tmp_path):
     assert reopened.get_job("stuck")["state"] == "interrupted"
 
 
+def test_multiple_inlets_and_outlets(client):
+    G = {"nx": 60, "ny": 70, "lx": 100, "ly": 120, "domain_limit": [0, 100, 0, 120]}
+    pid = client.post("/projects", json={"name": "io", "grid": G,
+                                         "params": FAST_PARAMS}).json()["id"]
+    vessels = {
+        "arteries": [{"points": p, "radius": 2.0} for p in
+                     ([[50, 5], [50, 30]], [[50, 30], [20, 60]],
+                      [[50, 30], [50, 65]], [[50, 30], [80, 60]])],
+        "veins": [{"points": p, "radius": 2.0} for p in
+                  ([[50, 115], [50, 90]], [[50, 90], [20, 60]],
+                   [[50, 90], [50, 55]], [[50, 90], [80, 60]])],
+    }
+    client.put(f"/projects/{pid}/vessels", json=vessels)
+    # two arterial inlets, two venous outlets
+    assert client.put(f"/projects/{pid}/io",
+                      json={"inlets": [[20, 60], [80, 60]],
+                            "outlets": [[20, 60], [50, 55]]}).status_code == 200
+    assert len(client.get(f"/projects/{pid}/io").json()["inlets"]) == 2
+
+    jid = client.post(f"/projects/{pid}/run", json={"use_vessels": True}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    summary = client.get(f"/projects/{pid}/results").json()
+    assert summary["arterial_inflow"] > 0
+    assert summary["arterial_inflow"] == pytest.approx(summary["venous_outflow"], rel=1e-6)
+
+
+def test_io_points_persist_across_store_reopen(tmp_path):
+    c1 = TestClient(create_app(store=ProjectStore(tmp_path)))
+    pid = c1.post("/projects", json={"name": "io", "grid": SMALL_GRID}).json()["id"]
+    c1.put(f"/projects/{pid}/io", json={"inlets": [[0, 80], [10, 90]], "outlets": [[0, 20]]})
+    c2 = TestClient(create_app(store=ProjectStore(tmp_path)))
+    io = c2.get(f"/projects/{pid}/io").json()
+    assert io["inlets"] == [[0, 80], [10, 90]]
+    assert io["outlets"] == [[0, 20]]
+
+
 def test_frontend_is_served(client):
     root = client.get("/")
     assert root.status_code == 200
