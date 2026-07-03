@@ -114,7 +114,7 @@ def create_app(store: ProjectStore | None = None,
     from .. import __version__
 
     store = store or ProjectStore()
-    jobs = jobs or JobManager()
+    jobs = jobs or JobManager(store)
     app = FastAPI(title="perfusion API", version=__version__,
                   summary="Multiscale blood-flow & perfusion modelling service")
 
@@ -227,18 +227,19 @@ def create_app(store: ProjectStore | None = None,
     def run_project(pid: str, body: RunRequest | None = None) -> JobInfo:
         project = _project(pid)
         req = body or RunRequest()
-        jid = jobs.submit(lambda: _run_project(store, project, req), project.id)
-        state = jobs.get(jid)
-        return JobInfo(id=jid, state=state["state"], error=state["error"],
-                       project_id=project.id)
+        jid = jobs.submit(lambda: _run_project(store, project, req), project.id, kind="run")
+        return JobInfo(**jobs.get(jid))
+
+    @app.get("/jobs", response_model=list[JobInfo])
+    def list_jobs(project_id: str | None = None) -> list[JobInfo]:
+        return [JobInfo(**j) for j in store.list_jobs(project_id=project_id)]
 
     @app.get("/jobs/{jid}", response_model=JobInfo)
     def job_status(jid: str) -> JobInfo:
         try:
-            state = jobs.get(jid)
+            return JobInfo(**jobs.get(jid))
         except KeyError:
             raise HTTPException(404, f"job {jid!r} not found") from None
-        return JobInfo(id=jid, **state)
 
     @app.get("/projects/{pid}/results")
     def results(pid: str) -> dict:
@@ -299,10 +300,8 @@ def create_app(store: ProjectStore | None = None,
     def run_tracer(pid: str, body: TracerRequest | None = None) -> JobInfo:
         project = _project(pid)
         req = body or TracerRequest()
-        jid = jobs.submit(lambda: _run_tracer(store, project, req), project.id)
-        state = jobs.get(jid)
-        return JobInfo(id=jid, state=state["state"], error=state["error"],
-                       project_id=project.id)
+        jid = jobs.submit(lambda: _run_tracer(store, project, req), project.id, kind="tracer")
+        return JobInfo(**jobs.get(jid))
 
     @app.get("/projects/{pid}/tracer", response_model=TracerInfo)
     def tracer_frames(pid: str) -> TracerInfo:

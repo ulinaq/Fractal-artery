@@ -196,6 +196,33 @@ def test_image_upload_rejects_bad_payload(client):
                        params={"kind": "bogus"}).status_code == 422
 
 
+def test_jobs_are_listed_and_persist(tmp_path):
+    c1 = TestClient(create_app(store=ProjectStore(tmp_path)))
+    pid = c1.post("/projects", json={"name": "jobs", "grid": SMALL_GRID,
+                                     "params": FAST_PARAMS}).json()["id"]
+    jid = c1.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(c1, jid)["state"] == "done"
+
+    listed = c1.get("/jobs").json()
+    assert any(j["id"] == jid and j["kind"] == "run" for j in listed)
+    assert c1.get(f"/jobs?project_id={pid}").json()[0]["id"] == jid
+
+    # a finished job survives a "restart" (fresh store at the same location)
+    c2 = TestClient(create_app(store=ProjectStore(tmp_path)))
+    job = c2.get(f"/jobs/{jid}").json()
+    assert job["state"] == "done"
+    assert job["created_at"]
+    assert job["updated_at"]
+
+
+def test_stale_jobs_are_reaped_on_restart(tmp_path):
+    store = ProjectStore(tmp_path)
+    store.create_job("stuck", "p1", "run", state="running")   # never finished
+    # reopening the store (a restart) marks in-flight jobs interrupted
+    reopened = ProjectStore(tmp_path)
+    assert reopened.get_job("stuck")["state"] == "interrupted"
+
+
 def test_frontend_is_served(client):
     root = client.get("/")
     assert root.status_code == 200

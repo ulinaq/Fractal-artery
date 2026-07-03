@@ -116,9 +116,12 @@ class TracerInfo(BaseModel):
 
 class JobInfo(BaseModel):
     id: str
-    state: str                 # pending | running | done | error
+    state: str                 # pending | running | done | error | interrupted
     project_id: str
     error: str | None = None
+    kind: str | None = None    # run | tracer
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class FieldResponse(BaseModel):

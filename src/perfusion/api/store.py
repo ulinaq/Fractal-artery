@@ -19,6 +19,7 @@ import tempfile
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 
@@ -26,6 +27,10 @@ import numpy as np
 
 from .. import io
 from .schemas import GridIn, ParametersIn, Polyline
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 @dataclass
@@ -71,10 +76,19 @@ class ProjectStore:
                        arteries TEXT NOT NULL, veins TEXT NOT NULL,
                        regions TEXT NOT NULL DEFAULT '[]', summary TEXT )"""
             )
+            con.execute(
+                """CREATE TABLE IF NOT EXISTS jobs (
+                       id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
+                       kind TEXT NOT NULL, state TEXT NOT NULL, error TEXT,
+                       created_at TEXT NOT NULL, updated_at TEXT NOT NULL )"""
+            )
             # migrate DBs created before `regions` existed
             cols = {r["name"] for r in con.execute("PRAGMA table_info(projects)")}
             if "regions" not in cols:
                 con.execute("ALTER TABLE projects ADD COLUMN regions TEXT NOT NULL DEFAULT '[]'")
+            # a restart killed any in-flight jobs -> mark them interrupted
+            con.execute("UPDATE jobs SET state='interrupted', updated_at=? "
+                        "WHERE state IN ('pending','running')", (_now(),))
 
     # -- connections / blob paths ------------------------------------------- #
     @contextmanager
@@ -201,3 +215,35 @@ class ProjectStore:
         """Load the tracer blob (frames, times, vmax, mask) as a dict of arrays."""
         with np.load(self.tracer_path(pid)) as data:
             return {k: data[k] for k in data.files}
+
+    # -- jobs (durable registry) -------------------------------------------- #
+    def create_job(self, jid: str, project_id: str, kind: str,
+                   state: str = "pending") -> None:
+        now = _now()
+        with self._lock, self._txn() as con:
+            con.execute(
+                """INSERT INTO jobs (id, project_id, kind, state, error,
+                                     created_at, updated_at)
+                       VALUES (?, ?, ?, ?, NULL, ?, ?)""",
+                (jid, project_id, kind, state, now, now),
+            )
+
+    def set_job_state(self, jid: str, state: str, error: str | None = None) -> None:
+        with self._lock, self._txn() as con:
+            con.execute("UPDATE jobs SET state=?, error=?, updated_at=? WHERE id=?",
+                        (state, error, _now(), jid))
+
+    def get_job(self, jid: str) -> dict | None:
+        with self._txn() as con:
+            row = con.execute("SELECT * FROM jobs WHERE id=?", (jid,)).fetchone()
+        return dict(row) if row is not None else None
+
+    def list_jobs(self, project_id: str | None = None, limit: int = 100) -> list[dict]:
+        query = "SELECT * FROM jobs"
+        params: tuple = ()
+        if project_id is not None:
+            query += " WHERE project_id=?"
+            params = (project_id,)
+        query += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
+        with self._txn() as con:
+            return [dict(r) for r in con.execute(query, (*params, limit)).fetchall()]
