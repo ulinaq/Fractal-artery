@@ -44,6 +44,11 @@ imports use `perfusion.core.*`.
   (`run_simulation`, `describe_model`) — run with `uv run --extra mcp perfusion-mcp`;
   the repo's `.mcp.json` registers it for Claude Code. Tool logic lives in plain
   functions (`simulate`, `model_info`); the `@server.tool()` wrappers are thin.
+- **Expose new capabilities as MCP tools.** When you add a user-facing feature
+  (a new solve/analysis mode, growth method, exporter, etc.), also surface it as
+  an MCP tool in `mcp_server.py` — keep the logic in a plain, testable function
+  and add a thin `@server.tool()` wrapper — so any AI client can use it too. Treat
+  "is it in MCP?" as part of done for new features.
 - **New-contributor / extension guide**: `docs/DEVELOPING.md` (feature → files →
   pattern → tests map).
 

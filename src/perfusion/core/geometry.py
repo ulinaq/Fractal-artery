@@ -88,6 +88,32 @@ class Network:
         interior[self.inlet_nodes] = False
         return np.flatnonzero(interior)
 
+    def node_components(self) -> np.ndarray:
+        """Connected-component label per node (over the segment graph).
+
+        Lets callers verify each separate feeding tree has its own inlet; a
+        component with no prescribed-pressure node gives a singular block.
+        """
+        adjacency: dict[int, list[int]] = {}
+        for a, b in zip(self.seg_start, self.seg_end, strict=True):
+            adjacency.setdefault(int(a), []).append(int(b))
+            adjacency.setdefault(int(b), []).append(int(a))
+        label = np.full(self.n_nodes, -1, dtype=int)
+        current = 0
+        for start in range(self.n_nodes):
+            if label[start] >= 0:
+                continue
+            label[start] = current
+            stack = [start]
+            while stack:
+                u = stack.pop()
+                for v in adjacency.get(u, ()):
+                    if label[v] < 0:
+                        label[v] = current
+                        stack.append(v)
+            current += 1
+        return label
+
     def resistance(self, viscosity: float | np.ndarray) -> np.ndarray:
         """Poiseuille hydraulic resistance per segment, R = 8 mu L / (pi r^4)."""
         return 8.0 * viscosity * self.seg_length / (np.pi * self.seg_radius**4)
@@ -213,11 +239,15 @@ def network_from_edges(node_x, node_y, edges, *, root: int | None = None,
     """Assemble a rooted :class:`Network` from a node list and edge list.
 
     ``edges`` is a list of ``(node_a, node_b, length, radius)``. Edges are
-    oriented away from the root by a breadth-first search, node roles are set by
-    degree (1 -> TERMINAL, >=2 -> BIFURCATION, root -> ROOT), and the root is
+    oriented away from a root by a breadth-first search and node roles are set by
+    degree (1 -> TERMINAL, >=2 -> BIFURCATION, root -> ROOT). The primary root is
     chosen as ``root`` if given, else the node nearest ``root_xy``, else the
-    thickest leaf (by ``node_radius``). The input must be a single connected
-    component.
+    thickest leaf (by ``node_radius``).
+
+    **Multiple connected components are supported**: each component is oriented
+    from its own root (thickest leaf, or the primary root for the component that
+    contains it), and every component root is added to ``inlet_nodes`` so the
+    result is solvable (each separate feeding tree gets its own inlet).
     """
     node_x = np.asarray(node_x, dtype=float)
     node_y = np.asarray(node_y, dtype=float)
@@ -243,14 +273,42 @@ def network_from_edges(node_x, node_y, edges, *, root: int | None = None,
             else:
                 root = 0
 
-    order = {root: 0}
-    queue = deque([root])
-    while queue:
-        u = queue.popleft()
-        for v, _ in adjacency.get(u, ()):
-            if v not in order:
-                order[v] = len(order)
-                queue.append(v)
+    def _component_root(comp: list[int]) -> int:
+        """Pick the root for one component: the primary root if it is in here,
+        else the thickest leaf, else the first node."""
+        if root in comp:
+            return root
+        leaves = [u for u in comp if degree[u] == 1]
+        if leaves and node_radius is not None:
+            rad = np.asarray(node_radius)
+            return int(max(leaves, key=lambda u: rad[u]))
+        return int(leaves[0]) if leaves else int(min(comp))
+
+    # BFS-orient each connected component from its own root; collect the roots.
+    order: dict[int, int] = {}
+    roots: list[int] = []
+    for seed in [root, *range(n)]:                     # primary component first
+        if seed in order or seed >= n:
+            continue
+        comp, stack = [], [seed]                        # gather this component
+        seen = {seed}
+        while stack:
+            u = stack.pop()
+            comp.append(u)
+            for v, _ in adjacency.get(u, ()):
+                if v not in seen:
+                    seen.add(v)
+                    stack.append(v)
+        r = _component_root(comp)
+        roots.append(r)
+        order[r] = len(order)                           # BFS order from the root
+        queue = deque([r])
+        while queue:
+            u = queue.popleft()
+            for v, _ in adjacency.get(u, ()):
+                if v not in order:
+                    order[v] = len(order)
+                    queue.append(v)
 
     seg_start, seg_end, seg_len, seg_rad, seg_theta = [], [], [], [], []
     for a, b, length, radius in edges:
@@ -262,7 +320,7 @@ def network_from_edges(node_x, node_y, edges, *, root: int | None = None,
         seg_theta.append(np.arctan2(node_y[v] - node_y[u], node_x[v] - node_x[u]))
 
     role = np.where(degree == 1, NodeRole.TERMINAL, NodeRole.BIFURCATION)
-    role[root] = NodeRole.ROOT
+    role[roots] = NodeRole.ROOT
     return Network(
         node_x=node_x, node_y=node_y, node_role=role.astype(int),
         seg_start=np.asarray(seg_start, dtype=int),
@@ -270,6 +328,7 @@ def network_from_edges(node_x, node_y, edges, *, root: int | None = None,
         seg_length=np.asarray(seg_len, dtype=float),
         seg_radius=np.asarray(seg_rad, dtype=float),
         seg_angle=np.asarray(seg_theta, dtype=float), root_node=int(root),
+        inlet_nodes=np.asarray(roots, dtype=int),
     )
 
 

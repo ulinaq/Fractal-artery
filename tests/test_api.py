@@ -267,6 +267,28 @@ def test_multiple_inlets_and_outlets(client):
     assert summary["arterial_inflow"] == pytest.approx(summary["venous_outflow"], rel=1e-6)
 
 
+def test_separate_feeding_trees(client):
+    # two disconnected arterial trees + two venous trees, one shared Darcy bed
+    G = {"nx": 60, "ny": 70, "lx": 100, "ly": 120, "domain_limit": [0, 100, 0, 120]}
+    pid = client.post("/projects", json={"name": "multi", "grid": G,
+                                         "params": FAST_PARAMS}).json()["id"]
+    arteries = [[[20, 6], [20, 30]], [[20, 30], [8, 60]], [[20, 30], [32, 60]],
+                [[80, 6], [80, 30]], [[80, 30], [68, 60]], [[80, 30], [92, 60]]]
+    veins = [[[20, 114], [20, 90]], [[20, 90], [8, 60]], [[20, 90], [32, 60]],
+             [[80, 114], [80, 90]], [[80, 90], [68, 60]], [[80, 90], [92, 60]]]
+    client.put(f"/projects/{pid}/vessels", json={
+        "arteries": [{"points": p, "radius": 2.0} for p in arteries],
+        "veins": [{"points": p, "radius": 2.0} for p in veins]})
+    # mark an inlet on only ONE artery tree; the other must be auto-covered (not singular)
+    client.put(f"/projects/{pid}/io", json={"inlets": [[8, 60]], "outlets": [[8, 60]]})
+
+    jid = client.post(f"/projects/{pid}/run", json={"use_vessels": True}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    summary = client.get(f"/projects/{pid}/results").json()
+    assert summary["arterial_inflow"] > 0
+    assert summary["arterial_inflow"] == pytest.approx(summary["venous_outflow"], rel=1e-6)
+
+
 def test_io_points_persist_across_store_reopen(tmp_path):
     c1 = TestClient(create_app(store=ProjectStore(tmp_path)))
     pid = c1.post("/projects", json={"name": "io", "grid": SMALL_GRID}).json()["id"]

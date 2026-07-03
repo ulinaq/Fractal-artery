@@ -67,13 +67,26 @@ def _build_networks(project: Project, use_vessels: bool):
 
 
 def _snap_io(net, points):
-    """Nearest vessel end (leaf or root) to each point -> unique node indices."""
+    """Snap inlet/outlet points to the nearest vessel ends -> node indices.
+
+    Every connected component (separate feeding tree) must keep at least one
+    prescribed-pressure node or its block is singular, so any component the user
+    left unmarked is topped up with its own root.
+    """
     if net is None or not points:
         return None
-    cand = np.append(net.terminal_nodes, net.root_node)
-    cx, cy = net.node_x[cand], net.node_y[cand]
-    idx = [int(cand[int(np.argmin((cx - x) ** 2 + (cy - y) ** 2))]) for x, y in points]
-    return np.unique(idx)
+    ends = np.unique(np.concatenate([np.flatnonzero(net.node_degree == 1),
+                                     net.inlet_nodes]))
+    ex, ey = net.node_x[ends], net.node_y[ends]
+    idx = {int(ends[int(np.argmin((ex - x) ** 2 + (ey - y) ** 2))]) for x, y in points}
+
+    labels = net.node_components()
+    covered = {int(labels[i]) for i in idx}
+    for root in net.inlet_nodes:                    # component roots from construction
+        if int(labels[root]) not in covered:
+            idx.add(int(root))
+            covered.add(int(labels[root]))
+    return np.array(sorted(idx), dtype=int)
 
 
 def _solve(project: Project, *, use_vessels: bool, nonlinear: bool = False):

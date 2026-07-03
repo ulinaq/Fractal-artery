@@ -25,6 +25,28 @@ def test_layout_offsets(art, ven):
     assert np.all(signs[len(ta):] == -1)
 
 
+def test_multi_component_trees_conserve_mass(grid):
+    # two separate arterial feeding trees + two venous trees share one Darcy bed
+    from perfusion.core.geometry import network_from_polylines
+
+    art = network_from_polylines([
+        [(-40, 5), (-40, 40)], [(-40, 40), (-55, 80)], [(-40, 40), (-25, 80)],
+        [(40, 5), (40, 40)], [(40, 40), (25, 80)], [(40, 40), (55, 80)],
+    ], radii=2.0)
+    ven = network_from_polylines([
+        [(-40, 155), (-40, 110)], [(-40, 110), (-55, 80)], [(-40, 110), (-25, 80)],
+        [(40, 155), (40, 110)], [(40, 110), (25, 80)], [(40, 110), (55, 80)],
+    ], radii=2.0)
+    assert len(art.inlet_nodes) == 2       # one inlet per arterial feeding tree
+    assert len(ven.inlet_nodes) == 2       # one outlet per venous tree
+
+    response, _, _ = _response(grid, art, ven)
+    sol = network.solve_linear(art, ven, response, p_in=10.0, p_out=0.0)
+    assert np.allclose(sol.p_a[art.inlet_nodes], 10.0)      # both feeding trees driven
+    assert np.allclose(sol.p_v[ven.inlet_nodes], 0.0)
+    assert np.isclose(sol.terminal_flux.sum(), 0.0, atol=1e-8)   # global mass balance
+
+
 def test_multiple_inlets_outlets_conserve_mass(art, ven, grid):
     import dataclasses
 

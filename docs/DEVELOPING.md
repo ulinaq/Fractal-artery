@@ -70,6 +70,12 @@ automatically (`uv run --extra mcp perfusion-mcp`). To add a tool: write the
 logic as a plain, testable function, then add a thin `@server.tool()` wrapper in
 `build_server()` and a case to `tests/test_mcp.py`.
 
+**Convention: new capabilities should get an MCP tool.** When you add a
+user-facing feature (a new solve/analysis mode, growth method, exporter, …),
+expose it here too so any AI client can drive it — keep the logic in a plain,
+testable function and wrap it with `@server.tool()`. "Is it in MCP?" is part of
+*done* for a new feature.
+
 ## Keeping the repo publishable
 
 This is open research code. Keep it free of anything proprietary or personal:
