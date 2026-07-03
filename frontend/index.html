@@ -78,8 +78,14 @@
 
       <section class="card">
         <h2>Grow</h2>
-        <p class="muted">Grow the arterial tree into the tissue (space colonisation).
-          Uses hand-drawn arteries as the seed if present, else the fractal trunk.</p>
+        <p class="muted">Grow the arterial tree into the tissue. Uses hand-drawn
+          arteries as the seed if present, else the fractal trunk.</p>
+        <label>method
+          <select id="grow-method">
+            <option value="colonization">space colonisation</option>
+            <option value="cco">CCO (constructive)</option>
+          </select>
+        </label>
         <div class="grid2">
           <label>points <input id="grow-npts" type="number" value="400" step="50" /></label>
           <label>step <input id="grow-step" type="number" value="4" step="1" /></label>

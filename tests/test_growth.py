@@ -67,6 +67,31 @@ def test_from_selection_limits_growth_sources(trunk):
     assert net.n_nodes > trunk.n_nodes
 
 
+def test_cco_grows_a_valid_spaced_tree(trunk):
+    rng = np.random.default_rng(0)
+    pool = rng.uniform([20, 25], [80, 90], size=(600, 2))
+    net = growth.cco_grow(trunk, pool, n_terminals=100, d_min=4.0, leaf_radius=0.5)
+
+    assert net.n_nodes > trunk.n_nodes
+    assert net.n_segments == net.n_nodes - 1        # still a tree
+    assert net.root_node == trunk.root_node
+    assert np.all(net.seg_length > 0)
+    # the constraint holds: terminals are spaced at least ~d_min apart
+    tips = np.column_stack([net.node_x[net.terminal_nodes], net.node_y[net.terminal_nodes]])
+    d, _ = cKDTree(tips).query(tips, k=2)
+    assert np.median(d[:, 1]) >= 3.0                # ~d_min, allowing for the base tip
+
+
+def test_cco_in_mask_conserves_mass_in_hybrid():
+    dom = (0, 100, 0, 100)
+    mask = np.ones((40, 50), bool)
+    base = network_from_polylines([[(50, 2), (50, 30)]], radii=2.0, root_xy=(50, 2))
+    art = growth.cco_grow_in_mask(base, mask, dom, n_terminals=60, seed=0, leaf_radius=0.4)
+    grid = Grid(nx=40, ny=50, lx=100, ly=100)
+    res = run_hybrid(Parameters(), grid, domain_limit=dom, art=art)
+    assert np.isclose(res.solution.terminal_flux.sum(), 0.0, atol=1e-8)
+
+
 def test_grown_network_conserves_mass_in_hybrid():
     """Grown arterial + venous trees feed straight into run_hybrid; mass balances."""
     dom = (0, 100, 0, 100)

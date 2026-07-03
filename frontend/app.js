@@ -167,7 +167,8 @@ async function grow() {
   if (state.regions.length || state.regionStroke.length >= 3) await saveMask();
   status("growing…");
   const info = await api("POST", `/projects/${state.project}/grow`,
-    { n_points: numOf("grow-npts"), step: numOf("grow-step"), seed: numOf("seed") });
+    { method: $("grow-method").value, n_points: numOf("grow-npts"),
+      step: numOf("grow-step"), seed: numOf("seed") });
   $("grow-info").textContent = `grown tree: ${info.n_segments} segments, ${info.n_terminals} terminals`;
   await loadNetwork();
   status("arterial tree grown", "ok");
