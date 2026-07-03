@@ -148,14 +148,15 @@ async function loadMask() {
 
 async function uploadImage(file) {
   requireProject();
-  status("segmenting image…");
-  const r = await fetch(`/projects/${state.project}/image`, { method: "POST", body: file });
+  const kind = vtype();                    // artery/vein selector governs the target
+  status(`segmenting ${kind} image…`);
+  const r = await fetch(`/projects/${state.project}/image?kind=${kind}`, { method: "POST", body: file });
   if (!r.ok) { status(`segment failed (${r.status}): ${(await r.text()).slice(0, 140)}`, "err"); return; }
   stopFlow(); state.tracer = null; state.fieldData = null;
   await loadNetwork();
   const n = state.network ? state.network.segments.length : 0;
-  $("img-info").textContent = `segmented → ${n} segments (arterial tree)`;
-  status("image segmented → arterial tree", "ok");
+  $("img-info").textContent = `segmented → ${n} total segments`;
+  status(`image segmented → ${kind} tree`, "ok");
   redraw();
 }
 

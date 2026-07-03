@@ -164,11 +164,36 @@ def test_image_upload_segments_a_network(client):
     assert _wait_for_job(client, jid)["state"] == "done"
 
 
+def test_image_upload_artery_and_vein(client):
+    pytest.importorskip("skimage")
+    pytest.importorskip("imageio")
+    from perfusion.io import DATA_DIR
+
+    art = (DATA_DIR / "frog_art_low.png").read_bytes()
+    ven = (DATA_DIR / "frog_vein.png").read_bytes()
+    pid = client.post("/projects", json={"name": "av", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    assert client.post(f"/projects/{pid}/image", content=art,
+                       params={"kind": "artery", "min_size": 30}).status_code == 200
+    assert client.post(f"/projects/{pid}/image", content=ven,
+                       params={"kind": "vein", "min_size": 30}).status_code == 200
+    # both segmented trees show up in the overlay geometry
+    kinds = {s["kind"] for s in client.get(f"/projects/{pid}/network").json()["segments"]}
+    assert kinds == {"artery", "vein"}
+    # and the coupled system solves + conserves mass
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    summary = client.get(f"/projects/{pid}/results").json()
+    assert summary["arterial_inflow"] == pytest.approx(summary["venous_outflow"], rel=1e-6)
+
+
 def test_image_upload_rejects_bad_payload(client):
     pytest.importorskip("imageio")
     pid = client.post("/projects", json={"name": "bad", "grid": SMALL_GRID}).json()["id"]
     assert client.post(f"/projects/{pid}/image", content=b"").status_code == 400
     assert client.post(f"/projects/{pid}/image", content=b"not-an-image").status_code == 422
+    assert client.post(f"/projects/{pid}/image", content=b"x",
+                       params={"kind": "bogus"}).status_code == 422
 
 
 def test_frontend_is_served(client):

@@ -37,7 +37,8 @@ class Project:
     arteries: list[Polyline] = field(default_factory=list)
     veins: list[Polyline] = field(default_factory=list)
     regions: list = field(default_factory=list)  # tissue outline polygons
-    artery_network: object | None = None  # grown perfusion.core.geometry.Network
+    artery_network: object | None = None  # grown/segmented perfusion.core.geometry.Network
+    vein_network: object | None = None    # segmented venous network
     summary: dict | None = None
     has_result: bool = False              # set from blob existence on load
     has_tracer: bool = False              # set from blob existence on load
@@ -90,6 +91,9 @@ class ProjectStore:
     def _artery_path(self, pid: str) -> Path:
         return self.blobs / f"{pid}.artery.npz"
 
+    def _vein_path(self, pid: str) -> Path:
+        return self.blobs / f"{pid}.vein.npz"
+
     def result_path(self, pid: str) -> Path:
         return self.blobs / f"{pid}.result.npz"
 
@@ -111,6 +115,9 @@ class ProjectStore:
         artery = self._artery_path(pid)
         if artery.exists():
             project.artery_network = io.load_network(artery)
+        vein = self._vein_path(pid)
+        if vein.exists():
+            project.vein_network = io.load_network(vein)
         project.has_result = self.result_path(pid).exists()
         project.has_tracer = self.tracer_path(pid).exists()
         return project
@@ -154,11 +161,12 @@ class ProjectStore:
                     "summary": json.dumps(project.summary) if project.summary else None,
                 },
             )
-        artery = self._artery_path(project.id)
-        if project.artery_network is not None:
-            io.save_network(project.artery_network, artery)
-        else:
-            artery.unlink(missing_ok=True)
+        for path, net in ((self._artery_path(project.id), project.artery_network),
+                          (self._vein_path(project.id), project.vein_network)):
+            if net is not None:
+                io.save_network(net, path)
+            else:
+                path.unlink(missing_ok=True)
 
     def save_result(self, project: Project, result) -> None:
         """Write the result blob + summary and persist (invalidating any tracer)."""
