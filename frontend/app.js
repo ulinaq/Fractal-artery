@@ -36,10 +36,12 @@ async function api(method, path, body) {
 // ── application state ────────────────────────────────────────────────────────
 const state = {
   project: null,
-  mode: "draw",              // "draw" | "result"
+  mode: "vessels",           // "vessels" | "tissue" | "result"
   field: "pressure",
   vessels: { arteries: [], veins: [] },   // saved strokes
-  stroke: [],                // current in-progress polyline (domain coords)
+  stroke: [],                // current in-progress vessel polyline (domain coords)
+  regions: [],               // saved tissue outline polygons (domain coords)
+  regionStroke: [],          // current in-progress tissue polygon
   network: null,             // {segments:[...]} overlaid in result mode
   fieldData: null,           // {name, shape, data, vmin, vmax}
 };
@@ -63,11 +65,12 @@ async function newProject() {
   const p = await api("POST", "/projects", body);
   state.project = p.id;
   state.vessels = { arteries: [], veins: [] };
-  state.stroke = []; state.network = null; state.fieldData = null;
+  state.stroke = []; state.regions = []; state.regionStroke = [];
+  state.network = null; state.fieldData = null;
   $("proj-id").textContent = `project ${p.id}`;
   $("btn-export").disabled = true;
   $("grow-info").textContent = ""; $("run-info").textContent = "";
-  setMode("draw");
+  setMode("vessels");
   status("project ready", "ok");
   redraw();
 }
@@ -79,11 +82,13 @@ function requireProject() {
 
 // ── vessel drawing ────────────────────────────────────────────────────────────
 canvas.addEventListener("pointerdown", (e) => {
-  if (state.mode !== "draw") return;
+  if (state.mode === "result") return;
   const rect = canvas.getBoundingClientRect();
   const px = (e.clientX - rect.left) * (W / rect.width);
   const py = (e.clientY - rect.top) * (H / rect.height);
-  state.stroke.push(toDomain(px, py));
+  const pt = toDomain(px, py);
+  if (state.mode === "vessels") state.stroke.push(pt);
+  else if (state.mode === "tissue") state.regionStroke.push(pt);
   redraw();
 });
 
@@ -112,10 +117,37 @@ async function saveVessels() {
   status(`saved ${state.vessels.arteries.length} arteries, ${state.vessels.veins.length} veins`, "ok");
 }
 
+// ── tissue mask drawing ────────────────────────────────────────────────────────
+function endRegion() {
+  if (state.regionStroke.length >= 3) state.regions.push(state.regionStroke.map(([x, y]) => [x, y]));
+  state.regionStroke = [];
+  redraw();
+}
+function undoRegion() {
+  if (state.regionStroke.length) state.regionStroke.pop();
+  else state.regions.pop();
+  redraw();
+}
+function clearTissue() { state.regions = []; state.regionStroke = []; redraw(); }
+
+async function saveMask() {
+  requireProject();
+  if (state.regionStroke.length >= 3) endRegion();   // auto-close a pending outline
+  await api("PUT", `/projects/${state.project}/mask`, { regions: state.regions });
+  status(state.regions.length ? `saved tissue (${state.regions.length} region(s))`
+                              : "tissue cleared — full domain active", "ok");
+}
+
+async function loadMask() {
+  try { state.regions = (await api("GET", `/projects/${state.project}/mask`)).regions || []; }
+  catch { state.regions = []; }
+}
+
 // ── grow / run ─────────────────────────────────────────────────────────────────
 async function grow() {
   requireProject();
   if (state.vessels.arteries.length) await saveVessels();
+  if (state.regions.length || state.regionStroke.length >= 3) await saveMask();
   status("growing…");
   const info = await api("POST", `/projects/${state.project}/grow`,
     { n_points: numOf("grow-npts"), step: numOf("grow-step"), seed: numOf("seed") });
@@ -128,6 +160,7 @@ async function grow() {
 async function run() {
   requireProject();
   if (state.vessels.arteries.length || state.vessels.veins.length) await saveVessels();
+  if (state.regions.length || state.regionStroke.length >= 3) await saveMask();
   const job = await api("POST", `/projects/${state.project}/run`,
     { nonlinear: $("nonlinear").checked, use_vessels: $("use-vessels").checked });
   status("running…");
@@ -175,9 +208,27 @@ async function loadField(name) {
 function redraw() {
   ctx.clearRect(0, 0, W, H);
   if (state.mode === "result" && state.fieldData) drawField();
+  drawRegions();
   drawNetworkOverlay();
   drawVessels();
   drawStroke();
+}
+
+function tracePath(points) {
+  points.forEach(([x, y], i) => {
+    const [px, py] = toCanvas(x, y);
+    i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+  });
+}
+
+function drawRegions() {
+  // saved tissue outlines: translucent fill (skip under a rendered field)
+  const showFill = !(state.mode === "result" && state.fieldData);
+  for (const poly of state.regions) {
+    ctx.beginPath(); tracePath(poly); ctx.closePath();
+    if (showFill) { ctx.fillStyle = "rgba(16,185,129,.12)"; ctx.fill(); }
+    ctx.strokeStyle = "rgba(5,150,105,.7)"; ctx.lineWidth = 1.5; ctx.stroke();
+  }
 }
 
 function drawField() {
@@ -228,15 +279,26 @@ function drawVessels() {
   paint(state.vessels.veins, getCss("--ven"));
 }
 
+function markVertices(points) {
+  for (const [x, y] of points) {
+    const [px, py] = toCanvas(x, y);
+    ctx.beginPath(); ctx.arc(px, py, 3, 0, 7); ctx.fill();
+  }
+}
+
 function drawStroke() {
-  if (state.mode !== "draw" || !state.stroke.length) return;
-  ctx.strokeStyle = vtype() === "artery" ? getCss("--art") : getCss("--ven");
-  ctx.fillStyle = ctx.strokeStyle;
-  ctx.lineWidth = Math.max(1.5, numOf("draw-radius") * 1.2);
-  ctx.beginPath();
-  state.stroke.forEach(([x, y], i) => { const [px, py] = toCanvas(x, y); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
-  ctx.stroke();
-  for (const [x, y] of state.stroke) { const [px, py] = toCanvas(x, y); ctx.beginPath(); ctx.arc(px, py, 3, 0, 7); ctx.fill(); }
+  if (state.mode === "vessels" && state.stroke.length) {
+    ctx.strokeStyle = vtype() === "artery" ? getCss("--art") : getCss("--ven");
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.lineWidth = Math.max(1.5, numOf("draw-radius") * 1.2);
+    ctx.beginPath(); tracePath(state.stroke); ctx.stroke();
+    markVertices(state.stroke);
+  } else if (state.mode === "tissue" && state.regionStroke.length) {
+    ctx.strokeStyle = "rgba(5,150,105,.9)"; ctx.fillStyle = ctx.strokeStyle;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath(); tracePath(state.regionStroke); ctx.stroke();
+    markVertices(state.regionStroke);
+  }
 }
 
 function updateColorbar(vmin, vmax) {
@@ -253,11 +315,12 @@ const getCss = (name) => getComputedStyle(document.documentElement).getPropertyV
 // ── modes ────────────────────────────────────────────────────────────────────
 function setMode(mode) {
   state.mode = mode;
-  $("mode-draw").classList.toggle("active", mode === "draw");
+  $("mode-vessels").classList.toggle("active", mode === "vessels");
+  $("mode-tissue").classList.toggle("active", mode === "tissue");
   $("mode-result").classList.toggle("active", mode === "result");
   $("field-picker").classList.toggle("show", mode === "result");
   $("colorbar").hidden = mode !== "result" || !state.fieldData;
-  canvas.style.cursor = mode === "draw" ? "crosshair" : "default";
+  canvas.style.cursor = mode === "result" ? "default" : "crosshair";
   redraw();
 }
 
@@ -267,12 +330,17 @@ $("btn-endseg").addEventListener("click", endStroke);
 $("btn-undo").addEventListener("click", undo);
 $("btn-clear").addEventListener("click", clearVessels);
 $("btn-save-vessels").addEventListener("click", () => saveVessels().catch((e) => status(e.message, "err")));
+$("btn-endregion").addEventListener("click", endRegion);
+$("btn-undo-region").addEventListener("click", undoRegion);
+$("btn-clear-tissue").addEventListener("click", clearTissue);
+$("btn-save-mask").addEventListener("click", () => saveMask().catch((e) => status(e.message, "err")));
 $("btn-grow").addEventListener("click", () => grow().catch((e) => status(e.message, "err")));
 $("btn-run").addEventListener("click", () => run().catch((e) => status(e.message, "err")));
 $("btn-export").addEventListener("click", () => { window.location = `/projects/${state.project}/export`; });
-$("mode-draw").addEventListener("click", () => setMode("draw"));
+$("mode-vessels").addEventListener("click", () => setMode("vessels"));
+$("mode-tissue").addEventListener("click", () => setMode("tissue"));
 $("mode-result").addEventListener("click", () => setMode("result"));
-canvas.addEventListener("dblclick", endStroke);
+canvas.addEventListener("dblclick", () => (state.mode === "tissue" ? endRegion() : endStroke()));
 document.querySelectorAll(".field").forEach((b) => b.addEventListener("click", () => {
   document.querySelectorAll(".field").forEach((x) => x.classList.remove("active"));
   b.classList.add("active");
@@ -285,12 +353,12 @@ async function openProject(id) {
   state.project = info.id;
   $("proj-name").value = info.name;
   $("proj-id").textContent = `project ${info.id}`;
-  await loadNetwork();
+  await Promise.all([loadNetwork(), loadMask()]);
   if (info.has_result) {
     await Promise.all([showSummary(), loadField(state.field)]);
     $("btn-export").disabled = false;
     setMode("result");
-  } else { setMode("draw"); }
+  } else { setMode("vessels"); }
   status(`opened ${info.id}`, "ok");
 }
 

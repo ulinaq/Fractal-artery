@@ -93,6 +93,7 @@ def save_results(result: HybridResult, path: str | Path) -> Path:
         path,
         pressure=result.pressure, flux=result.flux, tof=result.tof,
         domain_limit=np.asarray(result.domain_limit),
+        mask=np.asarray(result.grid.mask),
         q_a=result.solution.q_a, q_v=result.solution.q_v,
         terminal_flux=result.solution.terminal_flux,
     )

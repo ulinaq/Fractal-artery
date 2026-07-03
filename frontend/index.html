@@ -59,6 +59,19 @@
       </section>
 
       <section class="card">
+        <h2>Tissue</h2>
+        <p class="muted">In <b>Tissue</b> mode, click to outline the organ; cells
+          outside are inactive, so the Darcy bed is organ-shaped. Multiple regions
+          add together.</p>
+        <div class="row">
+          <button id="btn-endregion">End region</button>
+          <button id="btn-undo-region">Undo</button>
+          <button id="btn-clear-tissue">Clear</button>
+        </div>
+        <button id="btn-save-mask">Save tissue</button>
+      </section>
+
+      <section class="card">
         <h2>Grow</h2>
         <p class="muted">Grow the arterial tree into the tissue (space colonisation).
           Uses hand-drawn arteries as the seed if present, else the fractal trunk.</p>
@@ -82,7 +95,8 @@
     <section class="stage">
       <div class="stage-head">
         <div class="modes" role="tablist">
-          <button id="mode-draw" class="mode active" role="tab">Draw</button>
+          <button id="mode-vessels" class="mode active" role="tab">Vessels</button>
+          <button id="mode-tissue" class="mode" role="tab">Tissue</button>
           <button id="mode-result" class="mode" role="tab">Result</button>
         </div>
         <div class="fields" id="field-picker">

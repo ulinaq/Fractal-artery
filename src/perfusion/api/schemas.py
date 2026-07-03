@@ -37,8 +37,8 @@ class GridIn(BaseModel):
     ly: float = 160.0
     domain_limit: tuple[float, float, float, float] = (-70.0, 70.0, 0.0, 160.0)
 
-    def to_core(self) -> Grid:
-        return Grid(nx=self.nx, ny=self.ny, lx=self.lx, ly=self.ly)
+    def to_core(self, mask=None) -> Grid:
+        return Grid(nx=self.nx, ny=self.ny, lx=self.lx, ly=self.ly, mask=mask)
 
 
 class Polyline(BaseModel):
@@ -53,6 +53,12 @@ class VesselsIn(BaseModel):
     veins: list[Polyline] = Field(default_factory=list)
 
 
+class MaskIn(BaseModel):
+    """Tissue domain as a union of hand-drawn outline polygons (domain coords)."""
+
+    regions: list[list[tuple[float, float]]] = Field(default_factory=list)
+
+
 class ProjectCreate(BaseModel):
     name: str
     params: ParametersIn = Field(default_factory=ParametersIn)
@@ -63,6 +69,7 @@ class ProjectInfo(BaseModel):
     id: str
     name: str
     has_vessels: bool = False
+    has_mask: bool = False
     has_result: bool = False
 
 

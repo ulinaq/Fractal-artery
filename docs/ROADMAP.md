@@ -237,16 +237,19 @@ imports move to `perfusion.core.*`.
   blob store (grown network + result `.npz`), rooted at `$PERFUSION_DATA`.
   Projects and results survive a process restart, so shared URLs keep working;
   the store interface stays swappable (→ Postgres + object storage).
+- ✅ **Tissue-mask drawing** — outline the organ on the canvas (Tissue mode);
+  `core.geometry.rasterize_mask` turns the polygons into `Grid.mask`, so both the
+  Darcy solve and vessel growth are organ-shaped (not the bounding box). Regions
+  persist with the project; `PUT/GET /projects/{id}/mask`.
 
 **Next**
 
 1. **Task queue** — move jobs from the in-process thread pool to RQ/Celery +
    Redis for real multi-user hosting.
-2. **Draw the tissue mask** — paint the active domain on the canvas → `Grid.mask`.
-3. **Image upload + segmentation endpoint** — `POST /projects/{id}/image` →
+2. **Image upload + segmentation endpoint** — `POST /projects/{id}/image` →
    `segmentation.segment_network` (behind the `image` extra).
-4. **Flow video** — `transport` frames streamed/exported (mp4) and played in the UI.
-5. **CCO growth variant**; **VTK/CSV export**; then the optional React/Vite
+3. **Flow video** — `transport` frames streamed/exported (mp4) and played in the UI.
+4. **CCO growth variant**; **VTK/CSV export**; then the optional React/Vite
    rebuild and Phase 4 (3-D + vtk.js).
 
 Each step is independently useful and testable; the API contract lets the
