@@ -17,7 +17,7 @@ Requires the ``image`` extra (``uv sync --extra image``) for scikit-image.
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from scipy import ndimage as ndi
@@ -180,6 +180,28 @@ def _largest_component(adjacency: dict[int, list], n_nodes: int) -> set[int]:
         if len(comp) > len(best):
             best = comp
     return best
+
+
+def network_in_domain(net: Network, image_shape: tuple[int, int],
+                      domain_limit: tuple[float, float, float, float]) -> Network:
+    """Place a pixel-space segmented ``net`` into a physical ``domain_limit`` box.
+
+    :func:`skeleton_to_network` returns coordinates in image pixels
+    (``node_x`` = row, ``node_y`` = column). This maps them so the image fills
+    ``(xmin, xmax, ymin, ymax)`` the way it reads on screen: column -> x
+    (left->right), row -> y (top->bottom, flipped so the image top is at
+    ``ymax``). Segment lengths, angles and radii are rescaled to match.
+    """
+    h, w = image_shape[0], image_shape[1]
+    xmin, xmax, ymin, ymax = domain_limit
+    node_x = xmin + (net.node_y / max(w, 1)) * (xmax - xmin)
+    node_y = ymin + (1.0 - net.node_x / max(h, 1)) * (ymax - ymin)
+    ss, se = net.seg_start, net.seg_end
+    length = np.hypot(node_x[se] - node_x[ss], node_y[se] - node_y[ss])
+    angle = np.arctan2(node_y[se] - node_y[ss], node_x[se] - node_x[ss])
+    scale = 0.5 * ((xmax - xmin) / max(w, 1) + (ymax - ymin) / max(h, 1))
+    return replace(net, node_x=node_x, node_y=node_y, seg_length=length,
+                   seg_radius=net.seg_radius * scale, seg_angle=angle)
 
 
 def segment_network(image: np.ndarray, threshold: float | None = None,

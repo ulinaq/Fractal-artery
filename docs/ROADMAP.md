@@ -90,8 +90,7 @@ Every requested capability, and where it lives.
 
 | Feature | Front-end | API endpoint (sketch) | Back-end |
 |---|---|---|---|
-| Load vessel drawing/image | upload widget | `POST /projects/{id}/image` | `io` (store), `segmentation.vessel_mask` |
-| Segment image → network | preview + edit | `POST /projects/{id}/segment` | `segmentation.segment_network` |
+| Load vessel drawing/image | ✅ file picker | ✅ `POST /projects/{id}/image` | ✅ `segmentation.segment_network` + `network_in_domain` |
 | Draw tissue (mask) by hand | paint canvas | `PUT /projects/{id}/tissue` | rasterise → `core.darcy.Grid.mask` |
 | Draw vessels by hand | polyline canvas | `PUT /projects/{id}/vessels` | **new** `core.geometry.network_from_polylines` |
 | Grow vessels from selected segments | pick + run | `POST /projects/{id}/grow` | **new** `growth` (CCO / space colonisation) |
@@ -246,13 +245,17 @@ imports move to `perfusion.core.*`.
   frames as a 2-D flow animation with a robust (99th-pct) colour scale, and an
   animated GIF can be downloaded. `POST/GET /projects/{id}/tracer` (job) +
   `GET /projects/{id}/tracer.gif` (needs the `image` extra).
+- ✅ **Image upload + segmentation** — `POST /projects/{id}/image` segments an
+  uploaded vessel image (`segmentation.segment_network`) and places it in the
+  project's domain (`segmentation.network_in_domain`) as the arterial tree; the
+  UI has a file picker and shows the segmented tree. Needs the `image` extra.
 
 **Next**
 
 1. **Task queue** — move jobs from the in-process thread pool to RQ/Celery +
    Redis for real multi-user hosting.
-2. **Image upload + segmentation endpoint** — `POST /projects/{id}/image` →
-   `segmentation.segment_network` (behind the `image` extra).
+2. **Segment veins too** — a second uploaded image → the venous network (needs a
+   `vein_network` alongside the arterial one).
 3. **CCO growth variant**; **VTK/CSV export**; server-side **mp4** (needs
    ffmpeg); then the optional React/Vite rebuild and Phase 4 (3-D + vtk.js).
 
