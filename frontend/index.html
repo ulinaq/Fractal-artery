@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>perfusion — 2-D workspace</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">🩸</span>
+      <div>
+        <h1>perfusion</h1>
+        <p class="sub">Multiscale blood-flow &amp; perfusion — 2-D workspace</p>
+      </div>
+    </div>
+    <div class="status" id="status">connecting…</div>
+  </header>
+
+  <main class="layout">
+    <!-- ─── controls ─────────────────────────────────────────────── -->
+    <aside class="panel">
+      <section class="card">
+        <h2>Project</h2>
+        <label>Name <input id="proj-name" type="text" value="workspace" /></label>
+        <button id="btn-new" class="primary">New project</button>
+        <p class="muted" id="proj-id">no project yet</p>
+      </section>
+
+      <section class="card">
+        <h2>Parameters</h2>
+        <div class="grid2">
+          <label>p_in <input id="p_in" type="number" value="10" step="1" /></label>
+          <label>p_out <input id="p_out" type="number" value="0" step="1" /></label>
+          <label>r_min_frac <input id="r_min_frac" type="number" value="0.15" step="0.05" min="0.05" max="0.9" /></label>
+          <label>seed <input id="seed" type="number" value="0" step="1" /></label>
+          <label>grid nx <input id="nx" type="number" value="120" step="10" /></label>
+          <label>grid ny <input id="ny" type="number" value="140" step="10" /></label>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Vessels</h2>
+        <p class="muted">Draw in the canvas → each stroke is one segment. Share
+          endpoints to branch (they snap).</p>
+        <div class="row">
+          <label class="seg"><input type="radio" name="vtype" value="artery" checked /> <span class="dot art"></span>artery</label>
+          <label class="seg"><input type="radio" name="vtype" value="vein" /> <span class="dot ven"></span>vein</label>
+        </div>
+        <label>radius <input id="draw-radius" type="number" value="2" step="0.5" min="0.2" /></label>
+        <div class="row">
+          <button id="btn-endseg">End stroke</button>
+          <button id="btn-undo">Undo</button>
+          <button id="btn-clear">Clear</button>
+        </div>
+        <label class="check"><input id="use-vessels" type="checkbox" /> use hand-drawn vessels on Run</label>
+        <button id="btn-save-vessels">Save vessels</button>
+      </section>
+
+      <section class="card">
+        <h2>Grow</h2>
+        <p class="muted">Grow the arterial tree into the tissue (space colonisation).
+          Uses hand-drawn arteries as the seed if present, else the fractal trunk.</p>
+        <div class="grid2">
+          <label>points <input id="grow-npts" type="number" value="400" step="50" /></label>
+          <label>step <input id="grow-step" type="number" value="4" step="1" /></label>
+        </div>
+        <button id="btn-grow">Grow arterial tree</button>
+        <p class="muted" id="grow-info"></p>
+      </section>
+
+      <section class="card">
+        <h2>Run</h2>
+        <label class="check"><input id="nonlinear" type="checkbox" /> nonlinear (junction losses)</label>
+        <button id="btn-run" class="primary">Run simulation</button>
+        <p class="muted" id="run-info"></p>
+      </section>
+    </aside>
+
+    <!-- ─── canvas + results ─────────────────────────────────────── -->
+    <section class="stage">
+      <div class="stage-head">
+        <div class="modes" role="tablist">
+          <button id="mode-draw" class="mode active" role="tab">Draw</button>
+          <button id="mode-result" class="mode" role="tab">Result</button>
+        </div>
+        <div class="fields" id="field-picker">
+          <button class="field active" data-field="pressure">pressure</button>
+          <button class="field" data-field="flux">flux</button>
+          <button class="field" data-field="tof">time-of-flight</button>
+        </div>
+        <button id="btn-export" class="ghost" disabled>Export .npz</button>
+      </div>
+
+      <div class="canvas-wrap">
+        <canvas id="view" width="640" height="720"></canvas>
+        <div class="colorbar" id="colorbar" hidden>
+          <span class="cb-max" id="cb-max">—</span>
+          <div class="cb-ramp" id="cb-ramp"></div>
+          <span class="cb-min" id="cb-min">—</span>
+          <span class="cb-title" id="cb-title"></span>
+        </div>
+      </div>
+
+      <div class="summary" id="summary"></div>
+    </section>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

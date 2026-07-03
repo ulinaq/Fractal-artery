@@ -166,7 +166,41 @@ def create_app(store: ProjectStore | None = None,
         return FileResponse(path, media_type="application/octet-stream",
                             filename=f"{project.name or project.id}.npz")
 
+    @app.get("/projects/{pid}/network")
+    def network_geometry(pid: str) -> dict:
+        """Segment geometry (domain frame) for overlaying grown/drawn vessels."""
+        project = _project(pid)
+        segments: list[dict] = []
+
+        def _add(net, kind: str) -> None:
+            for s in range(net.n_segments):
+                a, b = int(net.seg_start[s]), int(net.seg_end[s])
+                segments.append({
+                    "x0": float(net.node_x[a]), "y0": float(net.node_y[a]),
+                    "x1": float(net.node_x[b]), "y1": float(net.node_y[b]),
+                    "r": float(net.seg_radius[s]), "kind": kind,
+                })
+
+        if project.artery_network is not None:
+            _add(project.artery_network, "artery")
+        elif project.arteries:
+            _add(_polylines_to_network(project.arteries), "artery")
+        if project.veins:
+            _add(_polylines_to_network(project.veins), "vein")
+        return {"segments": segments}
+
+    _mount_frontend(app)
     return app
+
+
+def _mount_frontend(app: FastAPI) -> None:
+    """Serve the static 2-D workspace at ``/`` if it is present (dev/editable)."""
+    frontend = Path(__file__).resolve().parents[3] / "frontend"
+    if (frontend / "index.html").exists():
+        from fastapi.staticfiles import StaticFiles
+
+        # Mounted last, so the API routes above take precedence over "/".
+        app.mount("/", StaticFiles(directory=frontend, html=True), name="frontend")
 
 
 app = create_app()
