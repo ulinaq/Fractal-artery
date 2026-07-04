@@ -104,3 +104,17 @@ canvas { background: #fff; border: 1px solid var(--line); border-radius: 6px; ma
 .summary .stat b { font-size: 16px; font-variant-numeric: tabular-nums; }
 .summary .stat span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .summary:empty { display: none; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 16px; padding: 8px 16px; border-top: 1px solid var(--line); font-size: 11px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend .ln { width: 16px; height: 2.5px; border-radius: 2px; display: inline-block; }
+.legend .ln.art { background: var(--art); }
+.legend .ln.ven { background: var(--ven); }
+.legend .tri { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; }
+.legend .tri.up { border-bottom: 9px solid var(--art); }
+.legend .tri.dn { border-top: 9px solid var(--ven); }
+.legend .sw { width: 12px; height: 10px; background: rgba(16,185,129,.15); border: 1px solid rgba(5,150,105,.7); border-radius: 2px; display: inline-block; }
+
+#proj-id a { color: var(--accent); text-decoration: none; }
+#proj-id a:hover { text-decoration: underline; }
+button:disabled { opacity: .45; }
