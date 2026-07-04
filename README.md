@@ -1,5 +1,7 @@
 # perfusion
 
+[![CI](https://github.com/ulinaq/Fractal-artery/actions/workflows/ci.yml/badge.svg)](https://github.com/ulinaq/Fractal-artery/actions/workflows/ci.yml)
+
 A Python implementation of the multiscale blood-circulation and perfusion models
 from Ulin Nuha Abdul Qohar's PhD thesis, *Modeling and simulation of blood
 circulation and perfusion* (University of Bergen, 2023).
