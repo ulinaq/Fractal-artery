@@ -44,6 +44,11 @@ no separate dev server.
   GIF (`tracer.gif`, needs the `image` extra).
 - **Share** — `?project=<id>` opens an existing project (and its result) by id.
 
+- **3-D viewer** (`viewer3d.html`) — a separate page (linked from the header)
+  that renders the full 3-D hybrid result (vessel trees + pressure voxel cloud)
+  in a rotatable, **dependency-free canvas** projection (no WebGL/vtk.js, works
+  offline). Data from `GET /demo3d`.
+
 ## Files
 
 | File | Role |
@@ -51,6 +56,7 @@ no separate dev server.
 | `index.html` | layout & controls |
 | `style.css`  | styling (no framework) |
 | `app.js`     | API client, canvas drawing, field rendering, job polling |
+| `viewer3d.html` / `viewer3d.js` | standalone rotatable 3-D result viewer |
 
 ## Roadmap
 

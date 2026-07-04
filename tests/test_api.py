@@ -315,6 +315,22 @@ def test_frontend_is_served(client):
     assert "perfusion" in root.text.lower()
     assert client.get("/app.js").status_code == 200
     assert client.get("/style.css").status_code == 200
+    assert client.get("/viewer3d.html").status_code == 200      # 3-D viewer page
+    assert client.get("/viewer3d.js").status_code == 200
+
+
+def test_demo3d_payload(client):
+    d = client.get("/demo3d", params={"gen": 4}).json()
+    assert len(d["shape"]) == 3                                # (nx, ny, nz)
+    assert len(d["domain"]) == 6
+    assert len(d["segments"]) > 0
+    seg = d["segments"][0]
+    assert len(seg) == 8                                       # x0..z1, r, kind
+    assert seg[7] in (0, 1)
+    vox = d["pressure"]["voxels"]
+    assert len(vox) > 0
+    assert len(vox[0]) == 4                                    # x, y, z, pressure
+    assert d["pressure"]["min"] <= d["pressure"]["max"]
 
 
 def test_mask_makes_the_solved_domain_organ_shaped(client):
