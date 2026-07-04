@@ -285,12 +285,18 @@ imports move to `perfusion.core.*`.
   3-D TPFA operator (mask-isolated, singular Neumann), verified against a linear
   pressure ramp. Not yet coupled to the network solver.
 
+- ✅ **Task queue (optional RQ)** — job execution moved to `api.runner` +
+  `run_job` (reconstructs the store from its root), so it runs in either the
+  default thread pool **or** an RQ/Redis worker. `RQJobManager` behind the same
+  `submit`/`get` seam; selected with `PERFUSION_QUEUE=rq` (+ `rq` extra, a running
+  Redis, and `rq worker`), with graceful fallback to threads. Verified in-process
+  with fakeredis.
+
 **Next**
 
-1. **Task queue** — swap the in-process `ThreadPoolExecutor` for RQ/Celery +
-   Redis for real multi-user hosting.
-2. Server-side **mp4** (needs ffmpeg); then the optional React/Vite rebuild and
-   Phase 4 (3-D + vtk.js).
+1. Server-side **mp4** (needs ffmpeg); couple the **3-D** grid to the network
+   solver + vtk.js rendering; the optional React/Vite front-end rebuild.
+2. Research tooling: parameter sweeps, inverse estimation, batch experiments.
 
 Each step is independently useful and testable; the API contract lets the
 front-end be built in parallel.

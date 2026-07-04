@@ -61,6 +61,13 @@ uv run --extra mcp perfusion-mcp           # MCP server over stdio   (extra: mcp
 uv run perfusion-tree | perfusion-frog     # example drivers
 ```
 
+**Jobs** run in an in-process thread pool by default (zero infra). For real
+multi-worker hosting, set `PERFUSION_QUEUE=rq` (+ `--extra rq`, a running Redis at
+`$REDIS_URL`, and one or more `uv run --extra rq rq worker perfusion` processes);
+the API falls back to threads if Redis is unreachable. Job execution lives in
+`api/runner.py` and `api/jobs.py:run_job` so a worker in another process can run
+it — keep it importable and its args picklable.
+
 ## MCP server
 
 `mcp_server.py` exposes the engine as MCP tools (`run_simulation`,
