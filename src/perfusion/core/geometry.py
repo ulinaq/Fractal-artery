@@ -44,6 +44,10 @@ class Network:
     # enters/leaves here rather than coupling to the Darcy bed. Defaults to the
     # single root, reproducing the original one-inlet/one-outlet model.
     inlet_nodes: np.ndarray | None = None
+    # Optional z-coordinate: when present the network is 3-D. The solver is
+    # coordinate-free (topology + seg_length/seg_radius only), so it is unchanged;
+    # only terminal->grid mapping and viz use coordinates. None => 2-D.
+    node_z: np.ndarray | None = None
 
     # derived, filled in __post_init__
     incoming_segment: np.ndarray = field(init=False)  # segment feeding each node (-1 at root)
@@ -55,6 +59,10 @@ class Network:
             self.inlet_nodes = np.array([self.root_node], dtype=int)
         else:
             self.inlet_nodes = np.unique(np.asarray(self.inlet_nodes, dtype=int))
+
+    @property
+    def is_3d(self) -> bool:
+        return self.node_z is not None
 
     @property
     def n_nodes(self) -> int:
@@ -429,3 +437,74 @@ def rasterize_mask(nx: int, ny: int,
     for poly in polygons:
         inside |= _points_in_polygon(px, py, poly)
     return inside.reshape(nx, ny)
+
+
+def _rotate(vec: np.ndarray, axis: np.ndarray, angle: float) -> np.ndarray:
+    """Rodrigues rotation of ``vec`` about unit ``axis`` by ``angle``."""
+    c, s = np.cos(angle), np.sin(angle)
+    return vec * c + np.cross(axis, vec) * s + axis * np.dot(axis, vec) * (1 - c)
+
+
+def grow_tree_3d(root_xyz, direction=(0.0, 0.0, 1.0), *, root_radius=2.0,
+                 min_radius=0.6, length_to_radius=8.0, theta=0.5, ratio=0.78,
+                 max_generations=8, mirror=False) -> Network:
+    """Grow a 3-D self-similar binary fractal tree.
+
+    Every segment above ``min_radius`` splits into two children rotated by
+    ``±theta`` from the parent direction; the branching plane alternates each
+    generation (about z then y) so the tree fills 3-D. Radii/lengths scale by
+    ``ratio``. Returns a :class:`Network` carrying ``node_z`` (a 3-D network).
+    The solver is coordinate-free, so this plugs into the same hybrid solve.
+    """
+    def unit(v):
+        n = np.linalg.norm(v)
+        return v / n if n > 0 else v
+
+    root = np.asarray(root_xyz, dtype=float)
+    d0 = unit(np.asarray(direction, dtype=float))
+    xs, ys, zs, roles = [root[0]], [root[1]], [root[2]], [NodeRole.ROOT]
+    seg_start, seg_end, seg_len, seg_rad, seg_ang = [], [], [], [], []
+
+    def add_node(p):
+        xs.append(float(p[0]))
+        ys.append(float(p[1]))
+        zs.append(float(p[2]))
+        roles.append(NodeRole.TERMINAL)
+        return len(xs) - 1
+
+    def add_seg(parent, child, length, radius):
+        seg_start.append(parent)
+        seg_end.append(child)
+        seg_len.append(length)
+        seg_rad.append(radius)
+        seg_ang.append(0.0)
+
+    L0 = length_to_radius * root_radius
+    add_seg(0, add_node(root + d0 * L0), L0, root_radius)
+
+    axes = (np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0]))
+    queue = deque([(1, d0, root_radius, L0, 0)])
+    while queue:
+        node, d, r, length, gen = queue.popleft()
+        if r <= min_radius or gen >= max_generations:
+            continue
+        roles[node] = NodeRole.BIFURCATION
+        axis = np.cross(axes[gen % 2], d)
+        if np.linalg.norm(axis) < 1e-9:
+            axis = np.cross(axes[(gen + 1) % 2], d)
+        axis = unit(axis)
+        cr, cl = r * ratio, length * ratio
+        parent_pos = np.array([xs[node], ys[node], zs[node]])
+        for sign in ((-1.0, 1.0) if not mirror else (1.0, -1.0)):
+            child_dir = unit(_rotate(d, axis, sign * theta))
+            child = add_node(parent_pos + child_dir * cl)
+            add_seg(node, child, cl, cr)
+            queue.append((child, child_dir, cr, cl, gen + 1))
+
+    return Network(
+        node_x=np.asarray(xs), node_y=np.asarray(ys),
+        node_role=np.asarray(roles, dtype=int),
+        seg_start=np.asarray(seg_start, dtype=int), seg_end=np.asarray(seg_end, dtype=int),
+        seg_length=np.asarray(seg_len), seg_radius=np.asarray(seg_rad),
+        seg_angle=np.asarray(seg_ang), root_node=0, node_z=np.asarray(zs),
+    )

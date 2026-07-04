@@ -36,6 +36,7 @@ perfusion-tree = "perfusion.examples.tree_optimize:main"
 perfusion-api = "perfusion.api.app:main"
 perfusion-mcp = "perfusion.mcp_server:main"
 perfusion-darcy3d = "perfusion.examples.darcy3d_demo:main"
+perfusion-hybrid3d = "perfusion.examples.hybrid3d_demo:main"
 
 [build-system]
 requires = ["hatchling"]

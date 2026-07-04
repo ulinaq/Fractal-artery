@@ -154,6 +154,35 @@ def solve_pressure_3d(grid: Grid3D, source: np.ndarray) -> np.ndarray:
     return p.reshape(grid.nx, grid.ny, grid.nz, order="F")
 
 
+def terminal_response_3d(grid: Grid3D, terminal_cells, eps: float, pin_cell=None):
+    """3-D Darcy terminal response (Schur coupling), mirroring ``darcy.terminal_response``.
+
+    Returns ``(response, field_response, sources)``: the ``(T, T)``
+    terminal-to-terminal pressure response, the ``(n_cells, T)`` full-field
+    response columns, and the per-terminal mollified sources.
+    """
+    n_terminals = len(terminal_cells)
+    active = grid.mask.ravel(order="F")
+    if pin_cell is None:
+        pin_cell = int(np.flatnonzero(active)[0])
+    A = tpfa_operator_3d(grid).tolil()
+    A[pin_cell, :] = 0.0
+    A[pin_cell, pin_cell] = 1.0                 # Dirichlet pin removes the nullspace
+    lu = spla.splu(A.tocsc())
+
+    sources = [point_source_3d(grid, int(c), eps) for c in terminal_cells]
+    rhs = np.zeros((grid.n_cells, n_terminals))
+    for j, (cells, weights) in enumerate(sources):
+        rhs[cells, j] = weights
+    rhs[pin_cell, :] = 0.0
+    field_response = lu.solve(rhs) if n_terminals else np.zeros((grid.n_cells, 0))
+
+    response = np.zeros((n_terminals, n_terminals))
+    for i, (cells, weights) in enumerate(sources):
+        response[i, :] = weights @ field_response[cells, :]
+    return response, field_response, sources
+
+
 def face_fluxes_3d(grid: Grid3D, pressure: np.ndarray):
     """Interior-face Darcy fluxes ``T * (p_owner - p_neighbour)`` per direction.
 

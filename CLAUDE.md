@@ -93,6 +93,15 @@ network with resistive links instead of a porous bed.
   extending that pattern over element-wise triplet loops.
 - **Vein flow orientation**: `q_v[s]` is positive toward the venous root, so the
   venous Poiseuille row is `−(S @ p_v)[s] − R q = 0` (i.e. `p_v[end] − p_v[start] = R q`).
+- **The network solver is coordinate-free** — `network.solve_linear` uses only
+  topology (`incidence`), `seg_length`/`seg_radius` (via `resistance`), and
+  `inlet_nodes`; it never reads `node_x/y/z` or `seg_angle`. That's why 3-D works
+  by reuse: a 3-D `Network` (with `node_z`, from `geometry.grow_tree_3d`) plugs
+  into the same solver, and 3-D adds only the Darcy coupling — `core.darcy3d`
+  (`Grid3D`, `tpfa_operator_3d`, `point_source_3d`, `terminal_response_3d`) and
+  `core.pipeline3d.run_hybrid_3d`, mirroring the 2-D `darcy`/`pipeline`.
+  `reconstruct_field` is dimension-agnostic and reused as-is. Don't make the
+  solver depend on coordinates.
 - **Shared upwind connectivity**: `darcy.upwind_operator` returns the net-inflow
   operator + per-cell outflow; both `timeofflight` and `transport` build on it.
 - **Boundary conditions**: Dirichlet `p_in` at the arterial `inlet_nodes` and
