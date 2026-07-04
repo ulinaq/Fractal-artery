@@ -48,6 +48,8 @@ const state = {
   fieldData: null,           // {name, shape, data, vmin, vmax}
   tracer: null,              // {shape, times, vmax, frames:[...]}
   flow: { active: false, idx: 0, timer: null },
+  busy: false,               // a job is running -> lock actions
+  hasResult: false,          // a solved result exists (enables Export)
 };
 
 // ── status helpers ────────────────────────────────────────────────────────────
@@ -56,6 +58,33 @@ function status(text, kind = "") { statusEl.textContent = text; statusEl.classNa
 const $ = (id) => document.getElementById(id);
 const numOf = (id) => Number($(id).value);
 const vtype = () => document.querySelector('input[name=vtype]:checked').value;
+
+// Actions that require a project (disabled until one exists, or while busy).
+const NEEDS_PROJECT = [
+  "btn-endseg", "btn-undo", "btn-clear", "btn-save-vessels", "img-file",
+  "btn-endregion", "btn-undo-region", "btn-clear-tissue", "btn-save-mask",
+  "btn-clear-io", "btn-save-io", "btn-grow", "btn-run", "btn-flow",
+];
+
+function refreshUI() {
+  const ready = !!state.project && !state.busy;
+  NEEDS_PROJECT.forEach((id) => { $(id).disabled = !ready; });
+  $("btn-new").disabled = state.busy;
+  $("btn-export").disabled = !(state.project && state.hasResult) || state.busy;
+}
+
+function setBusy(on) { state.busy = on; refreshUI(); }
+
+// Wrap a long-running action: lock the UI, surface errors, always unlock.
+function guarded(fn) {
+  return async () => {
+    if (state.busy) return;
+    setBusy(true);
+    try { await fn(); }
+    catch (e) { status(e.message, "err"); }
+    finally { setBusy(false); }
+  };
+}
 
 // ── project ───────────────────────────────────────────────────────────────────
 async function newProject() {
@@ -72,13 +101,18 @@ async function newProject() {
   state.stroke = []; state.regions = []; state.regionStroke = [];
   state.inlets = []; state.outlets = [];
   state.network = null; state.fieldData = null;
-  stopFlow(); state.tracer = null;
-  $("proj-id").textContent = `project ${p.id}`;
-  $("btn-export").disabled = true;
+  stopFlow(); state.tracer = null; state.hasResult = false;
+  showProjectLink(p.id);
   $("grow-info").textContent = ""; $("run-info").textContent = "";
   setMode("vessels");
+  refreshUI();
   status("project ready", "ok");
   redraw();
+}
+
+function showProjectLink(id) {
+  const url = `${location.origin}/?project=${id}`;
+  $("proj-id").innerHTML = `project <a href="${url}" title="shareable link">${id}</a>`;
 }
 
 function requireProject() {
@@ -202,6 +236,8 @@ async function grow() {
     { method: $("grow-method").value, n_points: numOf("grow-npts"),
       step: numOf("grow-step"), seed: numOf("seed") });
   $("grow-info").textContent = `grown tree: ${info.n_segments} segments, ${info.n_terminals} terminals`;
+  state.hasResult = false;         // grow invalidates any prior result server-side
+  stopFlow(); state.tracer = null; state.fieldData = null;
   await loadNetwork();
   status("arterial tree grown", "ok");
   redraw();
@@ -219,8 +255,8 @@ async function run() {
   const final = await pollJob(job.id);
   if (final.state === "error") { status("run failed", "err"); $("run-info").textContent = final.error; return; }
   status("solved", "ok");
+  state.hasResult = true;
   await Promise.all([loadNetwork(), showSummary(), loadField(state.field)]);
-  $("btn-export").disabled = false;
   setMode("result");
 }
 
@@ -459,7 +495,7 @@ function setMode(mode) {
 }
 
 // ── wiring ────────────────────────────────────────────────────────────────────
-$("btn-new").addEventListener("click", () => newProject().catch((e) => status(e.message, "err")));
+$("btn-new").addEventListener("click", guarded(newProject));
 $("btn-endseg").addEventListener("click", endStroke);
 $("btn-undo").addEventListener("click", undo);
 $("btn-clear").addEventListener("click", clearVessels);
@@ -472,8 +508,8 @@ $("btn-endregion").addEventListener("click", endRegion);
 $("btn-undo-region").addEventListener("click", undoRegion);
 $("btn-clear-tissue").addEventListener("click", clearTissue);
 $("btn-save-mask").addEventListener("click", () => saveMask().catch((e) => status(e.message, "err")));
-$("btn-grow").addEventListener("click", () => grow().catch((e) => status(e.message, "err")));
-$("btn-run").addEventListener("click", () => run().catch((e) => status(e.message, "err")));
+$("btn-grow").addEventListener("click", guarded(grow));
+$("btn-run").addEventListener("click", guarded(run));
 $("btn-export").addEventListener("click", () => {
   window.location = `/projects/${state.project}/export?fmt=${$("export-fmt").value}`;
 });
@@ -491,7 +527,7 @@ document.querySelectorAll(".field").forEach((b) => b.addEventListener("click", (
   if (state.project) loadField(b.dataset.field).catch((e) => status(e.message, "err"));
 }));
 
-$("btn-flow").addEventListener("click", () => computeFlow().catch((e) => status(e.message, "err")));
+$("btn-flow").addEventListener("click", guarded(computeFlow));
 $("flow-play").addEventListener("click", toggleFlowPlay);
 $("flow-scrub").addEventListener("input", (e) => {
   pauseFlow(); state.flow.idx = Number(e.target.value); syncFlowUI(); redraw();
@@ -502,19 +538,21 @@ async function openProject(id) {
   const info = await api("GET", `/projects/${id}`);
   state.project = info.id;
   $("proj-name").value = info.name;
-  $("proj-id").textContent = `project ${info.id}`;
+  showProjectLink(info.id);
   stopFlow(); state.tracer = null;
+  state.hasResult = !!info.has_result;
   await Promise.all([loadNetwork(), loadMask(), loadIO()]);
   if (info.has_result) {
     await Promise.all([showSummary(), loadField(state.field)]);
-    $("btn-export").disabled = false;
     setMode("result");
   } else { setMode("vessels"); }
+  refreshUI();
   status(`opened ${info.id}`, "ok");
 }
 
 // ── boot ──────────────────────────────────────────────────────────────────────
 (async function boot() {
+  refreshUI();                               // actions disabled until a project exists
   try { const h = await api("GET", "/health"); status(`connected · v${h.version}`, "ok"); }
   catch { status("back-end unreachable", "err"); redraw(); return; }
   const shared = new URLSearchParams(location.search).get("project");
