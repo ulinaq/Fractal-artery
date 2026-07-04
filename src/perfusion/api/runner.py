@@ -1,0 +1,119 @@
+"""Model building + job execution, independent of the web app.
+
+Kept out of ``app.py`` so both the FastAPI endpoints and background workers (the
+thread pool *and* an optional RQ worker process) can build the model and run a
+project without importing the app. Functions take a ``ProjectStore`` + a
+``Project`` and persist their results through the store.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+from .. import tkm, transport
+from ..core.geometry import (
+    arterial_tree,
+    network_from_polylines,
+    rasterize_mask,
+    venous_tree,
+)
+from ..core.pipeline import run_hybrid
+from .schemas import RunRequest, TracerRequest
+
+
+def polylines_to_network(polylines, root_xy=None):
+    return network_from_polylines([p.points for p in polylines],
+                                  radii=[p.radius for p in polylines], root_xy=root_xy)
+
+
+def build_grid(project):
+    """Grid (with the tissue mask, if any) + its domain window."""
+    domain_limit = project.grid.domain_limit
+    mask = (rasterize_mask(project.grid.nx, project.grid.ny, domain_limit, project.regions)
+            if project.regions else None)
+    return project.grid.to_core(mask=mask), domain_limit
+
+
+def build_networks(project, use_vessels):
+    """Arterial/venous networks: a grown/segmented tree wins, else hand-drawn."""
+    art = ven = None
+    if use_vessels and project.has_vessels:
+        art = polylines_to_network(project.arteries) if project.arteries else None
+        ven = polylines_to_network(project.veins) if project.veins else None
+    if project.artery_network is not None:
+        art = project.artery_network
+    if project.vein_network is not None:
+        ven = project.vein_network
+    return art, ven
+
+
+def snap_io(net, points):
+    """Snap inlet/outlet points to nearest vessel ends; keep every component fed.
+
+    Each connected component (separate feeding tree) must keep >=1 prescribed
+    node or its block is singular, so any component the user left unmarked is
+    topped up with its own root.
+    """
+    if net is None or not points:
+        return None
+    ends = np.unique(np.concatenate([np.flatnonzero(net.node_degree == 1),
+                                     net.inlet_nodes]))
+    ex, ey = net.node_x[ends], net.node_y[ends]
+    idx = {int(ends[int(np.argmin((ex - x) ** 2 + (ey - y) ** 2))]) for x, y in points}
+    labels = net.node_components()
+    covered = {int(labels[i]) for i in idx}
+    for root in net.inlet_nodes:
+        if int(labels[root]) not in covered:
+            idx.add(int(root))
+            covered.add(int(labels[root]))
+    return np.array(sorted(idx), dtype=int)
+
+
+def solve(project, *, use_vessels, nonlinear=False):
+    """Build the model (grid, trees, inlet/outlet nodes) and run the hybrid solve."""
+    prm = project.params.to_core()
+    grid, domain_limit = build_grid(project)
+    art, ven = build_networks(project, use_vessels)
+    if project.inlets and art is None:      # custom inlets on the default tree
+        art = arterial_tree(prm)
+    if project.outlets and ven is None:
+        ven = venous_tree(prm)
+    return run_hybrid(prm, grid, domain_limit=domain_limit, nonlinear=nonlinear,
+                      art=art, ven=ven,
+                      art_inlets=snap_io(art, project.inlets),
+                      ven_outlets=snap_io(ven, project.outlets))
+
+
+def run_project(store, project, req: RunRequest) -> None:
+    """Execute the hybrid simulation for a project and persist the result."""
+    result = solve(project, use_vessels=req.use_vessels, nonlinear=req.nonlinear)
+    store.save_result(project, result)
+
+
+def run_tracer(store, project, req: TracerRequest) -> None:
+    """Solve the flow, advect a contrast bolus, and persist the animation frames."""
+    result = solve(project, use_vessels=True)
+
+    # Time-scale from a characteristic transit time; long tail so the animation
+    # shows inflow -> peak -> washout rather than cutting off.
+    finite = result.tof[np.isfinite(result.tof)]
+    t_char = float(np.percentile(finite, 80)) if finite.size else 5.0
+    duration = req.duration or 5.0 * max(t_char, 1e-3)
+    t0 = req.aif_t0 if req.aif_t0 is not None else 0.08 * duration
+
+    n_steps = max(req.n_frames, 500)
+    dt = duration / n_steps
+    t = np.arange(n_steps) * dt
+    aif = tkm.gamma_variate_aif(t, t0=t0, A=3.0, B=max(0.06 * duration, dt))
+    peak = float(aif.max())
+    if peak > 0:
+        aif = aif / peak                        # unit-peak bolus -> concentrations O(1)
+    full = transport.transport_forward(
+        result.grid, result.fx, result.fy, result.sources,
+        result.solution.terminal_flux, aif, dt, theta=1.0)
+    stride = max(1, n_steps // req.n_frames)
+    frames, times = full[::stride][:req.n_frames], t[::stride][:req.n_frames]
+    # Robust colour scale: injection cells spike far above the tissue.
+    active = frames[:, result.grid.mask]
+    vmax = float(np.nanpercentile(active, 99)) if active.size else 0.0
+    store.save_tracer(project, frames, times, vmax if vmax > 0 else 1.0, result.grid.mask)

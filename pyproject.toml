@@ -19,12 +19,15 @@ dependencies = [
 image = ["imageio>=2.30", "scikit-image>=0.21"]
 api = ["fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2.5"]
 mcp = ["mcp>=1.0"]
+rq = ["rq>=1.15"]   # optional Redis-backed task queue (needs a running Redis)
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
     "ruff>=0.5",
-    "httpx>=0.27",   # FastAPI TestClient
+    "httpx>=0.27",     # FastAPI TestClient
+    "fakeredis>=2.20", # exercise the RQ backend without a real Redis
+    "rq>=1.15",
 ]
 
 [project.scripts]

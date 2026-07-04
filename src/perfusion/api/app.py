@@ -11,15 +11,9 @@ from fastapi import FastAPI, HTTPException, Request
 
 from .. import growth
 from .. import io as perfio
-from ..core import tkm, transport
-from ..core.geometry import (
-    arterial_tree,
-    network_from_polylines,
-    rasterize_mask,
-    venous_tree,
-)
-from ..core.pipeline import run_hybrid
-from .jobs import JobManager
+from ..core.geometry import arterial_tree, rasterize_mask
+from . import runner
+from .jobs import JobManager, RQJobManager
 from .schemas import (
     FieldResponse,
     GrowInfo,
@@ -39,106 +33,21 @@ from .store import Project, ProjectStore
 _FIELDS = {"pressure": "pressure", "flux": "flux", "tof": "tof"}
 
 
-def _polylines_to_network(polylines, root_xy=None):
-    lines = [p.points for p in polylines]
-    radii = [p.radius for p in polylines]
-    return network_from_polylines(lines, radii=radii, root_xy=root_xy)
+def _default_jobs(store: ProjectStore):
+    """Pick the job backend: RQ if ``PERFUSION_QUEUE=rq`` (and reachable), else threads."""
+    import os
 
+    if os.environ.get("PERFUSION_QUEUE", "").lower() == "rq":
+        try:
+            from redis import Redis
+            from rq import Queue
 
-def _build_grid(project: Project):
-    """Grid (with the tissue mask, if any) + its domain window."""
-    domain_limit = project.grid.domain_limit
-    mask = (rasterize_mask(project.grid.nx, project.grid.ny, domain_limit, project.regions)
-            if project.regions else None)
-    return project.grid.to_core(mask=mask), domain_limit
-
-
-def _build_networks(project: Project, use_vessels: bool):
-    """Arterial/venous networks: a grown tree wins, else hand-drawn, else defaults."""
-    art = ven = None
-    if use_vessels and project.has_vessels:
-        art = _polylines_to_network(project.arteries) if project.arteries else None
-        ven = _polylines_to_network(project.veins) if project.veins else None
-    if project.artery_network is not None:   # a grown/segmented tree wins
-        art = project.artery_network
-    if project.vein_network is not None:
-        ven = project.vein_network
-    return art, ven
-
-
-def _snap_io(net, points):
-    """Snap inlet/outlet points to the nearest vessel ends -> node indices.
-
-    Every connected component (separate feeding tree) must keep at least one
-    prescribed-pressure node or its block is singular, so any component the user
-    left unmarked is topped up with its own root.
-    """
-    if net is None or not points:
-        return None
-    ends = np.unique(np.concatenate([np.flatnonzero(net.node_degree == 1),
-                                     net.inlet_nodes]))
-    ex, ey = net.node_x[ends], net.node_y[ends]
-    idx = {int(ends[int(np.argmin((ex - x) ** 2 + (ey - y) ** 2))]) for x, y in points}
-
-    labels = net.node_components()
-    covered = {int(labels[i]) for i in idx}
-    for root in net.inlet_nodes:                    # component roots from construction
-        if int(labels[root]) not in covered:
-            idx.add(int(root))
-            covered.add(int(labels[root]))
-    return np.array(sorted(idx), dtype=int)
-
-
-def _solve(project: Project, *, use_vessels: bool, nonlinear: bool = False):
-    """Build the model (grid, trees, inlet/outlet nodes) and run the hybrid solve."""
-    prm = project.params.to_core()
-    grid, domain_limit = _build_grid(project)
-    art, ven = _build_networks(project, use_vessels)
-    if project.inlets and art is None:      # custom inlets on the default tree
-        art = arterial_tree(prm)
-    if project.outlets and ven is None:
-        ven = venous_tree(prm)
-    return run_hybrid(prm, grid, domain_limit=domain_limit, nonlinear=nonlinear,
-                      art=art, ven=ven,
-                      art_inlets=_snap_io(art, project.inlets),
-                      ven_outlets=_snap_io(ven, project.outlets))
-
-
-def _run_project(store: ProjectStore, project: Project, req: RunRequest) -> None:
-    """Execute the hybrid simulation for a project and persist the result."""
-    result = _solve(project, use_vessels=req.use_vessels, nonlinear=req.nonlinear)
-    store.save_result(project, result)
-
-
-def _run_tracer(store: ProjectStore, project: Project, req: TracerRequest) -> None:
-    """Solve the flow, then advect a contrast bolus and persist the frames."""
-    result = _solve(project, use_vessels=True)
-
-    # Time-scale from a characteristic transit time; leave a long tail for washout
-    # so the animation shows inflow -> peak -> washout rather than cutting off.
-    finite = result.tof[np.isfinite(result.tof)]
-    t_char = float(np.percentile(finite, 80)) if finite.size else 5.0
-    duration = req.duration or 5.0 * max(t_char, 1e-3)
-    t0 = req.aif_t0 if req.aif_t0 is not None else 0.08 * duration
-
-    # Integrate finely (implicit, unconditionally stable), then subsample frames.
-    n_steps = max(req.n_frames, 500)
-    dt = duration / n_steps
-    t = np.arange(n_steps) * dt
-    aif = tkm.gamma_variate_aif(t, t0=t0, A=3.0, B=max(0.06 * duration, dt))
-    peak = float(aif.max())
-    if peak > 0:
-        aif = aif / peak          # unit-peak bolus so concentrations stay O(1)
-    full = transport.transport_forward(
-        result.grid, result.fx, result.fy, result.sources,
-        result.solution.terminal_flux, aif, dt, theta=1.0)
-    stride = max(1, n_steps // req.n_frames)
-    frames, times = full[::stride][:req.n_frames], t[::stride][:req.n_frames]
-    # Robust colour scale: the arterial injection cells spike far above the tissue,
-    # so clip to the 99th percentile over active cells to reveal the perfusion front.
-    active = frames[:, result.grid.mask]
-    vmax = float(np.nanpercentile(active, 99)) if active.size else 0.0
-    store.save_tracer(project, frames, times, vmax if vmax > 0 else 1.0, result.grid.mask)
+            conn = Redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
+            conn.ping()
+            return RQJobManager(store, Queue("perfusion", connection=conn))
+        except Exception:            # rq/redis missing or unreachable -> threads
+            pass
+    return JobManager(store)
 
 
 def _info(project: Project) -> ProjectInfo:
@@ -153,7 +62,7 @@ def create_app(store: ProjectStore | None = None,
     from .. import __version__
 
     store = store or ProjectStore()
-    jobs = jobs or JobManager(store)
+    jobs = jobs or _default_jobs(store)
     app = FastAPI(title="perfusion API", version=__version__,
                   summary="Multiscale blood-flow & perfusion modelling service")
 
@@ -261,7 +170,7 @@ def create_app(store: ProjectStore | None = None,
         mask = (rasterize_mask(project.grid.nx, project.grid.ny, domain_limit, project.regions)
                 if project.regions else np.ones((project.grid.nx, project.grid.ny), bool))
 
-        base = (_polylines_to_network(project.arteries)
+        base = (runner.polylines_to_network(project.arteries)
                 if project.arteries else arterial_tree(project.params.to_core()))
         if req.method == "cco":
             network = growth.cco_grow_in_mask(
@@ -286,7 +195,7 @@ def create_app(store: ProjectStore | None = None,
     def run_project(pid: str, body: RunRequest | None = None) -> JobInfo:
         project = _project(pid)
         req = body or RunRequest()
-        jid = jobs.submit(lambda: _run_project(store, project, req), project.id, kind="run")
+        jid = jobs.submit(project.id, "run", req.model_dump())
         return JobInfo(**jobs.get(jid))
 
     @app.get("/jobs", response_model=list[JobInfo])
@@ -363,18 +272,18 @@ def create_app(store: ProjectStore | None = None,
         if project.artery_network is not None:
             _add(project.artery_network, "artery")
         elif project.arteries:
-            _add(_polylines_to_network(project.arteries), "artery")
+            _add(runner.polylines_to_network(project.arteries), "artery")
         if project.vein_network is not None:
             _add(project.vein_network, "vein")
         elif project.veins:
-            _add(_polylines_to_network(project.veins), "vein")
+            _add(runner.polylines_to_network(project.veins), "vein")
         return {"segments": segments}
 
     @app.post("/projects/{pid}/tracer", response_model=JobInfo)
     def run_tracer(pid: str, body: TracerRequest | None = None) -> JobInfo:
         project = _project(pid)
         req = body or TracerRequest()
-        jid = jobs.submit(lambda: _run_tracer(store, project, req), project.id, kind="tracer")
+        jid = jobs.submit(project.id, "tracer", req.model_dump())
         return JobInfo(**jobs.get(jid))
 
     @app.get("/projects/{pid}/tracer", response_model=TracerInfo)

@@ -18,10 +18,12 @@ zero-build 2-D web `frontend/` (plain HTML/CSS/ES-modules, mounted at `/` by
 SQLite + a filesystem blob store (grown/segmented networks + result & tracer
 `.npz`) under `$PERFUSION_DATA`, so projects/results survive a restart; heavy
 binary artefacts never go in the DB. Jobs are also in SQLite (a durable
-registry): the `JobManager` runs work on a thread pool but writes lifecycle
-through the store, and stale in-flight jobs are reaped to `interrupted` on
-startup. Physics goes in `core`; anything with optional deps or side effects
-stays out of it. The public API (`from perfusion
+registry): job execution lives in `api/runner.py` (+ `jobs.run_job`, which
+reopens the store from its root) so it runs in either the default thread pool
+(`JobManager`) or an optional RQ/Redis worker (`RQJobManager`, `PERFUSION_QUEUE=rq`),
+both writing lifecycle through the store; stale in-flight jobs are reaped to
+`interrupted` on startup. Physics goes in `core`; anything with optional deps or
+side effects stays out of it. The public API (`from perfusion
 import Grid, Parameters, run_hybrid, …` and module handles `perfusion.darcy`,
 `perfusion.geometry`, …) is re-exported from `perfusion/__init__.py`; deep
 imports use `perfusion.core.*`.
