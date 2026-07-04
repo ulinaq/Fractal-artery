@@ -30,13 +30,26 @@ def test_model_info_shape():
     assert {"pressure", "flux", "tof"} <= set(info["fields"])
 
 
+def test_sweep_trend_is_monotone_in_p_in():
+    r = mcp_server.sweep("p_in", [5.0, 10.0, 20.0], nx=40, ny=50, r_min_frac=0.6)
+    assert r["param"] == "p_in"
+    assert len(r["points"]) == 3
+    inflow = [p["arterial_inflow"] for p in r["points"]]
+    assert inflow[0] < inflow[1] < inflow[2]        # inflow rises with driving pressure
+
+
+def test_sweep_rejects_unknown_param():
+    with pytest.raises(ValueError, match="param"):
+        mcp_server.sweep("bogus", [1, 2])
+
+
 def test_server_registers_expected_tools():
     pytest.importorskip("mcp")
     import asyncio
 
     server = mcp_server.build_server()
     tools = {t.name for t in asyncio.run(server.list_tools())}
-    assert {"run_simulation", "describe_model"} <= tools
+    assert {"run_simulation", "run_sweep", "describe_model"} <= tools
 
 
 def test_simulate_is_json_serialisable():
