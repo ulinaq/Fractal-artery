@@ -92,8 +92,9 @@ frames, job) + `tracer.gif`, `projects/{id}/export?fmt=npz|csv|vtk`.
 
 `uv run --extra mcp perfusion-mcp` starts a [Model Context
 Protocol](https://modelcontextprotocol.io) server (stdio) that exposes the engine
-as tools — `run_simulation` and `describe_model` — so any MCP client (Claude
-Desktop, Claude Code, an agent) can drive the model. The bundled
+as tools — `run_simulation`, `run_sweep` (probe how perfusion responds to a
+parameter), and `describe_model` — so any MCP client (Claude Desktop, Claude
+Code, an agent) can drive the model. The bundled
 [`.mcp.json`](.mcp.json) registers it for Claude Code automatically when working
 in this repo.
 

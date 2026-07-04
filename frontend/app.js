@@ -513,6 +513,21 @@ $("btn-run").addEventListener("click", guarded(run));
 $("btn-export").addEventListener("click", () => {
   window.location = `/projects/${state.project}/export?fmt=${$("export-fmt").value}`;
 });
+$("btn-png").addEventListener("click", () => {
+  // client-side snapshot of the current view, composited onto a white background
+  const out = document.createElement("canvas");
+  out.width = canvas.width; out.height = canvas.height;
+  const octx = out.getContext("2d");
+  octx.fillStyle = "#fff"; octx.fillRect(0, 0, out.width, out.height);
+  octx.drawImage(canvas, 0, 0);
+  out.toBlob((blob) => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `perfusion-${state.project || "view"}-${state.mode}.png`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+});
 $("btn-clear-io").addEventListener("click", clearIO);
 $("btn-save-io").addEventListener("click", () => saveIO().catch((e) => status(e.message, "err")));
 $("mode-vessels").addEventListener("click", () => setMode("vessels"));
