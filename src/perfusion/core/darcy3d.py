@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import scipy.sparse as sp
+import scipy.sparse.linalg as spla
 
 
 @dataclass
@@ -111,6 +112,46 @@ def tpfa_operator_3d(grid: Grid3D) -> sp.csr_matrix:
     A = sp.coo_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
                       shape=(n, n))
     return A.tocsr()
+
+
+def point_source_3d(grid: Grid3D, center: int, eps: float):
+    """Compactly supported 3-D source around a cell (the thesis bump kernel).
+
+    Mirrors the 2-D ``darcy.point_source``: ``exp(-1/(1-r^2))`` over cells within
+    ``eps`` cell-radii of ``center``, restricted to the active mask, weights
+    summing to 1. Returns ``(cell_indices, weights)``.
+    """
+    xc, yc, zc = grid.cell_centers()
+    dist2 = (((xc - xc[center]) / grid.hx) ** 2
+             + ((yc - yc[center]) / grid.hy) ** 2
+             + ((zc - zc[center]) / grid.hz) ** 2)
+    support = (dist2 <= eps**2) & grid.mask.ravel(order="F")
+    if not support.any():
+        support[center] = True
+    normalised = np.clip(dist2[support] / eps**2, 0.0, 1.0 - 1e-12)
+    weights = np.exp(-1.0 / (1.0 - normalised))
+    total = weights.sum()
+    if not np.isfinite(total) or total <= 0.0:
+        weights = np.ones_like(weights)
+        total = weights.sum()
+    weights /= total
+    return np.flatnonzero(support), weights
+
+
+def solve_pressure_3d(grid: Grid3D, source: np.ndarray) -> np.ndarray:
+    """Solve ``-div(K grad p) = source`` on the active 3-D domain.
+
+    ``source`` is the net volumetric injection per cell (must sum to ~0 over the
+    active domain for a well-posed Neumann problem). One active cell is pinned as
+    the pressure datum. Returns the ``(nx, ny, nz)`` pressure field.
+    """
+    active = grid.mask.ravel(order="F")
+    A = tpfa_operator_3d(grid).tolil()
+    b = np.asarray(source, dtype=float).copy()
+    pin = int(np.flatnonzero(active)[0])
+    A.rows[pin], A.data[pin], b[pin] = [pin], [1.0], 0.0     # datum: p_pin = 0
+    p = spla.spsolve(A.tocsr(), b)
+    return p.reshape(grid.nx, grid.ny, grid.nz, order="F")
 
 
 def face_fluxes_3d(grid: Grid3D, pressure: np.ndarray):

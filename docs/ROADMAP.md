@@ -281,9 +281,12 @@ imports move to `perfusion.core.*`.
   Convention: new features also get an MCP tool.
 - ✅ **CI** — GitHub Actions runs ruff + the full test suite on Python 3.10/3.12
   and a front-end syntax check (`.github/workflows/ci.yml`).
-- 🚧 **3-D foundation (Phase 4, slice 1)** — `core.darcy3d`: a uniform `Grid3D` +
-  3-D TPFA operator (mask-isolated, singular Neumann), verified against a linear
-  pressure ramp. Not yet coupled to the network solver.
+- 🚧 **3-D foundation (Phase 4)** — `core.darcy3d`: a uniform `Grid3D`, 3-D TPFA
+  operator (mask-isolated, singular Neumann), `face_fluxes_3d`, a compact 3-D
+  mollified `point_source_3d`, and `solve_pressure_3d` (source-driven Darcy solve
+  with a pinned datum). Verified against a linear pressure ramp and a
+  source–sink dipole. *Next 3-D:* 3-D fractal trees + coupling to the network
+  solver, then vtk.js rendering.
 
 - ✅ **Task queue (optional RQ)** — job execution moved to `api.runner` +
   `run_job` (reconstructs the store from its root), so it runs in either the
