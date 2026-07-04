@@ -29,21 +29,24 @@ from .core import (
     network,
     parameters,
     pipeline,
+    pipeline3d,
     timeofflight,
     tkm,
     transport,
     viscosity,
 )
 from .core.darcy import Grid
-from .core.geometry import Network, arterial_tree, venous_tree
+from .core.geometry import Network, arterial_tree, grow_tree_3d, venous_tree
 from .core.parameters import Parameters
 from .core.pipeline import HybridResult, run_hybrid
+from .core.pipeline3d import HybridResult3D, run_hybrid_3d
 
 __version__ = "0.1.0"
 
 __all__ = [
     "Grid",
     "HybridResult",
+    "HybridResult3D",
     "Network",
     "Parameters",
     "arterial_tree",
@@ -51,11 +54,14 @@ __all__ = [
     "darcy3d",
     "direct",
     "geometry",
+    "grow_tree_3d",
     "growth",
     "network",
     "parameters",
     "pipeline",
+    "pipeline3d",
     "run_hybrid",
+    "run_hybrid_3d",
     "timeofflight",
     "tkm",
     "transport",

@@ -281,12 +281,14 @@ imports move to `perfusion.core.*`.
   Convention: new features also get an MCP tool.
 - ✅ **CI** — GitHub Actions runs ruff + the full test suite on Python 3.10/3.12
   and a front-end syntax check (`.github/workflows/ci.yml`).
-- 🚧 **3-D foundation (Phase 4)** — `core.darcy3d`: a uniform `Grid3D`, 3-D TPFA
-  operator (mask-isolated, singular Neumann), `face_fluxes_3d`, a compact 3-D
-  mollified `point_source_3d`, and `solve_pressure_3d` (source-driven Darcy solve
-  with a pinned datum). Verified against a linear pressure ramp and a
-  source–sink dipole. *Next 3-D:* 3-D fractal trees + coupling to the network
-  solver, then vtk.js rendering.
+- ✅ **Full 3-D hybrid coupling (Phase 4)** — `core.darcy3d` (`Grid3D`, 3-D TPFA,
+  `point_source_3d`, `terminal_response_3d`, `solve_pressure_3d`, `face_fluxes_3d`),
+  3-D fractal trees (`geometry.grow_tree_3d`, `Network.node_z`), and
+  `pipeline3d.run_hybrid_3d` couple 3-D arterial/venous trees to a 3-D Darcy bed.
+  The network solver is *coordinate-free*, so it is reused verbatim. Verified:
+  the coupled 3-D solve conserves mass (arterial inflow == venous outflow), pins
+  inlets/outlets, and supports multiple inlets. Demo: `perfusion-hybrid3d`.
+  *Next 3-D:* 3-D segmentation from image stacks; vtk.js rendering in the UI.
 
 - ✅ **Task queue (optional RQ)** — job execution moved to `api.runner` +
   `run_job` (reconstructs the store from its root), so it runs in either the

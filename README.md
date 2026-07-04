@@ -44,7 +44,8 @@ uv run python -m perfusion.examples.tkm_demo   # Paper C: TKM comparison
 uv run python scripts/generate_data.py         # regenerate bundled datasets
 uv run perfusion-api         # start the FastAPI back-end (http://127.0.0.1:8000)
 uv run --extra mcp perfusion-mcp   # start the MCP server (stdio)
-uv run perfusion-darcy3d     # Phase 4 demo: 3-D Darcy source→sink slices
+uv run perfusion-darcy3d     # 3-D Darcy source→sink slices
+uv run perfusion-hybrid3d    # Phase 4: full 3-D hybrid (3-D trees + 3-D Darcy)
 ```
 
 ### Web app
@@ -201,6 +202,8 @@ src/perfusion/          # the package
     tkm.py              #   tracer-kinetic models + fitting
     timeofflight.py     #   flux magnitude + upwind time-of-flight
     pipeline.py         #   one-call end-to-end hybrid run
+    darcy3d.py          #   3-D Darcy grid/TPFA + terminal response (Phase 4)
+    pipeline3d.py       #   3-D hybrid: 3-D trees coupled to a 3-D Darcy bed
   segmentation.py       # image → vascular Network (skeletonise + graph trace)
   growth.py             # grow vessels into tissue (space colonisation)
   optimize.py           # vascular-structure optimisation objectives (Paper D)
