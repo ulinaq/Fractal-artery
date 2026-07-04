@@ -86,7 +86,8 @@ uploaded vessel image),
 `projects/{id}/run` (job), `jobs` (durable registry) + `jobs/{id}`,
 `projects/{id}/results[/field/{name}]`,
 `projects/{id}/network` (overlay geometry), `projects/{id}/tracer` (flow-video
-frames, job) + `tracer.gif`, `projects/{id}/export?fmt=npz|csv|vtk`.
+frames, job) + `tracer.gif`, `projects/{id}/export?fmt=npz|csv|vtk`,
+`projects/{id}/bundle` (one zip: npz + CSV + VTK + summary/meta + GIF).
 
 ### MCP server
 

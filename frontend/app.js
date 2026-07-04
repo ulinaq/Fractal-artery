@@ -70,7 +70,9 @@ function refreshUI() {
   const ready = !!state.project && !state.busy;
   NEEDS_PROJECT.forEach((id) => { $(id).disabled = !ready; });
   $("btn-new").disabled = state.busy;
-  $("btn-export").disabled = !(state.project && state.hasResult) || state.busy;
+  const canExport = !!(state.project && state.hasResult) && !state.busy;
+  $("btn-export").disabled = !canExport;
+  $("btn-bundle").disabled = !canExport;
 }
 
 function setBusy(on) { state.busy = on; refreshUI(); }
@@ -512,6 +514,9 @@ $("btn-grow").addEventListener("click", guarded(grow));
 $("btn-run").addEventListener("click", guarded(run));
 $("btn-export").addEventListener("click", () => {
   window.location = `/projects/${state.project}/export?fmt=${$("export-fmt").value}`;
+});
+$("btn-bundle").addEventListener("click", () => {
+  window.location = `/projects/${state.project}/bundle`;
 });
 $("btn-png").addEventListener("click", () => {
   // client-side snapshot of the current view, composited onto a white background

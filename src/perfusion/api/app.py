@@ -254,6 +254,44 @@ def create_app(store: ProjectStore | None = None,
             media = "application/xml"
         return FileResponse(out, media_type=media, filename=f"{name}.{fmt}")
 
+    @app.get("/projects/{pid}/bundle")
+    def export_bundle(pid: str):
+        """One zip with everything: npz + CSV + VTK fields, summary/meta JSON, and
+        the tracer GIF if one exists."""
+        import contextlib
+        import json
+        import zipfile
+
+        from fastapi.responses import FileResponse
+
+        project = _project(pid)
+        if not project.has_result:
+            raise HTTPException(409, "no result yet; run the simulation first")
+        name = project.name or project.id
+        with np.load(store.result_path(pid)) as d:
+            dl, mask = tuple(d["domain_limit"]), d["mask"]
+            fields = {"pressure": d["pressure"], "flux": d["flux"], "tof": d["tof"]}
+        tmp = Path(tempfile.gettempdir())
+        csv_path, vtk_path = tmp / f"{pid}_f.csv", tmp / f"{pid}_f.vti"
+        perfio.fields_to_csv(csv_path, dl, mask=mask, **fields)
+        perfio.fields_to_vtk(vtk_path, dl, mask=mask, **fields)
+        meta = {"id": pid, "name": project.name,
+                "params": project.params.model_dump(), "grid": project.grid.model_dump(),
+                "inlets": project.inlets, "outlets": project.outlets,
+                "regions": project.regions}
+
+        out = tmp / f"perfusion_bundle_{pid}.zip"
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+            z.write(store.result_path(pid), "results.npz")
+            z.write(csv_path, "fields.csv")
+            z.write(vtk_path, "fields.vti")
+            z.writestr("summary.json", json.dumps(project.summary, indent=2))
+            z.writestr("meta.json", json.dumps(meta, indent=2))
+            if project.has_tracer:
+                with contextlib.suppress(ImportError):   # GIF needs the image extra
+                    z.writestr("tracer.gif", _render_gif(store.load_tracer(pid)))
+        return FileResponse(out, media_type="application/zip", filename=f"{name}.zip")
+
     @app.get("/projects/{pid}/network")
     def network_geometry(pid: str) -> dict:
         """Segment geometry (domain frame) for overlaying grown/drawn vessels."""
