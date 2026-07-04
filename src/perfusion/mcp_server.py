@@ -46,6 +46,27 @@ def simulate(p_in: float = 10.0, p_out: float = 0.0, nx: int = 120, ny: int = 14
     return summary
 
 
+_SWEEPABLE = ("p_in", "p_out", "r_min_frac")
+
+
+def sweep(param: str, values, **base) -> dict:
+    """Run :func:`simulate` across ``values`` of one parameter; return the trend.
+
+    ``param`` is one of ``p_in``, ``p_out``, ``r_min_frac``. Each point reports the
+    arterial inflow and mean flux / time-of-flight, so you can see how perfusion
+    responds to the parameter.
+    """
+    if param not in _SWEEPABLE:
+        raise ValueError(f"param must be one of {_SWEEPABLE}")
+    points = []
+    for v in values:
+        s = simulate(**{**base, param: float(v)})
+        points.append({"value": float(v),
+                       "arterial_inflow": s["arterial_inflow"],
+                       "flux_mean": s["flux_mean"], "tof_mean": s["tof_mean"]})
+    return {"param": param, "points": points}
+
+
 def model_info() -> dict:
     """Describe what the perfusion model computes and the fields it returns."""
     return {
@@ -84,6 +105,16 @@ def build_server():
         venous outflow, pressure/flux/time-of-flight statistics)."""
         return simulate(p_in=p_in, p_out=p_out, nx=nx, ny=ny,
                         r_min_frac=r_min_frac, nonlinear=nonlinear)
+
+    @server.tool()
+    def run_sweep(param: str, values: list[float], p_in: float = 10.0,
+                  p_out: float = 0.0, nx: int = 90, ny: int = 110,
+                  r_min_frac: float = 0.15) -> dict:
+        """Sweep one parameter ('p_in', 'p_out' or 'r_min_frac') over `values` and
+        return the arterial inflow / mean flux / mean time-of-flight at each — a
+        quick way to see how perfusion responds to a parameter."""
+        base = {"p_in": p_in, "p_out": p_out, "nx": nx, "ny": ny, "r_min_frac": r_min_frac}
+        return sweep(param, values, **base)
 
     @server.tool()
     def describe_model() -> dict:
