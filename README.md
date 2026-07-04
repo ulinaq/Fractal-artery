@@ -44,6 +44,7 @@ uv run python -m perfusion.examples.tkm_demo   # Paper C: TKM comparison
 uv run python scripts/generate_data.py         # regenerate bundled datasets
 uv run perfusion-api         # start the FastAPI back-end (http://127.0.0.1:8000)
 uv run --extra mcp perfusion-mcp   # start the MCP server (stdio)
+uv run perfusion-darcy3d     # Phase 4 demo: 3-D Darcy source→sink slices
 ```
 
 ### Web app

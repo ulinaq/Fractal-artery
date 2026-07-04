@@ -35,6 +35,7 @@ perfusion-frog = "perfusion.examples.frog_hybrid:main"
 perfusion-tree = "perfusion.examples.tree_optimize:main"
 perfusion-api = "perfusion.api.app:main"
 perfusion-mcp = "perfusion.mcp_server:main"
+perfusion-darcy3d = "perfusion.examples.darcy3d_demo:main"
 
 [build-system]
 requires = ["hatchling"]
