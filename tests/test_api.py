@@ -77,6 +77,16 @@ def test_run_results_and_export(client):
 
     assert client.get(f"/projects/{pid}/export", params={"fmt": "bogus"}).status_code == 422
 
+    # one-zip bundle of everything
+    import io as _io
+    import zipfile
+
+    bundle = client.get(f"/projects/{pid}/bundle")
+    assert bundle.status_code == 200
+    with zipfile.ZipFile(_io.BytesIO(bundle.content)) as z:
+        assert {"results.npz", "fields.csv", "fields.vti", "summary.json",
+                "meta.json"} <= set(z.namelist())
+
 
 def test_run_with_hand_drawn_vessels(client):
     pid = client.post("/projects", json={
