@@ -34,6 +34,9 @@ body { background: var(--bg); color: var(--ink); font-size: 14px; }
 }
 .status.ok { color: #047857; background: #ecfdf5; border-color: #a7f3d0; }
 .status.err { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
+.topbar-right { display: flex; align-items: center; gap: 12px; }
+.link3d { font-size: 13px; color: var(--accent); text-decoration: none; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; }
+.link3d:hover { border-color: var(--accent); }
 
 /* layout */
 .layout { display: grid; grid-template-columns: 320px 1fr; gap: 16px; padding: 16px; align-items: start; }

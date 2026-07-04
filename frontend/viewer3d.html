@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>perfusion — 3-D viewer</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">🩸</span>
+      <div>
+        <h1>perfusion — 3-D viewer</h1>
+        <p class="sub">3-D hybrid: arterial + venous trees coupled to a 3-D Darcy bed</p>
+      </div>
+    </div>
+    <div class="status" id="status">loading…</div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel">
+      <section class="card">
+        <h2>View</h2>
+        <p class="muted">Drag to rotate · scroll to zoom. A dependency-free canvas
+          renderer (no WebGL/vtk.js) so it works offline.</p>
+        <label class="check"><input id="show-trees" type="checkbox" checked /> vessel trees</label>
+        <label class="check"><input id="show-field" type="checkbox" checked /> pressure field</label>
+        <label class="check"><input id="spin" type="checkbox" checked /> auto-rotate</label>
+        <label>field opacity <input id="opacity" type="range" min="0" max="100" value="45" /></label>
+        <label>detail (branch depth)
+          <select id="gen"><option>4</option><option>5</option><option selected>6</option><option>7</option></select>
+        </label>
+        <button id="reset">Reset view</button>
+        <p class="muted" id="info"></p>
+      </section>
+      <section class="card">
+        <h2>Legend</h2>
+        <div class="legend" style="border:none;padding:0">
+          <span><i class="ln art"></i> artery</span>
+          <span><i class="ln ven"></i> vein</span>
+        </div>
+        <p class="muted">Field coloured by pressure (viridis: low → high).</p>
+        <p class="muted"><a href="/">← back to the 2-D workspace</a></p>
+      </section>
+    </aside>
+
+    <section class="stage">
+      <div class="canvas-wrap">
+        <canvas id="view3d" width="720" height="720"></canvas>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="viewer3d.js"></script>
+</body>
+</html>

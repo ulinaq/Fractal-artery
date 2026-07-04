@@ -58,8 +58,10 @@ the arterial tree into it, run the simulation, and view the
 pressure/flux/time-of-flight field as a heatmap with the network overlaid — or
 play a **flow video** of a contrast bolus washing through the tissue (with GIF
 download). Projects are shareable by URL (`/?project=<id>`) and **persist across restarts**
-(SQLite + a blob store under `$PERFUSION_DATA`). Interactive API docs are at
-`/docs`. See [`frontend/`](frontend/README.md) for the UI.
+(SQLite + a blob store under `$PERFUSION_DATA`). A **3-D viewer** (`/viewer3d.html`,
+linked from the header) renders the full 3-D hybrid result — vessel trees + a
+pressure voxel cloud — in a rotatable, dependency-free canvas. Interactive API
+docs are at `/docs`. See [`frontend/`](frontend/README.md) for the UI.
 
 ### Back-end API
 

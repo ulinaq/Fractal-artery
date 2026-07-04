@@ -56,6 +56,69 @@ def _info(project: Project) -> ProjectInfo:
                        has_result=project.has_result, has_tracer=project.has_tracer)
 
 
+_DEMO3D_CACHE: dict = {}
+
+
+def _demo3d_payload(gen: int = 6) -> dict:
+    """Run a default 3-D hybrid and serialise trees + a subsampled voxel field.
+
+    Cached per ``gen``. Feeds the browser 3-D viewer (``frontend/viewer3d.js``).
+    """
+    gen = int(np.clip(gen, 3, 7))
+    if gen in _DEMO3D_CACHE:
+        return _DEMO3D_CACHE[gen]
+
+    from ..core.darcy3d import Grid3D
+    from ..core.geometry import grow_tree_3d
+    from ..core.parameters import Parameters
+    from ..core.pipeline3d import run_hybrid_3d
+
+    art = grow_tree_3d((25, 25, 3), (0, 0, 1), root_radius=2.0, min_radius=0.8,
+                       length_to_radius=5, ratio=0.8, max_generations=gen)
+    ven = grow_tree_3d((25, 25, 47), (0, 0, -1), root_radius=2.0, min_radius=0.8,
+                       length_to_radius=5, ratio=0.8, max_generations=gen, mirror=True)
+    xs = np.concatenate([art.node_x, ven.node_x])
+    ys = np.concatenate([art.node_y, ven.node_y])
+    zs = np.concatenate([art.node_z, ven.node_z])
+    m = 4.0
+    dom = (xs.min() - m, xs.max() + m, ys.min() - m, ys.max() + m, zs.min() - m, zs.max() + m)
+    grid = Grid3D(nx=26, ny=26, nz=28,
+                  lx=dom[1] - dom[0], ly=dom[3] - dom[2], lz=dom[5] - dom[4])
+    res = run_hybrid_3d(Parameters(p_in=10.0, p_out=0.0, mu=1.0), grid, art, ven, dom, eps=2.0)
+
+    def segments(net, kind):
+        out = []
+        for s in range(net.n_segments):
+            a, b = int(net.seg_start[s]), int(net.seg_end[s])
+            out.append([round(float(net.node_x[a]), 2), round(float(net.node_y[a]), 2),
+                        round(float(net.node_z[a]), 2), round(float(net.node_x[b]), 2),
+                        round(float(net.node_y[b]), 2), round(float(net.node_z[b]), 2),
+                        round(float(net.seg_radius[s]), 2), 0 if kind == "artery" else 1])
+        return out
+
+    p, mask = res.pressure, grid.mask
+    nx, ny, nz = grid.nx, grid.ny, grid.nz
+    finite = p[np.isfinite(p) & mask]
+    pmin, pmax = float(finite.min()), float(finite.max())
+    stride = max(1, round((nx * ny * nz / 3000) ** (1 / 3)))
+    xmin, _, ymin, _, zmin, _ = dom
+    voxels = [
+        [round(xmin + (ix + 0.5) * grid.hx, 1), round(ymin + (iy + 0.5) * grid.hy, 1),
+         round(zmin + (iz + 0.5) * grid.hz, 1), round(float(p[ix, iy, iz]), 4)]
+        for ix in range(0, nx, stride)
+        for iy in range(0, ny, stride)
+        for iz in range(0, nz, stride)
+        if mask[ix, iy, iz] and np.isfinite(p[ix, iy, iz])
+    ]
+    payload = {
+        "domain": [round(v, 1) for v in dom], "shape": [nx, ny, nz],
+        "pressure": {"min": pmin, "max": pmax, "voxels": voxels},
+        "segments": segments(art, "artery") + segments(ven, "vein"),
+    }
+    _DEMO3D_CACHE[gen] = payload
+    return payload
+
+
 def create_app(store: ProjectStore | None = None,
                jobs: JobManager | None = None) -> FastAPI:
     """Build the FastAPI app; inject a store/job-manager for testing."""
@@ -350,6 +413,11 @@ def create_app(store: ProjectStore | None = None,
                                      "uv sync --extra image") from None
         return Response(gif, media_type="image/gif",
                         headers={"content-disposition": f'attachment; filename="{pid}.gif"'})
+
+    @app.get("/demo3d")
+    def demo3d(gen: int = 6) -> dict:
+        """A ready-to-render 3-D hybrid result (trees + voxel field) for the viewer."""
+        return _demo3d_payload(gen)
 
     _mount_frontend(app)
     return app
