@@ -3,7 +3,13 @@
 import numpy as np
 import scipy.sparse.linalg as spla
 
-from perfusion.core.darcy3d import Grid3D, face_fluxes_3d, tpfa_operator_3d
+from perfusion.core.darcy3d import (
+    Grid3D,
+    face_fluxes_3d,
+    point_source_3d,
+    solve_pressure_3d,
+    tpfa_operator_3d,
+)
 
 
 def _solve_x_ramp(grid, p_lo=1.0, p_hi=0.0):
@@ -59,3 +65,34 @@ def test_mask_isolates_inactive_cells():
     # inactive cells are identity rows (isolated): one nonzero of 1.0 each
     assert rows.nnz == int(inactive.sum())
     assert np.allclose(rows.data, 1.0)
+
+
+def test_point_source_is_normalised_and_local():
+    grid = Grid3D(nx=9, ny=9, nz=9)
+    center = int(grid.sub2ind(4, 4, 4))
+    cells, weights = point_source_3d(grid, center, eps=2.0)
+    assert np.isclose(weights.sum(), 1.0)          # weights sum to 1
+    assert center in cells.tolist()                # includes the centre
+    assert cells.size < grid.n_cells               # compact support
+
+
+def test_source_sink_darcy_solve():
+    grid = Grid3D(nx=12, ny=10, nz=8, lx=12, ly=10, lz=8)
+    a = int(grid.sub2ind(2, 5, 4))                 # injection cell
+    b = int(grid.sub2ind(9, 5, 4))                 # extraction cell
+    q = np.zeros(grid.n_cells)
+    ca, wa = point_source_3d(grid, a, eps=1.5)
+    cb, wb = point_source_3d(grid, b, eps=1.5)
+    q[ca] += wa                                     # +1 injected
+    q[cb] -= wb                                     # -1 extracted (balanced)
+    assert np.isclose(q.sum(), 0.0, atol=1e-12)
+
+    p = solve_pressure_3d(grid, q).ravel(order="F")
+    # conservation holds everywhere except the pinned datum cell
+    A = tpfa_operator_3d(grid)
+    pin = 0
+    residual = (A @ p) - q
+    residual[pin] = 0.0
+    assert np.allclose(residual, 0.0, atol=1e-8)
+    # pressure is higher at the source than the sink -> flow a -> b
+    assert p[a] > p[b]
