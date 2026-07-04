@@ -23,6 +23,7 @@ front-end layers.
 from . import growth
 from .core import (
     darcy,
+    darcy3d,
     direct,
     geometry,
     network,
@@ -47,6 +48,7 @@ __all__ = [
     "Parameters",
     "arterial_tree",
     "darcy",
+    "darcy3d",
     "direct",
     "geometry",
     "growth",
