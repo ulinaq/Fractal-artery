@@ -279,6 +279,11 @@ imports move to `perfusion.core.*`.
 - ✅ **MCP server + dev guidance** — `perfusion.mcp_server` exposes the engine as
   MCP tools; `.mcp.json` + `mcp` extra; `docs/DEVELOPING.md` extension guide.
   Convention: new features also get an MCP tool.
+- ✅ **CI** — GitHub Actions runs ruff + the full test suite on Python 3.10/3.12
+  and a front-end syntax check (`.github/workflows/ci.yml`).
+- 🚧 **3-D foundation (Phase 4, slice 1)** — `core.darcy3d`: a uniform `Grid3D` +
+  3-D TPFA operator (mask-isolated, singular Neumann), verified against a linear
+  pressure ramp. Not yet coupled to the network solver.
 
 **Next**
 
