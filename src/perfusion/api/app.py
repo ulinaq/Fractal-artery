@@ -56,7 +56,8 @@ def _info(project: Project) -> ProjectInfo:
     has_mask = bool(project.regions) or getattr(project, "mask", None) is not None
     return ProjectInfo(id=project.id, name=project.name,
                        has_vessels=project.has_vessels, has_mask=has_mask,
-                       has_result=project.has_result, has_tracer=project.has_tracer)
+                       has_result=project.has_result, has_tracer=project.has_tracer,
+                       params=project.params, grid=project.grid)
 
 
 def _frog_networks_and_mask(nx: int, ny: int, dom):
