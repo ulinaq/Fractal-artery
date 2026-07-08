@@ -24,18 +24,19 @@
   <main class="layout">
     <!-- ─── controls ─────────────────────────────────────────────── -->
     <aside class="panel">
-      <section class="card">
-        <h2>Project</h2>
+      <details class="card" open>
+        <summary>Project</summary>
         <label>Name <input id="proj-name" type="text" value="workspace" /></label>
-        <button id="btn-new" class="primary">New project</button>
-        <button id="btn-frog" title="load the segmented frog-tongue example">🐸 Load frog example</button>
+        <div class="row">
+          <button id="btn-new" class="primary">New project</button>
+          <button id="btn-frog" title="load the segmented frog-tongue example">🐸 Frog</button>
+        </div>
         <p class="muted" id="proj-id">no project yet</p>
-        <p class="muted">Pick a tab above the canvas (Vessels · Tissue ·
-          Inlets/Outlets · Result) — the tools below follow it.</p>
-      </section>
+        <p class="muted">Tools below follow the tab above the canvas.</p>
+      </details>
 
-      <section class="card">
-        <h2>Parameters</h2>
+      <details class="card">
+        <summary>Parameters</summary>
         <div class="grid2">
           <label>p_in <input id="p_in" type="number" value="10" step="1" /></label>
           <label>p_out <input id="p_out" type="number" value="0" step="1" /></label>
@@ -44,12 +45,11 @@
           <label>grid nx <input id="nx" type="number" value="120" step="10" /></label>
           <label>grid ny <input id="ny" type="number" value="140" step="10" /></label>
         </div>
-      </section>
+      </details>
 
-      <section class="card" data-mode="vessels">
-        <h2>Vessels</h2>
-        <p class="muted">Draw in the canvas → each stroke is one segment. Share
-          endpoints to branch (they snap).</p>
+      <details class="card" data-mode="vessels" open>
+        <summary>Vessels</summary>
+        <p class="muted">Each stroke is one segment; shared endpoints snap into branches.</p>
         <div class="row">
           <label class="seg"><input type="radio" name="vtype" value="artery" checked /> <span class="dot art"></span>artery</label>
           <label class="seg"><input type="radio" name="vtype" value="vein" /> <span class="dot ven"></span>vein</label>
@@ -67,39 +67,37 @@
           <input id="img-file" type="file" accept="image/*" />
         </label>
         <p class="muted" id="img-info">Segments into the artery/vein selected above.</p>
-      </section>
+      </details>
 
-      <section class="card" data-mode="tissue">
-        <h2>Tissue</h2>
-        <p class="muted">In <b>Tissue</b> mode, click to outline the organ; cells
-          outside are inactive, so the Darcy bed is organ-shaped. Multiple regions
-          add together.</p>
+      <details class="card" data-mode="tissue" open>
+        <summary>Tissue</summary>
+        <p class="muted">Click to outline the organ; cells outside are inactive
+          (organ-shaped bed). Multiple regions add together.</p>
         <div class="row">
           <button id="btn-endregion">End region</button>
           <button id="btn-undo-region">Undo</button>
           <button id="btn-clear-tissue">Clear</button>
         </div>
         <button id="btn-save-mask">Save tissue</button>
-      </section>
+      </details>
 
-      <section class="card" data-mode="io">
-        <h2>Inlets / Outlets</h2>
-        <p class="muted">In <b>Inlets/Outlets</b> mode, click near a vessel end to
-          set a boundary: with <span class="dot art"></span>artery selected it
-          becomes an <b>inlet</b> (▲, p_in); with <span class="dot ven"></span>vein
-          an <b>outlet</b> (▼, p_out). Click a marker again to remove it. Add
-          several for multiple inputs/outputs. You can draw <b>separate</b>
-          arterial trees — each is fed at its own inlet automatically if you don't
-          mark one. Default (none) = each tree fed at its root.</p>
-        <button id="btn-clear-io">Clear</button>
-        <button id="btn-save-io">Save inlets/outlets</button>
+      <details class="card" data-mode="io" open>
+        <summary>Inlets / Outlets</summary>
+        <p class="muted">Click near a vessel end: <span class="dot art"></span>artery →
+          inlet (▲, p_in), <span class="dot ven"></span>vein → outlet (▼, p_out).
+          Click a marker to remove it. Add any number; unmarked trees are fed at
+          their root.</p>
+        <div class="row">
+          <button id="btn-clear-io">Clear</button>
+          <button id="btn-save-io">Save</button>
+        </div>
         <p class="muted" id="io-info"></p>
-      </section>
+      </details>
 
-      <section class="card" data-mode="vessels">
-        <h2>Grow</h2>
-        <p class="muted">Grow the arterial tree into the tissue. Uses hand-drawn
-          arteries as the seed if present, else the fractal trunk.</p>
+      <details class="card" data-mode="vessels">
+        <summary>Grow</summary>
+        <p class="muted">Grow the arterial tree into the tissue (from hand-drawn
+          arteries if present, else the fractal trunk).</p>
         <label>method
           <select id="grow-method">
             <option value="colonization">space colonisation</option>
@@ -112,12 +110,11 @@
         </div>
         <button id="btn-grow">Grow arterial tree</button>
         <p class="muted" id="grow-info"></p>
-      </section>
+      </details>
 
-      <section class="card">
-        <h2>Run</h2>
+      <section class="card run-card">
         <label class="check"><input id="nonlinear" type="checkbox" /> nonlinear (junction losses)</label>
-        <button id="btn-run" class="primary">Run simulation</button>
+        <button id="btn-run" class="primary">▶ Run simulation</button>
         <p class="muted" id="run-info"></p>
       </section>
     </aside>
