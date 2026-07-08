@@ -83,6 +83,8 @@ class ProjectInfo(BaseModel):
     has_mask: bool = False
     has_result: bool = False
     has_tracer: bool = False
+    params: ParametersIn | None = None     # so the UI can reflect a project's settings
+    grid: GridIn | None = None
 
 
 class RunRequest(BaseModel):

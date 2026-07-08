@@ -314,6 +314,8 @@ def test_frog_example_project(client):
     pytest.importorskip("imageio")
     info = client.post("/projects/frog").json()
     assert info["has_mask"] is True                # tongue raster mask
+    assert info["params"]["p_in"] == 40.0          # UI can reflect the project's settings
+    assert info["grid"]["nx"] == 120
     pid = info["id"]
     kinds = {s["kind"] for s in client.get(f"/projects/{pid}/network").json()["segments"]}
     assert kinds == {"artery", "vein"}             # segmented arterial + venous trees

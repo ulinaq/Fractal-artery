@@ -567,11 +567,27 @@ $("flow-scrub").addEventListener("input", (e) => {
   pauseFlow(); state.flow.idx = Number(e.target.value); syncFlowUI(); redraw();
 });
 
+// Reflect a project's stored parameters/grid in the input fields.
+function syncParamInputs(info) {
+  const p = info.params, g = info.grid;
+  if (p) {
+    if (p.p_in != null) $("p_in").value = p.p_in;
+    if (p.p_out != null) $("p_out").value = p.p_out;
+    if (p.r_min_frac != null) $("r_min_frac").value = p.r_min_frac;
+    if (p.seed != null) $("seed").value = p.seed;
+  }
+  if (g) {
+    if (g.nx != null) $("nx").value = g.nx;
+    if (g.ny != null) $("ny").value = g.ny;
+  }
+}
+
 // Open an existing project by id (shareable URL: ?project=<id>).
 async function openProject(id) {
   const info = await api("GET", `/projects/${id}`);
   state.project = info.id;
   $("proj-name").value = info.name;
+  syncParamInputs(info);                     // reflect the project's stored settings
   showProjectLink(info.id);
   stopFlow(); state.tracer = null;
   state.hasResult = !!info.has_result;
