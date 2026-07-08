@@ -500,6 +500,10 @@ function setMode(mode) {
   $("field-picker").classList.toggle("show", mode === "result");
   $("flowbar").classList.toggle("show", mode === "result");
   $("colorbar").hidden = mode !== "result";
+  // show only the tool card(s) for the active mode (Project/Parameters/Run stay)
+  document.querySelectorAll(".card[data-mode]").forEach((c) => {
+    c.style.display = c.dataset.mode === mode ? "" : "none";
+  });
   if (mode !== "result") stopTimer();
   canvas.style.cursor = mode === "result" ? "default" : "crosshair";
   redraw();
@@ -583,6 +587,7 @@ async function openProject(id) {
 // ── boot ──────────────────────────────────────────────────────────────────────
 (async function boot() {
   refreshUI();                               // actions disabled until a project exists
+  setMode("vessels");                        // tidy: show only the active mode's tools
   try { const h = await api("GET", "/health"); status(`connected · v${h.version}`, "ok"); }
   catch { status("back-end unreachable", "err"); redraw(); return; }
   const shared = new URLSearchParams(location.search).get("project");

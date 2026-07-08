@@ -349,6 +349,16 @@ def test_demo3d_payload(client):
     assert d["pressure"]["min"] <= d["pressure"]["max"]
 
 
+def test_demo3d_frog_relief(client):
+    pytest.importorskip("skimage")
+    pytest.importorskip("imageio")
+    d = client.get("/demo3d", params={"model": "frog"}).json()
+    assert len(d["domain"]) == 6
+    assert d["domain"][5] > 0                                  # pressure-relief z-extent
+    assert {s[7] for s in d["segments"]} == {0, 1}             # artery + vein trees
+    assert len(d["pressure"]["voxels"]) > 0
+
+
 def test_mask_makes_the_solved_domain_organ_shaped(client):
     pid = client.post("/projects", json={"name": "mask", "grid": SMALL_GRID,
                                          "params": FAST_PARAMS}).json()["id"]

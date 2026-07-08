@@ -49,9 +49,14 @@ no separate dev server.
 - **Share** — `?project=<id>` opens an existing project (and its result) by id.
 
 - **3-D viewer** (`viewer3d.html`) — a separate page (linked from the header)
-  that renders the full 3-D hybrid result (vessel trees + pressure voxel cloud)
-  in a rotatable, **dependency-free canvas** projection (no WebGL/vtk.js, works
-  offline). Data from `GET /demo3d`.
+  that renders results in a rotatable, **dependency-free canvas** projection (no
+  WebGL/vtk.js, works offline). Two models via `GET /demo3d?model=`: a synthetic
+  3-D hybrid (trees + voxel field) and the **frog tongue** as a 3-D pressure-relief
+  surface with the vasculature at its base. Deep-linkable (`?model=frog`).
+
+The left-panel **tools are contextual**: picking a tab above the canvas
+(Vessels · Tissue · Inlets/Outlets · Result) shows just that tool card; Project,
+Parameters and Run stay put — so there's far less to scroll.
 
 ## Files
 

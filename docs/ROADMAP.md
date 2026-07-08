@@ -288,11 +288,13 @@ imports move to `perfusion.core.*`.
   The network solver is *coordinate-free*, so it is reused verbatim. Verified:
   the coupled 3-D solve conserves mass (arterial inflow == venous outflow), pins
   inlets/outlets, and supports multiple inlets. Demo: `perfusion-hybrid3d`.
-- ✅ **3-D viewer in the browser** — `GET /demo3d` serves the coupled result
-  (tree segments + a subsampled voxel field); `frontend/viewer3d.html` renders it
-  as a rotatable 3-D scene (trees + viridis pressure cloud) with a **dependency-free
-  canvas** projection — no WebGL/vtk.js, so it works offline and is verifiable.
-  Linked from the 2-D workspace. *(vtk.js/WebGL volume rendering could swap in
+- ✅ **3-D viewer in the browser** — `GET /demo3d?model=synthetic|frog` serves a
+  result (tree segments + a subsampled voxel field); `frontend/viewer3d.html`
+  renders it as a rotatable 3-D scene with a **dependency-free canvas** projection
+  (no WebGL/vtk.js — works offline, verifiable). Two models: a synthetic 3-D
+  hybrid, and the **frog tongue** shown as a 3-D pressure-relief surface with its
+  vasculature at the base. Linked from the 2-D workspace (whose left-panel tools
+  are now **contextual to the active mode tab** for a tidier UI). *(vtk.js/WebGL volume rendering could swap in
   behind the same `/demo3d` data later for fancier transfer functions.)*
   *Next 3-D:* 3-D segmentation from image stacks; a full 3-D project path in the API/UI.
 
