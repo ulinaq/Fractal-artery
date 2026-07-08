@@ -46,6 +46,7 @@ class Project:
     outlets: list = field(default_factory=list)   # venous outlet points (p_out)
     artery_network: object | None = None  # grown/segmented perfusion.core.geometry.Network
     vein_network: object | None = None    # segmented venous network
+    mask: object | None = None            # optional raster tissue mask (nx, ny) bool
     summary: dict | None = None
     has_result: bool = False              # set from blob existence on load
     has_tracer: bool = False              # set from blob existence on load
@@ -113,6 +114,9 @@ class ProjectStore:
     def _vein_path(self, pid: str) -> Path:
         return self.blobs / f"{pid}.vein.npz"
 
+    def _mask_path(self, pid: str) -> Path:
+        return self.blobs / f"{pid}.rmask.npz"
+
     def result_path(self, pid: str) -> Path:
         return self.blobs / f"{pid}.result.npz"
 
@@ -139,6 +143,10 @@ class ProjectStore:
         vein = self._vein_path(pid)
         if vein.exists():
             project.vein_network = io.load_network(vein)
+        mask = self._mask_path(pid)
+        if mask.exists():
+            with np.load(mask) as d:
+                project.mask = d["mask"]
         project.has_result = self.result_path(pid).exists()
         project.has_tracer = self.tracer_path(pid).exists()
         return project
@@ -192,6 +200,11 @@ class ProjectStore:
                 io.save_network(net, path)
             else:
                 path.unlink(missing_ok=True)
+        mask_path = self._mask_path(project.id)
+        if project.mask is not None:
+            np.savez(mask_path, mask=np.asarray(project.mask, dtype=bool))
+        else:
+            mask_path.unlink(missing_ok=True)
 
     def save_result(self, project: Project, result) -> None:
         """Write the result blob + summary and persist (invalidating any tracer)."""

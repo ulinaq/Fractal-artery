@@ -167,3 +167,15 @@ def test_inlets_and_degree_based_terminals():
 def test_rasterize_mask_empty_is_all_active():
     assert rasterize_mask(4, 5, (0, 1, 0, 1), []).shape == (4, 5)
     assert rasterize_mask(4, 5, (0, 1, 0, 1), []).all()
+
+
+def test_mask_in_domain_resamples_shape_and_preserves_blob():
+    from perfusion.segmentation import mask_in_domain
+
+    src = np.zeros((40, 30), dtype=bool)
+    src[10:30, 8:22] = True                         # a solid rectangular blob
+    out = mask_in_domain(src, 24, 20, (0.0, 100.0, 0.0, 120.0))
+    assert out.shape == (24, 20)
+    assert out.dtype == bool
+    assert out.any()                                # resampled...
+    assert not out.all()                            # ...still a partial region

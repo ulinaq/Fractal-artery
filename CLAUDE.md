@@ -149,7 +149,14 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   touching inactive cells and `tpfa_operator` gives inactive cells identity rows,
   so the active domain is hydraulically isolated (organ-shaped, not the bounding
   box). `time_of_flight` returns NaN on inactive cells. The pin in
-  `terminal_response` is the first *active* cell.
+  `terminal_response` is the first *active* cell. **Terminals must couple to
+  active cells**: `pipeline._terminal_cells` snaps any terminal that lands on an
+  inactive cell to the nearest active one (`_snap_to_active`), else its mollifier
+  is degenerate and the coupling goes singular. Masks must also keep the active
+  region *connected* — a mask that splits it into disconnected blobs leaves all
+  but one blob as a singular Neumann block (only one cell is pinned). This is why
+  the frog template uses a faithful raster resample (`segmentation.mask_in_domain`),
+  not a lossy polygon outline.
 - **Fåhræus–Lindqvist viscosity** is wired in via `Parameters.fahraeus_lindqvist`
   (+`radius_to_um`); `run_hybrid` then passes a per-tree `(mu_art, mu_ven)` pair
   of per-segment viscosities to the solvers. `_resistances` accepts a scalar or a

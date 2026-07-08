@@ -16,11 +16,13 @@ from . import runner
 from .jobs import JobManager, RQJobManager
 from .schemas import (
     FieldResponse,
+    GridIn,
     GrowInfo,
     GrowRequest,
     IOIn,
     JobInfo,
     MaskIn,
+    ParametersIn,
     ProjectCreate,
     ProjectInfo,
     RunRequest,
@@ -51,8 +53,9 @@ def _default_jobs(store: ProjectStore):
 
 
 def _info(project: Project) -> ProjectInfo:
+    has_mask = bool(project.regions) or getattr(project, "mask", None) is not None
     return ProjectInfo(id=project.id, name=project.name,
-                       has_vessels=project.has_vessels, has_mask=bool(project.regions),
+                       has_vessels=project.has_vessels, has_mask=has_mask,
                        has_result=project.has_result, has_tracer=project.has_tracer)
 
 
@@ -142,6 +145,31 @@ def create_app(store: ProjectStore | None = None,
     @app.post("/projects", response_model=ProjectInfo)
     def create_project(body: ProjectCreate) -> ProjectInfo:
         return _info(store.create(body.name, body.params, body.grid))
+
+    @app.post("/projects/frog", response_model=ProjectInfo)
+    def create_frog(name: str = "frog tongue") -> ProjectInfo:
+        """One-click example: the segmented frog-tongue vasculature + organ mask.
+
+        Segments the bundled frog artery/vein images and tongue mask and places
+        them in the app's standard domain (reusing ``segmentation.network_in_domain``
+        / ``mask_in_domain``) — a real coupled system ready to Run. Needs the
+        ``image`` extra.
+        """
+        try:
+            from .. import segmentation as seg
+        except ImportError:
+            raise HTTPException(501, "the frog example needs the 'image' extra: "
+                                     "uv sync --extra image") from None
+        system = seg.load_frog_system()
+        dom = (0.0, 100.0, 0.0, 120.0)
+        nx, ny = 120, 140
+        grid = GridIn(nx=nx, ny=ny, lx=100.0, ly=120.0, domain_limit=dom)
+        project = store.create(name, ParametersIn(p_in=40.0, p_out=0.0), grid)
+        project.artery_network = seg.network_in_domain(system.artery, system.mask.shape, dom)
+        project.vein_network = seg.network_in_domain(system.vein, system.mask.shape, dom)
+        project.mask = seg.mask_in_domain(system.mask, nx, ny, dom)   # organ-shaped bed
+        store.save(project)
+        return _info(project)
 
     @app.get("/projects", response_model=list[ProjectInfo])
     def list_projects() -> list[ProjectInfo]:

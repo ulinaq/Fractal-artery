@@ -309,6 +309,22 @@ def test_io_points_persist_across_store_reopen(tmp_path):
     assert io["outlets"] == [[0, 20]]
 
 
+def test_frog_example_project(client):
+    pytest.importorskip("skimage")
+    pytest.importorskip("imageio")
+    info = client.post("/projects/frog").json()
+    assert info["has_mask"] is True                # tongue raster mask
+    pid = info["id"]
+    kinds = {s["kind"] for s in client.get(f"/projects/{pid}/network").json()["segments"]}
+    assert kinds == {"artery", "vein"}             # segmented arterial + venous trees
+
+    jid = client.post(f"/projects/{pid}/run", json={"use_vessels": True}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    summary = client.get(f"/projects/{pid}/results").json()
+    assert summary["arterial_inflow"] > 0
+    assert summary["arterial_inflow"] == pytest.approx(summary["venous_outflow"], rel=1e-6)
+
+
 def test_frontend_is_served(client):
     root = client.get("/")
     assert root.status_code == 200

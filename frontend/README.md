@@ -17,6 +17,10 @@ no separate dev server.
 
 ## What it does
 
+- **Frog example** — one click (`POST /projects/frog`, `image` extra) loads the
+  bundled segmented frog-tongue system — arterial + venous networks placed in the
+  domain and the tongue as the organ mask — so the whole pipeline is instantly
+  testable on real data.
 - **Project** — create a project (name, parameters, grid).
 - **Draw vessels** — sketch arteries/veins on the canvas; each stroke is one
   segment, shared endpoints snap into branches (`PUT /projects/{id}/vessels`).
