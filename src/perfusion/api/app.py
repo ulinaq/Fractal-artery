@@ -59,7 +59,62 @@ def _info(project: Project) -> ProjectInfo:
                        has_result=project.has_result, has_tracer=project.has_tracer)
 
 
+def _frog_networks_and_mask(nx: int, ny: int, dom):
+    """Segment the bundled frog system into (artery, vein, raster mask) placed in
+    ``dom``. Raises ImportError without the ``image`` extra."""
+    from .. import segmentation as seg
+
+    system = seg.load_frog_system()
+    return (seg.network_in_domain(system.artery, system.mask.shape, dom),
+            seg.network_in_domain(system.vein, system.mask.shape, dom),
+            seg.mask_in_domain(system.mask, nx, ny, dom))
+
+
 _DEMO3D_CACHE: dict = {}
+
+
+def _demo3d_frog() -> dict:
+    """The 2-D frog result as a 3-D pressure-relief surface (z = pressure) with
+    the vasculature at the base — for the 3-D viewer."""
+    if "frog" in _DEMO3D_CACHE:
+        return _DEMO3D_CACHE["frog"]
+    from ..core.darcy import Grid
+    from ..core.parameters import Parameters
+    from ..core.pipeline import run_hybrid
+
+    dom = (0.0, 100.0, 0.0, 120.0)
+    nx, ny = 120, 140
+    art, ven, mask = _frog_networks_and_mask(nx, ny, dom)
+    grid = Grid(nx=nx, ny=ny, lx=100.0, ly=120.0, mask=mask)
+    res = run_hybrid(Parameters(p_in=40.0, p_out=0.0), grid, domain_limit=dom, art=art, ven=ven)
+    p = res.pressure
+    finite = p[np.isfinite(p) & mask]
+    pmin, pmax = float(finite.min()), float(finite.max())
+    span = (pmax - pmin) or 1.0
+    relief = 35.0
+    xc = (np.arange(nx) + 0.5) / nx * 100.0
+    yc = (np.arange(ny) + 0.5) / ny * 120.0
+    stride = max(1, round((nx * ny / 2500) ** 0.5))
+    voxels = [
+        [round(float(xc[ix]), 1), round(float(yc[iy]), 1),
+         round((p[ix, iy] - pmin) / span * relief, 2), round(float(p[ix, iy]), 4)]
+        for ix in range(0, nx, stride) for iy in range(0, ny, stride)
+        if mask[ix, iy] and np.isfinite(p[ix, iy])
+    ]
+
+    def segs(net, kind):
+        return [[round(float(net.node_x[net.seg_start[s]]), 2),
+                 round(float(net.node_y[net.seg_start[s]]), 2), 0.0,
+                 round(float(net.node_x[net.seg_end[s]]), 2),
+                 round(float(net.node_y[net.seg_end[s]]), 2), 0.0,
+                 round(float(net.seg_radius[s]), 2), 0 if kind == "artery" else 1]
+                for s in range(net.n_segments)]
+
+    payload = {"domain": [0.0, 100.0, 0.0, 120.0, 0.0, relief], "shape": [nx, ny, 1],
+               "pressure": {"min": pmin, "max": pmax, "voxels": voxels},
+               "segments": segs(art, "artery") + segs(ven, "vein")}
+    _DEMO3D_CACHE["frog"] = payload
+    return payload
 
 
 def _demo3d_payload(gen: int = 6) -> dict:
@@ -155,19 +210,16 @@ def create_app(store: ProjectStore | None = None,
         / ``mask_in_domain``) — a real coupled system ready to Run. Needs the
         ``image`` extra.
         """
+        dom = (0.0, 100.0, 0.0, 120.0)
+        nx, ny = 120, 140
         try:
-            from .. import segmentation as seg
+            art, ven, mask = _frog_networks_and_mask(nx, ny, dom)
         except ImportError:
             raise HTTPException(501, "the frog example needs the 'image' extra: "
                                      "uv sync --extra image") from None
-        system = seg.load_frog_system()
-        dom = (0.0, 100.0, 0.0, 120.0)
-        nx, ny = 120, 140
         grid = GridIn(nx=nx, ny=ny, lx=100.0, ly=120.0, domain_limit=dom)
         project = store.create(name, ParametersIn(p_in=40.0, p_out=0.0), grid)
-        project.artery_network = seg.network_in_domain(system.artery, system.mask.shape, dom)
-        project.vein_network = seg.network_in_domain(system.vein, system.mask.shape, dom)
-        project.mask = seg.mask_in_domain(system.mask, nx, ny, dom)   # organ-shaped bed
+        project.artery_network, project.vein_network, project.mask = art, ven, mask
         store.save(project)
         return _info(project)
 
@@ -443,8 +495,18 @@ def create_app(store: ProjectStore | None = None,
                         headers={"content-disposition": f'attachment; filename="{pid}.gif"'})
 
     @app.get("/demo3d")
-    def demo3d(gen: int = 6) -> dict:
-        """A ready-to-render 3-D hybrid result (trees + voxel field) for the viewer."""
+    def demo3d(gen: int = 6, model: str = "synthetic") -> dict:
+        """A ready-to-render result for the 3-D viewer.
+
+        ``model=synthetic`` (default) is a 3-D fractal-tree hybrid; ``model=frog``
+        is the real 2-D frog result shown as a 3-D pressure-relief surface.
+        """
+        if model == "frog":
+            try:
+                return _demo3d_frog()
+            except ImportError:
+                raise HTTPException(501, "the frog model needs the 'image' extra: "
+                                         "uv sync --extra image") from None
         return _demo3d_payload(gen)
 
     _mount_frontend(app)

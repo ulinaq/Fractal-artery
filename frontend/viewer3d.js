@@ -21,10 +21,16 @@ function viridis(t) {
 const view = { yaw: 0.7, pitch: 0.45, zoom: 1, spin: true };
 let data = null, center = [0, 0, 0], scale = 1;
 
-async function load(gen) {
-  $("status").textContent = "solving 3-D hybrid…";
-  const r = await fetch(`/demo3d?gen=${gen}`);
-  if (!r.ok) { $("status").textContent = "3-D endpoint unavailable"; $("status").className = "status err"; return; }
+async function load() {
+  const model = $("model").value;
+  const gen = $("gen").value;
+  $("gen-row").style.display = model === "synthetic" ? "" : "none";
+  $("status").textContent = model === "frog" ? "solving frog hybrid…" : "solving 3-D hybrid…";
+  const r = await fetch(`/demo3d?model=${model}&gen=${gen}`);
+  if (!r.ok) {
+    const msg = r.status === 501 ? "frog needs the image extra" : "3-D endpoint unavailable";
+    $("status").textContent = msg; $("status").className = "status err"; return;
+  }
   data = await r.json();
   const [x0, x1, y0, y1, z0, z1] = data.domain;
   center = [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2];
@@ -102,7 +108,10 @@ canvas.addEventListener("wheel", (e) => {
 }, { passive: false });
 $("spin").addEventListener("change", (e) => { view.spin = e.target.checked; });
 $("reset").addEventListener("click", () => { Object.assign(view, { yaw: 0.7, pitch: 0.45, zoom: 1 }); });
-$("gen").addEventListener("change", (e) => load(e.target.value).catch(() => {}));
+$("gen").addEventListener("change", () => load().catch(() => {}));
+$("model").addEventListener("change", () => load().catch(() => {}));
 
-load($("gen").value).catch((e) => { $("status").textContent = e.message; });
+const initModel = new URLSearchParams(location.search).get("model");
+if (initModel === "frog" || initModel === "synthetic") $("model").value = initModel;
+load().catch((e) => { $("status").textContent = e.message; });
 loop();

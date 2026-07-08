@@ -30,6 +30,8 @@
         <button id="btn-new" class="primary">New project</button>
         <button id="btn-frog" title="load the segmented frog-tongue example">🐸 Load frog example</button>
         <p class="muted" id="proj-id">no project yet</p>
+        <p class="muted">Pick a tab above the canvas (Vessels · Tissue ·
+          Inlets/Outlets · Result) — the tools below follow it.</p>
       </section>
 
       <section class="card">
@@ -44,7 +46,7 @@
         </div>
       </section>
 
-      <section class="card">
+      <section class="card" data-mode="vessels">
         <h2>Vessels</h2>
         <p class="muted">Draw in the canvas → each stroke is one segment. Share
           endpoints to branch (they snap).</p>
@@ -67,7 +69,7 @@
         <p class="muted" id="img-info">Segments into the artery/vein selected above.</p>
       </section>
 
-      <section class="card">
+      <section class="card" data-mode="tissue">
         <h2>Tissue</h2>
         <p class="muted">In <b>Tissue</b> mode, click to outline the organ; cells
           outside are inactive, so the Darcy bed is organ-shaped. Multiple regions
@@ -80,7 +82,7 @@
         <button id="btn-save-mask">Save tissue</button>
       </section>
 
-      <section class="card">
+      <section class="card" data-mode="io">
         <h2>Inlets / Outlets</h2>
         <p class="muted">In <b>Inlets/Outlets</b> mode, click near a vessel end to
           set a boundary: with <span class="dot art"></span>artery selected it
@@ -94,7 +96,7 @@
         <p class="muted" id="io-info"></p>
       </section>
 
-      <section class="card">
+      <section class="card" data-mode="vessels">
         <h2>Grow</h2>
         <p class="muted">Grow the arterial tree into the tissue. Uses hand-drawn
           arteries as the seed if present, else the fractal trunk.</p>

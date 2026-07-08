@@ -24,11 +24,17 @@
         <h2>View</h2>
         <p class="muted">Drag to rotate · scroll to zoom. A dependency-free canvas
           renderer (no WebGL/vtk.js) so it works offline.</p>
+        <label>model
+          <select id="model">
+            <option value="synthetic" selected>synthetic 3-D tree</option>
+            <option value="frog">frog tongue (pressure relief)</option>
+          </select>
+        </label>
         <label class="check"><input id="show-trees" type="checkbox" checked /> vessel trees</label>
         <label class="check"><input id="show-field" type="checkbox" checked /> pressure field</label>
         <label class="check"><input id="spin" type="checkbox" checked /> auto-rotate</label>
         <label>field opacity <input id="opacity" type="range" min="0" max="100" value="45" /></label>
-        <label>detail (branch depth)
+        <label id="gen-row">detail (branch depth, synthetic)
           <select id="gen"><option>4</option><option>5</option><option selected>6</option><option>7</option></select>
         </label>
         <button id="reset">Reset view</button>
