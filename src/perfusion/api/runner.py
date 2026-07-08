@@ -27,10 +27,16 @@ def polylines_to_network(polylines, root_xy=None):
 
 
 def build_grid(project):
-    """Grid (with the tissue mask, if any) + its domain window."""
-    domain_limit = project.grid.domain_limit
-    mask = (rasterize_mask(project.grid.nx, project.grid.ny, domain_limit, project.regions)
-            if project.regions else None)
+    """Grid + its domain window, with the tissue mask: a stored raster mask if
+    present (shape must match the grid), else the drawn tissue polygons, else none."""
+    nx, ny, domain_limit = project.grid.nx, project.grid.ny, project.grid.domain_limit
+    raster = getattr(project, "mask", None)
+    if raster is not None and np.asarray(raster).shape == (nx, ny):
+        mask = np.asarray(raster, dtype=bool)
+    elif project.regions:
+        mask = rasterize_mask(nx, ny, domain_limit, project.regions)
+    else:
+        mask = None
     return project.grid.to_core(mask=mask), domain_limit
 
 

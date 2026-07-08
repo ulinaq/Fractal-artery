@@ -70,6 +70,7 @@ function refreshUI() {
   const ready = !!state.project && !state.busy;
   NEEDS_PROJECT.forEach((id) => { $(id).disabled = !ready; });
   $("btn-new").disabled = state.busy;
+  $("btn-frog").disabled = state.busy;
   const canExport = !!(state.project && state.hasResult) && !state.busy;
   $("btn-export").disabled = !canExport;
   $("btn-bundle").disabled = !canExport;
@@ -115,6 +116,14 @@ async function newProject() {
 function showProjectLink(id) {
   const url = `${location.origin}/?project=${id}`;
   $("proj-id").innerHTML = `project <a href="${url}" title="shareable link">${id}</a>`;
+}
+
+async function loadFrog() {
+  status("segmenting the frog example…");
+  const p = await api("POST", "/projects/frog");
+  await openProject(p.id);
+  $("use-vessels").checked = true;
+  status("frog example loaded — press Run to solve it", "ok");
 }
 
 function requireProject() {
@@ -498,6 +507,7 @@ function setMode(mode) {
 
 // ── wiring ────────────────────────────────────────────────────────────────────
 $("btn-new").addEventListener("click", guarded(newProject));
+$("btn-frog").addEventListener("click", guarded(loadFrog));
 $("btn-endseg").addEventListener("click", endStroke);
 $("btn-undo").addEventListener("click", undo);
 $("btn-clear").addEventListener("click", clearVessels);

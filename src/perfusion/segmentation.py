@@ -204,6 +204,25 @@ def network_in_domain(net: Network, image_shape: tuple[int, int],
                    seg_radius=net.seg_radius * scale, seg_angle=angle)
 
 
+def mask_in_domain(mask: np.ndarray, nx: int, ny: int, domain_limit) -> np.ndarray:
+    """Resample a pixel mask onto an ``(nx, ny)`` grid over ``domain_limit``.
+
+    Uses the same (column -> x, row -> y flipped) convention as
+    :func:`network_in_domain`, so a segmented network and its organ mask stay
+    aligned after both are placed in the domain. Nearest-neighbour sampling
+    preserves connectivity (unlike a polygon-outline approximation).
+    """
+    mask = np.asarray(mask)
+    h, w = mask.shape
+    xmin, xmax, ymin, ymax = domain_limit
+    xc = xmin + (np.arange(nx) + 0.5) * (xmax - xmin) / nx
+    yc = ymin + (np.arange(ny) + 0.5) * (ymax - ymin) / ny
+    gx, gy = np.meshgrid(xc, yc, indexing="ij")
+    col = np.clip(((gx - xmin) / (xmax - xmin) * w).astype(int), 0, w - 1)
+    row = np.clip(((1 - (gy - ymin) / (ymax - ymin)) * h).astype(int), 0, h - 1)
+    return mask[row, col]
+
+
 def segment_network(image: np.ndarray, threshold: float | None = None,
                     root_xy: tuple[float, float] | None = None,
                     pixel_size: float = 1.0, min_size: int = 20) -> Network:

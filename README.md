@@ -51,7 +51,9 @@ uv run perfusion-hybrid3d    # Phase 4: full 3-D hybrid (3-D trees + 3-D Darcy)
 ### Web app
 
 `uv run perfusion-api` starts the FastAPI back-end **and** serves a zero-build
-2-D workspace (no Node/npm) at `http://127.0.0.1:8000/`: create a project, draw
+2-D workspace (no Node/npm) at `http://127.0.0.1:8000/`. **🐸 Load frog example**
+gives you a real segmented frog-tongue system (arteries + veins + organ mask) in
+one click, ready to Run. Or create a project, draw
 vessels (or **segment them from an uploaded image**), **outline the tissue** (so
 the Darcy bed is organ-shaped), **place inlets/outlets** (any number, ▲/▼), grow
 the arterial tree into it, run the simulation, and view the
@@ -81,7 +83,8 @@ curl -s localhost:8000/jobs/$jid          # -> {"state":"done",...}
 curl -s localhost:8000/projects/$pid/results
 ```
 
-Endpoints: `health`, `projects` (CRUD), `projects/{id}/vessels` (hand-drawn
+Endpoints: `health`, `projects` (CRUD) + `projects/frog` (one-click example),
+`projects/{id}/vessels` (hand-drawn
 polylines → networks), `projects/{id}/image?kind=artery|vein` (segment an
 uploaded vessel image),
 `projects/{id}/mask` (tissue outline → `Grid.mask`),

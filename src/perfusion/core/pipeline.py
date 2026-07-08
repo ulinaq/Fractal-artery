@@ -64,7 +64,27 @@ def _terminal_cells(grid: Grid, art: Network, ven: Network,
     ix_a, ix_v = np.clip(ix_a, 0, grid.nx - 1), np.clip(ix_v, 0, grid.nx - 1)
     iy_a, iy_v = np.clip(iy_a, 0, grid.ny - 1), np.clip(iy_v, 0, grid.ny - 1)
     cells = np.concatenate([grid.sub2ind(ix_a, iy_a), grid.sub2ind(ix_v, iy_v)])
-    return _spread_coincident(grid, cells)
+    return _spread_coincident(grid, _snap_to_active(grid, cells))
+
+
+def _snap_to_active(grid: Grid, cells: np.ndarray) -> np.ndarray:
+    """Move terminals that land outside the mask to the nearest active cell.
+
+    A terminal on an inactive cell gives a degenerate mollifier (empty support),
+    which makes the Darcy coupling singular. Snapping to the nearest active cell
+    keeps every terminal coupled to the tissue (organ-shaped or hand-drawn masks).
+    """
+    active = grid.mask.ravel(order="F")
+    if active.all():
+        return cells
+    active_idx = np.flatnonzero(active)
+    ax, ay = active_idx % grid.nx, active_idx // grid.nx
+    cells = cells.copy()
+    for i, c in enumerate(cells):
+        if not active[c]:
+            cx, cy = c % grid.nx, c // grid.nx
+            cells[i] = int(active_idx[np.argmin((ax - cx) ** 2 + (ay - cy) ** 2)])
+    return cells
 
 
 def _spread_coincident(grid: Grid, cells: np.ndarray) -> np.ndarray:
