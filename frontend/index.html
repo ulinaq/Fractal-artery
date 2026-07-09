@@ -83,10 +83,12 @@
 
       <details class="card" data-mode="io" open>
         <summary>Inlets / Outlets</summary>
-        <p class="muted">Click near a vessel end: <span class="dot art"></span>artery →
-          inlet (▲, p_in), <span class="dot ven"></span>vein → outlet (▼, p_out).
-          Click a marker to remove it. Add any number; unmarked trees are fed at
-          their root.</p>
+        <p class="muted">Pick inlet or outlet, then click near a vessel end. Click a
+          marker to remove it. Add any number; unmarked trees are fed at their root.</p>
+        <div class="row">
+          <label class="seg"><input type="radio" name="iotype" value="inlet" checked /> <span class="tri-up art"></span>inlet (p_in)</label>
+          <label class="seg"><input type="radio" name="iotype" value="outlet" /> <span class="tri-dn ven"></span>outlet (p_out)</label>
+        </div>
         <div class="row">
           <button id="btn-clear-io">Clear</button>
           <button id="btn-save-io">Save</button>

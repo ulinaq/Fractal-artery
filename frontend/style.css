@@ -89,6 +89,9 @@ input[type=file] { width: 100%; margin-top: 4px; font-size: 12px; color: var(--i
 select { width: 100%; margin-top: 3px; padding: 7px 9px; font-size: 13px; color: var(--ink); border: 1px solid var(--line); border-radius: 7px; background: #fff; }
 .seg { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.tri-up, .tri-dn { display: inline-block; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; }
+.tri-up.art { border-bottom: 8px solid var(--art); }
+.tri-dn.ven { border-top: 8px solid var(--ven); }
 .dot.art { background: var(--art); }
 .dot.ven { background: var(--ven); }
 
