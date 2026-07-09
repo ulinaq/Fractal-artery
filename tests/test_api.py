@@ -361,6 +361,58 @@ def test_demo3d_frog_relief(client):
     assert len(d["pressure"]["voxels"]) > 0
 
 
+def test_document_roundtrip_basic(client):
+    # a plain project with params, a tissue region and I/O points
+    pid = client.post("/projects", json={"name": "my work", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    region = [[-60, 8], [60, 8], [60, 150], [-60, 150]]
+    client.put(f"/projects/{pid}/mask", json={"regions": [region]})
+    client.put(f"/projects/{pid}/io", json={"inlets": [[0, 20]], "outlets": [[0, 140]]})
+
+    doc = client.get(f"/projects/{pid}/document")
+    assert doc.status_code == 200
+    assert "attachment" in doc.headers["content-disposition"]
+    assert doc.headers["content-disposition"].endswith('my_work.perfusion.json"')
+    body = doc.json()
+    assert body["version"] == 1
+    assert body["name"] == "my work"
+
+    info = client.post("/projects/import", json=body).json()
+    assert info["id"] != pid                        # a fresh project
+    pid2 = info["id"]
+    assert client.get(f"/projects/{pid2}/mask").json()["regions"] == [region]
+    io2 = client.get(f"/projects/{pid2}/io").json()
+    assert io2["inlets"] == [[0, 20]]
+    assert io2["outlets"] == [[0, 140]]
+    got = client.get(f"/projects/{pid2}").json()
+    assert got["params"]["r_min_frac"] == 0.5
+    assert got["grid"]["nx"] == 60
+
+
+def test_document_roundtrip_frog_networks_and_mask(client):
+    pytest.importorskip("skimage")
+    pytest.importorskip("imageio")
+    pid = client.post("/projects/frog").json()["id"]
+    body = client.get(f"/projects/{pid}/document").json()
+    # the segmented trees and raster mask travel inside the JSON
+    assert len(body["artery_network"]["node_x"]) > 10
+    assert len(body["vein_network"]["seg_start"]) > 10
+    assert body["mask"]["shape"] == [120, 140]
+
+    pid2 = client.post("/projects/import", json=body).json()["id"]
+    # the restored trees are still there and the project solves + conserves mass
+    kinds = {s["kind"] for s in client.get(f"/projects/{pid2}/network").json()["segments"]}
+    assert kinds == {"artery", "vein"}
+    jid = client.post(f"/projects/{pid2}/run", json={"use_vessels": True}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    summary = client.get(f"/projects/{pid2}/results").json()
+    assert summary["arterial_inflow"] == pytest.approx(summary["venous_outflow"], rel=1e-6)
+
+
+def test_import_rejects_garbage(client):
+    assert client.post("/projects/import", json={"grid": "not a grid"}).status_code == 422
+
+
 def test_mask_makes_the_solved_domain_organ_shaped(client):
     pid = client.post("/projects", json={"name": "mask", "grid": SMALL_GRID,
                                          "params": FAST_PARAMS}).json()["id"]

@@ -24,13 +24,19 @@ from .schemas import (
     MaskIn,
     ParametersIn,
     ProjectCreate,
+    ProjectDocument,
     ProjectInfo,
     RunRequest,
     TracerInfo,
     TracerRequest,
     VesselsIn,
 )
-from .store import Project, ProjectStore
+from .store import (
+    Project,
+    ProjectStore,
+    document_from_project,
+    project_from_document,
+)
 
 _FIELDS = {"pressure": "pressure", "flux": "flux", "tof": "tof"}
 
@@ -201,6 +207,28 @@ def create_app(store: ProjectStore | None = None,
     @app.post("/projects", response_model=ProjectInfo)
     def create_project(body: ProjectCreate) -> ProjectInfo:
         return _info(store.create(body.name, body.params, body.grid))
+
+    @app.get("/projects/{pid}/document")
+    def export_document(pid: str):
+        """Download the whole project as one portable JSON file (save your work)."""
+        from fastapi.responses import JSONResponse
+
+        project = _project(pid)
+        doc = document_from_project(project)
+        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in project.name) or "project"
+        return JSONResponse(
+            doc.model_dump(mode="json"),
+            headers={"Content-Disposition": f'attachment; filename="{safe}.perfusion.json"'},
+        )
+
+    @app.post("/projects/import", response_model=ProjectInfo)
+    def import_document(doc: ProjectDocument) -> ProjectInfo:
+        """Restore a saved project document as a *new* project (continue later)."""
+        import uuid
+
+        project = project_from_document(doc, uuid.uuid4().hex[:12])
+        store.save(project)
+        return _info(project)
 
     @app.post("/projects/frog", response_model=ProjectInfo)
     def create_frog(name: str = "frog tongue") -> ProjectInfo:

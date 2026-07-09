@@ -134,6 +134,102 @@ class TracerInfo(BaseModel):
     frames: list[list[list[float | None]]]   # (n_frames, nx, ny); masked -> null
 
 
+class NetworkModel(BaseModel):
+    """A vascular :class:`~perfusion.core.geometry.Network` as plain JSON.
+
+    Carries the full topology + geometry (and, unlike the ``.npz`` blob,
+    ``inlet_nodes``/``node_z`` too) so a project round-trips losslessly.
+    """
+
+    node_x: list[float]
+    node_y: list[float]
+    node_role: list[int]
+    seg_start: list[int]
+    seg_end: list[int]
+    seg_length: list[float]
+    seg_radius: list[float]
+    seg_angle: list[float]
+    root_node: int = 0
+    inlet_nodes: list[int] | None = None
+    node_z: list[float] | None = None
+
+    @classmethod
+    def from_core(cls, net) -> NetworkModel:
+        import numpy as np
+
+        def arr(x, dtype=float):
+            return np.asarray(x, dtype=dtype).tolist()
+
+        return cls(
+            node_x=arr(net.node_x), node_y=arr(net.node_y),
+            node_role=arr(net.node_role, int),
+            seg_start=arr(net.seg_start, int), seg_end=arr(net.seg_end, int),
+            seg_length=arr(net.seg_length), seg_radius=arr(net.seg_radius),
+            seg_angle=arr(net.seg_angle), root_node=int(net.root_node),
+            inlet_nodes=arr(net.inlet_nodes, int) if net.inlet_nodes is not None else None,
+            node_z=arr(net.node_z) if net.node_z is not None else None,
+        )
+
+    def to_core(self):
+        import numpy as np
+
+        from ..core.geometry import Network
+
+        return Network(
+            node_x=np.asarray(self.node_x, float), node_y=np.asarray(self.node_y, float),
+            node_role=np.asarray(self.node_role, int),
+            seg_start=np.asarray(self.seg_start, int), seg_end=np.asarray(self.seg_end, int),
+            seg_length=np.asarray(self.seg_length, float),
+            seg_radius=np.asarray(self.seg_radius, float),
+            seg_angle=np.asarray(self.seg_angle, float), root_node=int(self.root_node),
+            inlet_nodes=(np.asarray(self.inlet_nodes, int)
+                         if self.inlet_nodes is not None else None),
+            node_z=np.asarray(self.node_z, float) if self.node_z is not None else None,
+        )
+
+
+class MaskModel(BaseModel):
+    """A raster tissue mask: ``shape`` + a row-major flat list of booleans."""
+
+    shape: tuple[int, int]
+    data: list[bool]
+
+    @classmethod
+    def from_core(cls, mask) -> MaskModel:
+        import numpy as np
+
+        m = np.asarray(mask, dtype=bool)
+        return cls(shape=(int(m.shape[0]), int(m.shape[1])), data=m.reshape(-1).tolist())
+
+    def to_core(self):
+        import numpy as np
+
+        return np.asarray(self.data, dtype=bool).reshape(self.shape)
+
+
+class ProjectDocument(BaseModel):
+    """A complete, self-contained project — everything needed to resume work later.
+
+    Download one with ``GET /projects/{id}/document`` and restore it (as a new
+    project) with ``POST /projects/import``. Everything is plain JSON, so the file
+    is portable, diff-able and editable by hand.
+    """
+
+    version: int = 1
+    name: str = "workspace"
+    params: ParametersIn = Field(default_factory=ParametersIn)
+    grid: GridIn = Field(default_factory=GridIn)
+    arteries: list[Polyline] = Field(default_factory=list)
+    veins: list[Polyline] = Field(default_factory=list)
+    regions: list[list[tuple[float, float]]] = Field(default_factory=list)
+    inlets: list[tuple[float, float]] = Field(default_factory=list)
+    outlets: list[tuple[float, float]] = Field(default_factory=list)
+    artery_network: NetworkModel | None = None
+    vein_network: NetworkModel | None = None
+    mask: MaskModel | None = None
+    summary: dict | None = None
+
+
 class JobInfo(BaseModel):
     id: str
     state: str                 # pending | running | done | error | interrupted
