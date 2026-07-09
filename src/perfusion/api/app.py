@@ -221,6 +221,14 @@ def create_app(store: ProjectStore | None = None,
         grid = GridIn(nx=nx, ny=ny, lx=100.0, ly=120.0, domain_limit=dom)
         project = store.create(name, ParametersIn(p_in=40.0, p_out=0.0), grid)
         project.artery_network, project.vein_network, project.mask = art, ven, mask
+        # Tongue outline as a display polygon (shows/edits in Tissue mode). The raster
+        # mask above still drives the solve; this is aligned to it for visualisation.
+        from skimage.measure import find_contours
+
+        outline = max(find_contours(mask.astype(float), 0.5), key=len)
+        step = max(1, len(outline) // 80)
+        project.regions = [[[round(float(r) / nx * 100.0, 2), round(float(c) / ny * 120.0, 2)]
+                            for r, c in outline[::step]]]
         store.save(project)
         return _info(project)
 

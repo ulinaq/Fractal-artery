@@ -152,9 +152,10 @@ canvas.addEventListener("pointerdown", (e) => {
   redraw();
 });
 
-// place/remove an inlet (artery selected) or outlet (vein) near the click
+// place/remove an inlet or outlet near the click (own toggle in the I/O card)
 function markIO(pt) {
-  const list = vtype() === "artery" ? state.inlets : state.outlets;
+  const isInlet = document.querySelector("input[name=iotype]:checked").value === "inlet";
+  const list = isInlet ? state.inlets : state.outlets;
   const tol = 4;   // domain units: click a marker again to remove it
   const hit = list.findIndex(([x, y]) => Math.hypot(x - pt[0], y - pt[1]) < tol);
   if (hit >= 0) list.splice(hit, 1);
