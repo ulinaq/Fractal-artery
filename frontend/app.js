@@ -120,7 +120,15 @@ function showProjectLink(id) {
 
 async function loadFrog() {
   status("segmenting the frog example…");
-  const p = await api("POST", "/projects/frog");
+  let p;
+  try {
+    p = await api("POST", "/projects/frog");
+  } catch (e) {
+    status(/50[01]|image/.test(e.message)
+      ? "Frog needs the 'image' extra — restart: uv run --extra api --extra image perfusion-api"
+      : e.message, "err");
+    return;
+  }
   await openProject(p.id);
   $("use-vessels").checked = true;
   status("frog example loaded — press Run to solve it", "ok");

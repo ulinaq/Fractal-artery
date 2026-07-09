@@ -536,11 +536,20 @@ def _render_gif(tracer: dict, fps: int = 12) -> bytes:
 def _mount_frontend(app: FastAPI) -> None:
     """Serve the static 2-D workspace at ``/`` if it is present (dev/editable)."""
     frontend = Path(__file__).resolve().parents[3] / "frontend"
-    if (frontend / "index.html").exists():
-        from fastapi.staticfiles import StaticFiles
+    if not (frontend / "index.html").exists():
+        return
+    from fastapi.staticfiles import StaticFiles
 
-        # Mounted last, so the API routes above take precedence over "/".
-        app.mount("/", StaticFiles(directory=frontend, html=True), name="frontend")
+    class _NoCacheStatic(StaticFiles):
+        # Force the browser to revalidate (ETag) every load, so an updated app.js/
+        # index.html is never served stale from cache.
+        def file_response(self, *args, **kwargs):
+            resp = super().file_response(*args, **kwargs)
+            resp.headers["Cache-Control"] = "no-cache"
+            return resp
+
+    # Mounted last, so the API routes above take precedence over "/".
+    app.mount("/", _NoCacheStatic(directory=frontend, html=True), name="frontend")
 
 
 app = create_app()
