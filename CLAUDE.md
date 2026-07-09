@@ -180,6 +180,13 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   segmented network into a physical box (column→x, row→y flipped so it reads
   upright); the API's `POST /projects/{id}/image` uses it to turn an upload into
   the arterial tree.
+- **Portable save/load** (`schemas.ProjectDocument`): a whole project — params,
+  grid, hand-drawn vessels, tissue regions + raster mask, I/O points and the
+  segmented/grown `artery/vein` networks (with `inlet_nodes`/`node_z`, unlike the
+  `.npz` blob) — round-trips losslessly as one JSON file. `GET /projects/{id}/document`
+  downloads it; `POST /projects/import` restores it as a *new* project. Conversion
+  lives in `store.document_from_project` / `project_from_document`; the frontend
+  Project card has 💾 Save file / 📂 Load file.
 
 ## Gotchas
 

@@ -26,7 +26,14 @@ from threading import Lock
 import numpy as np
 
 from .. import io
-from .schemas import GridIn, ParametersIn, Polyline
+from .schemas import (
+    GridIn,
+    MaskModel,
+    NetworkModel,
+    ParametersIn,
+    Polyline,
+    ProjectDocument,
+)
 
 
 def _now() -> str:
@@ -54,6 +61,35 @@ class Project:
     @property
     def has_vessels(self) -> bool:
         return bool(self.arteries or self.veins)
+
+
+def document_from_project(project: Project) -> ProjectDocument:
+    """Snapshot a project as a portable, self-contained JSON document."""
+    return ProjectDocument(
+        name=project.name, params=project.params, grid=project.grid,
+        arteries=list(project.arteries), veins=list(project.veins),
+        regions=project.regions, inlets=project.inlets, outlets=project.outlets,
+        artery_network=(NetworkModel.from_core(project.artery_network)
+                        if project.artery_network is not None else None),
+        vein_network=(NetworkModel.from_core(project.vein_network)
+                      if project.vein_network is not None else None),
+        mask=MaskModel.from_core(project.mask) if project.mask is not None else None,
+        summary=project.summary,
+    )
+
+
+def project_from_document(doc: ProjectDocument, pid: str) -> Project:
+    """Rebuild a :class:`Project` (with a fresh ``pid``) from a saved document."""
+    return Project(
+        id=pid, name=doc.name, params=doc.params, grid=doc.grid,
+        arteries=list(doc.arteries), veins=list(doc.veins),
+        regions=[[list(pt) for pt in poly] for poly in doc.regions],
+        inlets=[list(pt) for pt in doc.inlets], outlets=[list(pt) for pt in doc.outlets],
+        artery_network=doc.artery_network.to_core() if doc.artery_network else None,
+        vein_network=doc.vein_network.to_core() if doc.vein_network else None,
+        mask=doc.mask.to_core() if doc.mask else None,
+        summary=doc.summary,
+    )
 
 
 def _default_root() -> Path:

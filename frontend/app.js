@@ -61,6 +61,7 @@ const vtype = () => document.querySelector('input[name=vtype]:checked').value;
 
 // Actions that require a project (disabled until one exists, or while busy).
 const NEEDS_PROJECT = [
+  "btn-save-file",
   "btn-endseg", "btn-undo", "btn-clear", "btn-save-vessels", "img-file",
   "btn-endregion", "btn-undo-region", "btn-clear-tissue", "btn-save-mask",
   "btn-clear-io", "btn-save-io", "btn-grow", "btn-run", "btn-flow",
@@ -71,6 +72,7 @@ function refreshUI() {
   NEEDS_PROJECT.forEach((id) => { $(id).disabled = !ready; });
   $("btn-new").disabled = state.busy;
   $("btn-frog").disabled = state.busy;
+  $("btn-load-file").disabled = state.busy;
   const canExport = !!(state.project && state.hasResult) && !state.busy;
   $("btn-export").disabled = !canExport;
   $("btn-bundle").disabled = !canExport;
@@ -132,6 +134,27 @@ async function loadFrog() {
   await openProject(p.id);
   $("use-vessels").checked = true;
   status("frog example loaded — press Run to solve it", "ok");
+}
+
+// ── save / load a project as a portable .json file ─────────────────────────────
+async function saveToFile() {
+  requireProject();
+  // the endpoint sets Content-Disposition: attachment, so this downloads (no nav)
+  window.location = `/projects/${state.project}/document`;
+  status("project saved to file", "ok");
+}
+
+async function loadFromFile() {
+  const file = $("file-load").files[0];
+  if (!file) return;
+  status("loading project file…");
+  let doc;
+  try { doc = JSON.parse(await file.text()); }
+  catch { status("not a valid project .json file", "err"); return; }
+  const info = await api("POST", "/projects/import", doc);
+  await openProject(info.id);
+  $("file-load").value = "";                 // allow re-loading the same file
+  status(`loaded “${info.name}” from file`, "ok");
 }
 
 function requireProject() {
@@ -521,6 +544,9 @@ function setMode(mode) {
 // ── wiring ────────────────────────────────────────────────────────────────────
 $("btn-new").addEventListener("click", guarded(newProject));
 $("btn-frog").addEventListener("click", guarded(loadFrog));
+$("btn-save-file").addEventListener("click", guarded(saveToFile));
+$("btn-load-file").addEventListener("click", () => $("file-load").click());
+$("file-load").addEventListener("change", guarded(loadFromFile));
 $("btn-endseg").addEventListener("click", endStroke);
 $("btn-undo").addEventListener("click", undo);
 $("btn-clear").addEventListener("click", clearVessels);
