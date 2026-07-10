@@ -45,6 +45,9 @@ const state = {
   inlets: [],                // arterial inlet points (domain coords)
   outlets: [],               // venous outlet points (domain coords)
   network: null,             // {segments:[...]} overlaid in result mode
+  editable: null,            // {artery, vein} node-level trees being edited
+  editSel: null,             // {kind, node, seg} current selection
+  editDrag: false,           // a node is being dragged
   fieldData: null,           // {name, shape, data, vmin, vmax}
   tracer: null,              // {shape, times, vmax, frames:[...]}
   flow: { active: false, idx: 0, timer: null },
@@ -64,7 +67,8 @@ const NEEDS_PROJECT = [
   "btn-save-file",
   "btn-endseg", "btn-undo", "btn-clear", "btn-save-vessels", "img-file",
   "btn-endregion", "btn-undo-region", "btn-clear-tissue", "btn-save-mask",
-  "btn-clear-io", "btn-save-io", "btn-grow", "btn-run", "btn-flow",
+  "btn-clear-io", "btn-save-io", "btn-edit-save", "btn-edit-revert",
+  "btn-grow", "btn-run", "btn-flow",
 ];
 
 function refreshUI() {
@@ -162,18 +166,136 @@ function requireProject() {
   return state.project;
 }
 
+// ── interactive vessel-node editing ────────────────────────────────────────────
+let editDirty = false;
+
+async function loadEditable() {
+  state.editable = null; state.editSel = null; clearEditDirty();
+  if (!state.project) return;
+  try {
+    const e = await api("GET", `/projects/${state.project}/editable`);
+    state.editable = (e && (e.artery || e.vein)) ? e : null;
+  } catch { state.editable = null; }
+  if (state.mode === "edit") syncEditPanel();
+}
+
+function hasEditable() { return !!(state.editable && (state.editable.artery || state.editable.vein)); }
+function editKinds() { return ["artery", "vein"].filter((k) => state.editable && state.editable[k]); }
+
+// nearest node handle to a canvas point, within tolerance (px); else null
+function pickNode(px, py, tol = 11) {
+  let best = null, bestD = tol * tol;
+  for (const kind of editKinds()) {
+    const n = state.editable[kind];
+    for (let i = 0; i < n.node_x.length; i++) {
+      const [cx, cy] = toCanvas(n.node_x[i], n.node_y[i]);
+      const d = (cx - px) ** 2 + (cy - py) ** 2;
+      if (d < bestD) { bestD = d; best = { kind, node: i }; }
+    }
+  }
+  return best;
+}
+
+// the vessel to resize for a node: the one feeding it, else an outgoing one (root)
+function nodeSegment(net, node) {
+  const s = net.seg_end.indexOf(node);
+  return s >= 0 ? s : net.seg_start.indexOf(node);
+}
+
+function editPointerDown(px, py) {
+  if (!hasEditable()) return;
+  const hit = pickNode(px, py);
+  if (hit) {
+    hit.seg = nodeSegment(state.editable[hit.kind], hit.node);
+    state.editSel = hit; state.editDrag = true;
+  } else {
+    state.editSel = null;
+  }
+  syncEditPanel(); redraw();
+}
+
+function syncEditPanel() {
+  const sl = $("edit-radius"), sel = state.editSel;
+  if (sel && sel.seg >= 0) {
+    const r = state.editable[sel.kind].seg_radius[sel.seg];
+    sl.value = r; sl.disabled = false;
+    $("edit-radius-val").textContent = (+r).toFixed(1);
+    $("edit-sel").textContent = `${sel.kind} node #${sel.node} — drag to move, slider to resize.`;
+  } else {
+    sl.disabled = true; $("edit-radius-val").textContent = "";
+    $("edit-sel").textContent = hasEditable()
+      ? "Click a node to select it."
+      : "No editable vessels — grow or segment a tree first.";
+  }
+}
+
+function onEditRadius() {
+  const sel = state.editSel;
+  if (!sel || sel.seg < 0) return;
+  const r = numOf("edit-radius");
+  state.editable[sel.kind].seg_radius[sel.seg] = r;
+  $("edit-radius-val").textContent = r.toFixed(1);
+  markEditDirty(); redraw();
+}
+
+function markEditDirty() { editDirty = true; $("btn-edit-save").textContent = "Save edits •"; }
+function clearEditDirty() { editDirty = false; if ($("btn-edit-save")) $("btn-edit-save").textContent = "Save edits"; }
+
+async function saveEdits() {
+  requireProject();
+  if (!hasEditable()) { status("nothing to edit", "err"); return; }
+  const pack = (k) => {
+    const n = state.editable[k];
+    return n ? { node_x: n.node_x, node_y: n.node_y, seg_radius: n.seg_radius } : null;
+  };
+  await api("PUT", `/projects/${state.project}/editable`,
+            { artery: pack("artery"), vein: pack("vein") });
+  state.hasResult = false;                       // geometry changed -> result stale
+  stopFlow(); state.tracer = null; state.fieldData = null;
+  await Promise.all([loadNetwork(), loadEditable()]);
+  syncEditPanel(); refreshUI(); redraw();
+  status("vessel edits saved", "ok");
+}
+
+async function revertEdits() {
+  await loadEditable();
+  syncEditPanel(); redraw();
+  status("reverted to saved geometry", "ok");
+}
+
 // ── vessel drawing ────────────────────────────────────────────────────────────
+const canvasXY = (e) => {
+  const rect = canvas.getBoundingClientRect();
+  return [(e.clientX - rect.left) * (W / rect.width),
+          (e.clientY - rect.top) * (H / rect.height)];
+};
+
 canvas.addEventListener("pointerdown", (e) => {
   if (state.mode === "result") return;
-  const rect = canvas.getBoundingClientRect();
-  const px = (e.clientX - rect.left) * (W / rect.width);
-  const py = (e.clientY - rect.top) * (H / rect.height);
+  const [px, py] = canvasXY(e);
+  if (state.mode === "edit") { editPointerDown(px, py); return; }
   const pt = toDomain(px, py);
   if (state.mode === "vessels") state.stroke.push(pt);
   else if (state.mode === "tissue") state.regionStroke.push(pt);
   else if (state.mode === "io") markIO(pt);
   redraw();
 });
+
+canvas.addEventListener("pointermove", (e) => {
+  if (state.mode !== "edit" || !state.editDrag || !state.editSel) return;
+  const [px, py] = canvasXY(e);
+  const [x, y] = toDomain(px, py);
+  const net = state.editable[state.editSel.kind];
+  net.node_x[state.editSel.node] = x;
+  net.node_y[state.editSel.node] = y;
+  redraw();
+});
+
+const endEditDrag = () => {
+  if (state.editDrag) { state.editDrag = false; markEditDirty(); }
+};
+canvas.addEventListener("pointerup", endEditDrag);
+canvas.addEventListener("pointerleave", endEditDrag);
 
 // place/remove an inlet or outlet near the click (own toggle in the I/O card)
 function markIO(pt) {
@@ -262,7 +384,7 @@ async function uploadImage(file) {
   const r = await fetch(`/projects/${state.project}/image?kind=${kind}`, { method: "POST", body: file });
   if (!r.ok) { status(`segment failed (${r.status}): ${(await r.text()).slice(0, 140)}`, "err"); return; }
   stopFlow(); state.tracer = null; state.fieldData = null;
-  await loadNetwork();
+  await Promise.all([loadNetwork(), loadEditable()]);
   const n = state.network ? state.network.segments.length : 0;
   $("img-info").textContent = `segmented → ${n} total segments`;
   status(`image segmented → ${kind} tree`, "ok");
@@ -281,7 +403,7 @@ async function grow() {
   $("grow-info").textContent = `grown tree: ${info.n_segments} segments, ${info.n_terminals} terminals`;
   state.hasResult = false;         // grow invalidates any prior result server-side
   stopFlow(); state.tracer = null; state.fieldData = null;
-  await loadNetwork();
+  await Promise.all([loadNetwork(), loadEditable()]);
   status("arterial tree grown", "ok");
   redraw();
 }
@@ -394,6 +516,7 @@ function redraw() {
   }
   drawRegions();
   drawNetworkOverlay();
+  drawEdit();
   drawVessels();
   drawStroke();
   drawIO();
@@ -465,8 +588,31 @@ function drawTracerFrame(idx) {
   updateColorbar(0, t.vmax, "tracer");
 }
 
+function drawEdit() {
+  if (state.mode !== "edit" || !hasEditable()) return;
+  for (const kind of editKinds()) {
+    const n = state.editable[kind];
+    const color = kind === "vein" ? getCss("--ven") : getCss("--art");
+    ctx.globalAlpha = 0.55;
+    for (let s = 0; s < n.seg_start.length; s++) {
+      const [x0, y0] = toCanvas(n.node_x[n.seg_start[s]], n.node_y[n.seg_start[s]]);
+      const [x1, y1] = toCanvas(n.node_x[n.seg_end[s]], n.node_y[n.seg_end[s]]);
+      ctx.strokeStyle = color; ctx.lineWidth = Math.max(1, n.seg_radius[s] * 0.6);
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    for (let i = 0; i < n.node_x.length; i++) {
+      const [cx, cy] = toCanvas(n.node_x[i], n.node_y[i]);
+      const sel = state.editSel && state.editSel.kind === kind && state.editSel.node === i;
+      ctx.beginPath(); ctx.arc(cx, cy, sel ? 6 : 3.2, 0, 7);
+      ctx.fillStyle = sel ? getCss("--accent") : "#fff";
+      ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = color; ctx.stroke();
+    }
+  }
+}
+
 function drawNetworkOverlay() {
-  if (!state.network) return;    // show the current (grown/segmented) tree in any mode
+  if (!state.network || state.mode === "edit") return;    // edit mode draws the editable tree instead
   for (const s of state.network.segments) {
     const [x0, y0] = toCanvas(s.x0, s.y0), [x1, y1] = toCanvas(s.x1, s.y1);
     ctx.strokeStyle = s.kind === "vein" ? "rgba(191,219,254,.95)" : "rgba(254,202,202,.95)";
@@ -528,6 +674,7 @@ function setMode(mode) {
   $("mode-vessels").classList.toggle("active", mode === "vessels");
   $("mode-tissue").classList.toggle("active", mode === "tissue");
   $("mode-io").classList.toggle("active", mode === "io");
+  $("mode-edit").classList.toggle("active", mode === "edit");
   $("mode-result").classList.toggle("active", mode === "result");
   $("field-picker").classList.toggle("show", mode === "result");
   $("flowbar").classList.toggle("show", mode === "result");
@@ -537,7 +684,8 @@ function setMode(mode) {
     c.style.display = c.dataset.mode === mode ? "" : "none";
   });
   if (mode !== "result") stopTimer();
-  canvas.style.cursor = mode === "result" ? "default" : "crosshair";
+  canvas.style.cursor = mode === "result" ? "default" : mode === "edit" ? "pointer" : "crosshair";
+  if (mode === "edit") syncEditPanel();
   redraw();
 }
 
@@ -547,6 +695,9 @@ $("btn-frog").addEventListener("click", guarded(loadFrog));
 $("btn-save-file").addEventListener("click", guarded(saveToFile));
 $("btn-load-file").addEventListener("click", () => $("file-load").click());
 $("file-load").addEventListener("change", guarded(loadFromFile));
+$("edit-radius").addEventListener("input", onEditRadius);
+$("btn-edit-save").addEventListener("click", guarded(saveEdits));
+$("btn-edit-revert").addEventListener("click", guarded(revertEdits));
 $("btn-endseg").addEventListener("click", endStroke);
 $("btn-undo").addEventListener("click", undo);
 $("btn-clear").addEventListener("click", clearVessels);
@@ -587,6 +738,7 @@ $("btn-save-io").addEventListener("click", () => saveIO().catch((e) => status(e.
 $("mode-vessels").addEventListener("click", () => setMode("vessels"));
 $("mode-tissue").addEventListener("click", () => setMode("tissue"));
 $("mode-io").addEventListener("click", () => setMode("io"));
+$("mode-edit").addEventListener("click", () => setMode("edit"));
 $("mode-result").addEventListener("click", () => setMode("result"));
 canvas.addEventListener("dblclick", () => (state.mode === "tissue" ? endRegion() : endStroke()));
 document.querySelectorAll(".field").forEach((b) => b.addEventListener("click", () => {
@@ -626,7 +778,7 @@ async function openProject(id) {
   showProjectLink(info.id);
   stopFlow(); state.tracer = null;
   state.hasResult = !!info.has_result;
-  await Promise.all([loadNetwork(), loadMask(), loadIO()]);
+  await Promise.all([loadNetwork(), loadMask(), loadIO(), loadEditable()]);
   if (info.has_result) {
     await Promise.all([showSummary(), loadField(state.field)]);
     setMode("result");

@@ -187,6 +187,14 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   downloads it; `POST /projects/import` restores it as a *new* project. Conversion
   lives in `store.document_from_project` / `project_from_document`; the frontend
   Project card has 💾 Save file / 📂 Load file.
+- **Interactive vessel editing** (`GET`/`PUT /projects/{id}/editable`): the
+  frontend **Edit** mode draws the segmented/grown arterial & venous trees as
+  draggable node handles — drag to move a node, click one and use the radius
+  slider to resize its vessel, then Save. The PUT applies new node positions +
+  per-segment radii to the stored `Network` via `dataclasses.replace`, keeping
+  topology/`inlet_nodes`/`root` and recomputing `seg_length`/`seg_angle`; it
+  invalidates the (now stale) result. Only 2-D trees are editable (`is_3d` →
+  `null`). Radii are clamped `>= 1e-3` so resistance never divides by zero.
 
 ## Gotchas
 

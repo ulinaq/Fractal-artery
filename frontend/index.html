@@ -101,6 +101,22 @@
         <p class="muted" id="io-info"></p>
       </details>
 
+      <details class="card" data-mode="edit" open>
+        <summary>Edit vessels</summary>
+        <p class="muted">Drag a node to move it; click a node then use the slider
+          to resize its vessel. Edits apply to the segmented / grown arterial and
+          venous trees.</p>
+        <p class="muted" id="edit-sel">No editable vessels — grow or segment a tree first.</p>
+        <label>radius
+          <input id="edit-radius" type="range" min="0.3" max="8" step="0.1" value="2" disabled />
+          <span id="edit-radius-val" class="muted"></span>
+        </label>
+        <div class="row">
+          <button id="btn-edit-save">Save edits</button>
+          <button id="btn-edit-revert">Revert</button>
+        </div>
+      </details>
+
       <details class="card" data-mode="vessels">
         <summary>Grow</summary>
         <p class="muted">Grow the arterial tree into the tissue (from hand-drawn
@@ -133,6 +149,7 @@
           <button id="mode-vessels" class="mode active" role="tab">Vessels</button>
           <button id="mode-tissue" class="mode" role="tab">Tissue</button>
           <button id="mode-io" class="mode" role="tab">Inlets/Outlets</button>
+          <button id="mode-edit" class="mode" role="tab">Edit</button>
           <button id="mode-result" class="mode" role="tab">Result</button>
         </div>
         <div class="fields" id="field-picker">
