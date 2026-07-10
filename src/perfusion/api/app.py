@@ -22,6 +22,8 @@ from .schemas import (
     IOIn,
     JobInfo,
     MaskIn,
+    NetworkModel,
+    NetworksEditIn,
     ParametersIn,
     ProjectCreate,
     ProjectDocument,
@@ -228,6 +230,60 @@ def create_app(store: ProjectStore | None = None,
 
         project = project_from_document(doc, uuid.uuid4().hex[:12])
         store.save(project)
+        return _info(project)
+
+    @app.get("/projects/{pid}/editable")
+    def get_editable(pid: str) -> dict:
+        """Node-level geometry of the arterial/venous trees, for interactive edits.
+
+        Returns each 2-D tree as a :class:`NetworkModel` (nodes + segments + radii),
+        or ``null`` when the tree is absent or 3-D (the 2-D editor cannot move it).
+        """
+        project = _project(pid)
+
+        def enc(net):
+            if net is None or net.is_3d:
+                return None
+            return NetworkModel.from_core(net).model_dump()
+
+        return {"artery": enc(project.artery_network), "vein": enc(project.vein_network)}
+
+    @app.put("/projects/{pid}/editable", response_model=ProjectInfo)
+    def put_editable(pid: str, body: NetworksEditIn) -> ProjectInfo:
+        """Apply moved nodes + resized segments to the stored trees (topology kept).
+
+        Segment lengths/angles are recomputed from the new node positions; the
+        result is invalidated because the geometry changed.
+        """
+        import dataclasses
+
+        project = _project(pid)
+
+        def apply(net, edit):
+            nx_ = np.asarray(edit.node_x, float)
+            ny_ = np.asarray(edit.node_y, float)
+            radius = np.maximum(np.asarray(edit.seg_radius, float), 1e-3)
+            if len(nx_) != net.n_nodes or len(ny_) != net.n_nodes:
+                raise HTTPException(422, f"expected {net.n_nodes} nodes")
+            if len(radius) != net.n_segments:
+                raise HTTPException(422, f"expected {net.n_segments} segment radii")
+            ss, se = net.seg_start, net.seg_end
+            return dataclasses.replace(
+                net, node_x=nx_, node_y=ny_, seg_radius=radius,
+                seg_length=np.hypot(nx_[se] - nx_[ss], ny_[se] - ny_[ss]),
+                seg_angle=np.arctan2(ny_[se] - ny_[ss], nx_[se] - nx_[ss]),
+            )
+
+        changed = False
+        if body.artery is not None and project.artery_network is not None:
+            project.artery_network = apply(project.artery_network, body.artery)
+            changed = True
+        if body.vein is not None and project.vein_network is not None:
+            project.vein_network = apply(project.vein_network, body.vein)
+            changed = True
+        if not changed:
+            raise HTTPException(404, "project has no editable arterial/venous tree")
+        store.clear_result(project)     # geometry changed -> stale result; also saves
         return _info(project)
 
     @app.post("/projects/frog", response_model=ProjectInfo)

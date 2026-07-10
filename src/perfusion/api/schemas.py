@@ -230,6 +230,26 @@ class ProjectDocument(BaseModel):
     summary: dict | None = None
 
 
+class NetworkEditIn(BaseModel):
+    """Edited node positions + segment radii for one tree (topology unchanged).
+
+    ``node_x``/``node_y`` must have one entry per node and ``seg_radius`` one per
+    segment; the server recomputes segment lengths/angles and preserves the
+    topology, root and inlet nodes.
+    """
+
+    node_x: list[float]
+    node_y: list[float]
+    seg_radius: list[float]
+
+
+class NetworksEditIn(BaseModel):
+    """Interactive edits to the arterial and/or venous trees."""
+
+    artery: NetworkEditIn | None = None
+    vein: NetworkEditIn | None = None
+
+
 class JobInfo(BaseModel):
     id: str
     state: str                 # pending | running | done | error | interrupted

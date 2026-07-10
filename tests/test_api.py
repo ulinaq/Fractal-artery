@@ -413,6 +413,59 @@ def test_import_rejects_garbage(client):
     assert client.post("/projects/import", json={"grid": "not a grid"}).status_code == 422
 
 
+def test_editable_move_node_and_resize(client):
+    pytest.importorskip("skimage")
+    pytest.importorskip("imageio")
+    pid = client.post("/projects/frog").json()["id"]
+    ed = client.get(f"/projects/{pid}/editable").json()
+    assert {k for k in ed if ed[k]} == {"artery", "vein"}
+    a = ed["artery"]
+    n_nodes, n_segs = len(a["node_x"]), len(a["seg_radius"])
+
+    # move node 0 by +12 in x and double every radius
+    nx_ = list(a["node_x"])
+    nx_[0] += 12.0
+    radii = [2 * r for r in a["seg_radius"]]
+    put = client.put(f"/projects/{pid}/editable",
+                     json={"artery": {"node_x": nx_, "node_y": a["node_y"],
+                                      "seg_radius": radii}})
+    assert put.status_code == 200
+
+    ed2 = client.get(f"/projects/{pid}/editable").json()["artery"]
+    assert ed2["node_x"][0] == pytest.approx(a["node_x"][0] + 12.0)
+    assert ed2["seg_radius"] == pytest.approx(radii)
+    assert len(ed2["node_x"]) == n_nodes          # topology preserved
+    assert len(ed2["seg_radius"]) == n_segs
+
+    # the edited network still solves and conserves mass
+    jid = client.post(f"/projects/{pid}/run", json={"use_vessels": True}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    s = client.get(f"/projects/{pid}/results").json()
+    assert s["arterial_inflow"] == pytest.approx(s["venous_outflow"], rel=1e-6)
+
+
+def test_editable_rejects_wrong_counts(client):
+    pytest.importorskip("skimage")
+    pytest.importorskip("imageio")
+    pid = client.post("/projects/frog").json()["id"]
+    a = client.get(f"/projects/{pid}/editable").json()["artery"]
+    bad = client.put(f"/projects/{pid}/editable",
+                     json={"artery": {"node_x": [1.0, 2.0], "node_y": [1.0, 2.0],
+                                      "seg_radius": a["seg_radius"]}})
+    assert bad.status_code == 422
+
+
+def test_editable_absent_without_networks(client):
+    pid = client.post("/projects", json={"name": "empty", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    ed = client.get(f"/projects/{pid}/editable").json()
+    assert ed == {"artery": None, "vein": None}
+    # nothing to edit -> 404
+    assert client.put(f"/projects/{pid}/editable",
+                      json={"artery": {"node_x": [], "node_y": [], "seg_radius": []}}
+                      ).status_code == 404
+
+
 def test_mask_makes_the_solved_domain_organ_shaped(client):
     pid = client.post("/projects", json={"name": "mask", "grid": SMALL_GRID,
                                          "params": FAST_PARAMS}).json()["id"]
