@@ -187,14 +187,19 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   downloads it; `POST /projects/import` restores it as a *new* project. Conversion
   lives in `store.document_from_project` / `project_from_document`; the frontend
   Project card has 💾 Save file / 📂 Load file.
-- **Interactive vessel editing** (`GET`/`PUT /projects/{id}/editable`): the
-  frontend **Edit** mode draws the segmented/grown arterial & venous trees as
+- **Interactive vessel editing**: the frontend **Edit** mode renders vessels as
   draggable node handles — drag to move a node, click one and use the radius
-  slider to resize its vessel, then Save. The PUT applies new node positions +
-  per-segment radii to the stored `Network` via `dataclasses.replace`, keeping
-  topology/`inlet_nodes`/`root` and recomputing `seg_length`/`seg_angle`; it
-  invalidates the (now stale) result. Only 2-D trees are editable (`is_3d` →
-  `null`). Radii are clamped `>= 1e-3` so resistance never divides by zero.
+  slider to resize its vessel, ＋ Add branch (click to extend the selected
+  vessel), 🗑 Delete node, then Save. It works on **two sources**: segmented/grown
+  *networks* (via `GET`/`PUT /projects/{id}/editable`, node-level `NetworkModel`;
+  `null` for 3-D trees) and hand-drawn *polylines* (edited in place, saved via
+  `PUT /projects/{id}/vessels` — `GET /vessels` now also exists and `openProject`
+  restores strokes). A move/resize PUT omits `seg_start`/`seg_end` and preserves
+  topology via `dataclasses.replace`; an add/delete PUT includes them and
+  `_rebuild_network` reindexes, drops isolated (degree-0, non-inlet) nodes and
+  re-derives `node_role`/`seg_length`/`seg_angle` (connected fragments without an
+  inlet are kept — their leaves couple to Darcy). Radii clamp `>= 1e-3`; edits
+  invalidate the stale result.
 
 ## Gotchas
 

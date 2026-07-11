@@ -231,16 +231,22 @@ class ProjectDocument(BaseModel):
 
 
 class NetworkEditIn(BaseModel):
-    """Edited node positions + segment radii for one tree (topology unchanged).
+    """Edited geometry (and optionally topology) for one tree.
 
-    ``node_x``/``node_y`` must have one entry per node and ``seg_radius`` one per
-    segment; the server recomputes segment lengths/angles and preserves the
-    topology, root and inlet nodes.
+    ``node_x``/``node_y`` give every node's position and ``seg_radius`` every
+    segment's radius. Omit ``seg_start``/``seg_end`` for a pure move/resize
+    (topology preserved from the stored tree); include them to also add/delete
+    nodes and segments — the server then rebuilds the tree, drops isolated
+    (degree-0, non-inlet) nodes, reindexes, and recomputes lengths/angles.
     """
 
     node_x: list[float]
     node_y: list[float]
     seg_radius: list[float]
+    seg_start: list[int] | None = None
+    seg_end: list[int] | None = None
+    inlet_nodes: list[int] | None = None   # prescribed-pressure nodes (new indices)
+    root_node: int | None = None
 
 
 class NetworksEditIn(BaseModel):
