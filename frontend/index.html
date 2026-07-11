@@ -103,16 +103,16 @@
 
       <details class="card" data-mode="edit" open>
         <summary>Edit vessels</summary>
-        <p class="muted">Click a node to select it, drag to move it, and use the
-          slider to resize its vessel. Works on hand-drawn, segmented and grown
-          vessels alike.</p>
+        <p class="muted">Vessels are a network: click a node to select it, drag to
+          move it, and use the slider to resize its edge. Works on hand-drawn,
+          segmented and grown vessels alike.</p>
         <p class="muted" id="edit-sel">No vessels yet — draw, segment or grow a tree first.</p>
         <label>radius
           <input id="edit-radius" type="range" min="0.3" max="8" step="0.1" value="2" disabled />
           <span id="edit-radius-val" class="muted"></span>
         </label>
         <div class="row">
-          <button id="btn-edit-add" title="click on the canvas to extend the selected vessel">＋ Add branch</button>
+          <button id="btn-edit-add" title="click the canvas to branch a new edge from the selected node (click several times to fan out)">＋ Add branch</button>
           <button id="btn-edit-del" title="delete the selected node" disabled>🗑 Delete node</button>
         </div>
         <div class="row">
