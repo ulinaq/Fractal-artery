@@ -910,6 +910,50 @@ document.addEventListener("keydown", (e) => {
   const redo = (e.key.toLowerCase() === "z" && e.shiftKey) || e.key.toLowerCase() === "y";
   redo ? historyRedo() : historyUndo();
 });
+
+// ── context-aware keyboard shortcuts (no modifiers, outside form fields) ────────
+// Speeds up the repeated actions: Del deletes the selected node, Enter ends a
+// stroke/region, A adds a branch / picks artery, Esc cancels, R runs, G grows,
+// 1–5 switch tabs. Clicking the real buttons reuses their enabled/guarded logic.
+const clickIfEnabled = (id) => { const b = $(id); if (b && !b.disabled) b.click(); };
+
+document.addEventListener("keydown", (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;                // combos handled above / by the browser
+  const t = e.target;
+  if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;   // don't hijack typing in fields
+  const m = state.mode, k = e.key.toLowerCase();
+  let handled = true;
+  if (e.key === "Delete" || e.key === "Backspace") {
+    if (m === "edit") clickIfEnabled("btn-edit-del");            // delete selected node
+    else if (m === "vessels") clickIfEnabled("btn-undo");        // remove last stroke
+    else if (m === "tissue") clickIfEnabled("btn-undo-region");
+    else handled = false;
+  } else if (e.key === "Enter") {
+    if (m === "vessels") clickIfEnabled("btn-endseg");           // end the current stroke
+    else if (m === "tissue") clickIfEnabled("btn-endregion");    // close the region
+    else handled = false;
+  } else if (e.key === "Escape") {
+    if (m === "edit") { if (state.editAdd) toggleAddMode(); else { state.editSel = null; syncEditPanel(); redraw(); } }
+    else if (m === "vessels" && state.stroke.length) { state.stroke = []; redraw(); }
+    else if (m === "tissue" && state.regionStroke.length) { state.regionStroke = []; redraw(); }
+    else handled = false;
+  } else if (k === "a") {
+    if (m === "edit") clickIfEnabled("btn-edit-add");            // toggle add-branch
+    else if (m === "vessels") document.querySelector('input[name=vtype][value=artery]').checked = true;
+    else handled = false;
+  } else if (k === "v" && m === "vessels") {
+    document.querySelector('input[name=vtype][value=vein]').checked = true;
+  } else if (k === "g" && m === "vessels") {
+    clickIfEnabled("btn-grow");
+  } else if (k === "r") {
+    clickIfEnabled("btn-run");                                   // run simulation
+  } else if (e.key >= "1" && e.key <= "5") {
+    setMode(["vessels", "tissue", "io", "edit", "result"][+e.key - 1]);
+  } else {
+    handled = false;
+  }
+  if (handled) e.preventDefault();
+});
 $("btn-edit-add").addEventListener("click", toggleAddMode);
 $("btn-edit-del").addEventListener("click", deleteSelectedNode);
 $("btn-edit-save").addEventListener("click", guarded(saveEdits));
