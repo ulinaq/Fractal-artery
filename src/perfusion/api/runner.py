@@ -139,7 +139,7 @@ def validate_run(project, use_vessels):
     return grid, art, ven
 
 
-def solve(project, *, use_vessels, nonlinear=False):
+def solve(project, *, use_vessels, nonlinear=False, max_iter=100, tol=1e-10):
     """Build the model (grid, trees, inlet/outlet nodes) and run the hybrid solve."""
     prm = project.params.to_core()
     grid, art, ven = validate_run(project, use_vessels)
@@ -147,13 +147,20 @@ def solve(project, *, use_vessels, nonlinear=False):
     return run_hybrid(prm, grid, domain_limit=domain_limit, nonlinear=nonlinear,
                       art=art, ven=ven,
                       art_inlets=snap_io(art, project.inlets),
-                      ven_outlets=snap_io(ven, project.outlets))
+                      ven_outlets=snap_io(ven, project.outlets),
+                      max_iter=max_iter, tol=tol)
 
 
 def run_project(store, project, req: RunRequest) -> None:
     """Execute the hybrid simulation for a project and persist the result."""
-    result = solve(project, use_vessels=req.use_vessels, nonlinear=req.nonlinear)
-    store.save_result(project, result)
+    import warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = solve(project, use_vessels=req.use_vessels, nonlinear=req.nonlinear,
+                       max_iter=req.max_iter, tol=req.tol)
+    notes = [str(w.message) for w in caught if issubclass(w.category, RuntimeWarning)]
+    store.save_result(project, result, notes=notes or None)
 
 
 def run_tracer(store, project, req: TracerRequest) -> None:

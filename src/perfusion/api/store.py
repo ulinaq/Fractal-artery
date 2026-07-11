@@ -242,11 +242,18 @@ class ProjectStore:
         else:
             mask_path.unlink(missing_ok=True)
 
-    def save_result(self, project: Project, result) -> None:
-        """Write the result blob + summary and persist (invalidating any tracer)."""
+    def save_result(self, project: Project, result, notes=None) -> None:
+        """Write the result blob + summary and persist (invalidating any tracer).
+
+        ``notes`` (e.g. a non-convergence warning) are stored in the summary so the
+        UI can surface them.
+        """
         io.save_results(result, self.result_path(project.id))
         self.tracer_path(project.id).unlink(missing_ok=True)   # stale
-        project.summary = io.results_summary(result)
+        summary = io.results_summary(result)
+        if notes:
+            summary["notes"] = list(notes)
+        project.summary = summary
         project.has_result = True
         project.has_tracer = False
         self.save(project)

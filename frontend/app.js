@@ -602,7 +602,8 @@ async function run() {
   if (state.regions.length || state.regionStroke.length >= 3) await saveMask();
   if (state.inlets.length || state.outlets.length) await saveIO();
   const job = await api("POST", `/projects/${state.project}/run`,
-    { nonlinear: $("nonlinear").checked, use_vessels: $("use-vessels").checked });
+    { nonlinear: $("nonlinear").checked, use_vessels: $("use-vessels").checked,
+      max_iter: numOf("max-iter") });
   status("running…");
   $("run-info").classList.remove("run-error");
   $("run-info").textContent = "job " + job.id;
@@ -618,6 +619,11 @@ async function run() {
   state.hasResult = true;
   await Promise.all([loadNetwork(), showSummary(), loadField(state.field)]);
   setMode("result");
+  if (state.runNotes && state.runNotes.length) {   // e.g. non-convergence within max iterations
+    status("solved (with warnings)", "ok");
+    $("run-info").textContent = "⚠ " + state.runNotes.join(" · ") +
+      " — increase max iterations if the result looks off.";
+  }
 }
 
 async function pollJob(jid) {
@@ -630,6 +636,7 @@ async function pollJob(jid) {
 
 async function showSummary() {
   const s = await api("GET", `/projects/${state.project}/results`);
+  state.runNotes = s.notes || [];
   const fmt = (v) => (Math.abs(v) < 1e-3 || Math.abs(v) > 1e4) ? v.toExponential(2) : v.toFixed(3);
   $("summary").innerHTML = [
     ["arterial inflow", s.arterial_inflow], ["venous outflow", s.venous_outflow],
@@ -972,6 +979,9 @@ $("btn-clear-tissue").addEventListener("click", clearTissue);
 $("btn-save-mask").addEventListener("click", () => saveMask().catch((e) => status(e.message, "err")));
 $("btn-grow").addEventListener("click", guarded(grow));
 $("btn-run").addEventListener("click", guarded(run));
+$("nonlinear").addEventListener("change", (e) => {   // max-iter only matters for the nonlinear solve
+  $("maxiter-row").style.display = e.target.checked ? "" : "none";
+});
 $("btn-export").addEventListener("click", () => {
   window.location = `/projects/${state.project}/export?fmt=${$("export-fmt").value}`;
 });
