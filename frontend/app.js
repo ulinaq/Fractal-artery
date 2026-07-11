@@ -64,6 +64,66 @@ const $ = (id) => document.getElementById(id);
 const numOf = (id) => Number($(id).value);
 const vtype = () => document.querySelector('input[name=vtype]:checked').value;
 
+// ── undo / redo (workspace geometry history) ───────────────────────────────────
+// Snapshots the editable geometry after each action — vessel network, hand-drawn
+// strokes, tissue regions and inlet/outlet points — so any edit can be reverted.
+const history = { stack: [], idx: -1 };
+
+function geomSnapshot() {
+  return JSON.stringify({
+    vessels: state.vessels, regions: state.regions,
+    inlets: state.inlets, outlets: state.outlets,
+    editable: state.editable, editSource: state.editSource,
+  });
+}
+
+function recordHistory() {
+  const snap = geomSnapshot();
+  if (history.idx >= 0 && history.stack[history.idx] === snap) return;   // no real change
+  history.stack = history.stack.slice(0, history.idx + 1);               // drop redo tail
+  history.stack.push(snap);
+  if (history.stack.length > 100) history.stack.shift();
+  history.idx = history.stack.length - 1;
+  updateHistoryButtons();
+}
+
+function resetHistory() {
+  history.stack = [geomSnapshot()];
+  history.idx = 0;
+  updateHistoryButtons();
+}
+
+function updateHistoryButtons() {
+  $("btn-hist-undo").disabled = history.idx <= 0 || state.busy;
+  $("btn-hist-redo").disabled = history.idx >= history.stack.length - 1 || state.busy;
+}
+
+function applySnapshot(snap) {
+  const s = JSON.parse(snap);
+  state.vessels = s.vessels || { arteries: [], veins: [] };
+  state.regions = s.regions || [];
+  state.inlets = s.inlets || []; state.outlets = s.outlets || [];
+  state.editable = s.editable; state.editSource = s.editSource;
+  state.editSel = null; state.editAdd = false; state.editDrag = false;
+  $("btn-edit-add").classList.remove("active");
+  if (state.editSource) markEditDirty();     // differs from the saved geometry -> Save to persist
+  syncEditPanel(); refreshUI(); redraw();
+}
+
+function historyUndo() {
+  if (history.idx <= 0 || state.busy) return;
+  applySnapshot(history.stack[--history.idx]);
+  updateHistoryButtons();
+  status("undo", "ok");
+}
+
+function historyRedo() {
+  if (history.idx >= history.stack.length - 1 || state.busy) return;
+  applySnapshot(history.stack[++history.idx]);
+  updateHistoryButtons();
+  status("redo", "ok");
+}
+
 // Actions that require a project (disabled until one exists, or while busy).
 const NEEDS_PROJECT = [
   "btn-save-file",
@@ -82,6 +142,7 @@ function refreshUI() {
   const canExport = !!(state.project && state.hasResult) && !state.busy;
   $("btn-export").disabled = !canExport;
   $("btn-bundle").disabled = !canExport;
+  updateHistoryButtons();
 }
 
 function setBusy(on) { state.busy = on; refreshUI(); }
@@ -118,6 +179,7 @@ async function newProject() {
   setMode("vessels");
   refreshUI();
   status("project ready", "ok");
+  resetHistory();
   redraw();
 }
 
@@ -193,7 +255,7 @@ async function ensureNetworkForEdit() {
     await api("POST", `/projects/${state.project}/vectorize`);
     await Promise.all([loadVessels(), loadNetwork(), loadEditable()]);
     state.hasResult = false; refreshUI();
-    syncEditPanel(); redraw();
+    syncEditPanel(); recordHistory(); redraw();
     status("hand-drawn vessels converted to an editable network", "ok");
   } catch (e) { status(e.message, "err"); }
 }
@@ -252,7 +314,7 @@ function editAddAt(px, py) {
   n.seg_start.push(sel.node); n.seg_end.push(ni);           // new child edge from the SAME node
   n.seg_radius.push(sel.seg >= 0 ? n.seg_radius[sel.seg] : 2);   // inherit the parent edge's radius
   selectNode({ kind, node: sel.node });                     // keep the source selected to keep branching
-  markEditDirty(); syncEditPanel(); redraw();
+  markEditDirty(); recordHistory(); syncEditPanel(); redraw();
 }
 
 function deleteSelectedNode() {
@@ -271,7 +333,7 @@ function deleteSelectedNode() {
   n.inlet_nodes = (n.inlet_nodes || []).filter((x) => x !== i).map(sh);
   if (n.root_node != null && n.root_node !== i) n.root_node = sh(n.root_node);
   pruneNetworkKind(n);          // drop nodes orphaned to degree 0 by the deletion
-  state.editSel = null; markEditDirty(); syncEditPanel(); redraw();
+  state.editSel = null; markEditDirty(); recordHistory(); syncEditPanel(); redraw();
 }
 
 // drop degree-0 non-inlet nodes, reindex (mirrors the backend rebuild)
@@ -342,7 +404,7 @@ async function saveEdits() {
   state.hasResult = false;                       // geometry changed -> result stale
   stopFlow(); state.tracer = null; state.fieldData = null;
   await Promise.all([loadNetwork(), loadEditable()]);
-  syncEditPanel(); refreshUI(); redraw();
+  syncEditPanel(); refreshUI(); recordHistory(); redraw();
   status("vessel edits saved", "ok");
 }
 
@@ -381,7 +443,7 @@ canvas.addEventListener("pointermove", (e) => {
 });
 
 const endEditDrag = () => {
-  if (state.editDrag) { state.editDrag = false; markEditDirty(); }
+  if (state.editDrag) { state.editDrag = false; markEditDirty(); recordHistory(); }
 };
 canvas.addEventListener("pointerup", endEditDrag);
 canvas.addEventListener("pointerleave", endEditDrag);
@@ -394,12 +456,14 @@ function markIO(pt) {
   const hit = list.findIndex(([x, y]) => Math.hypot(x - pt[0], y - pt[1]) < tol);
   if (hit >= 0) list.splice(hit, 1);
   else list.push([pt[0], pt[1]]);
+  recordHistory();
 }
 
 function endStroke() {
   if (state.stroke.length >= 2) {
     const bucket = vtype() === "artery" ? state.vessels.arteries : state.vessels.veins;
     bucket.push({ points: state.stroke.map(([x, y]) => [x, y]), radius: numOf("draw-radius") });
+    recordHistory();
   }
   state.stroke = [];
   redraw();
@@ -409,10 +473,11 @@ function undo() {
   else {
     const bucket = vtype() === "artery" ? state.vessels.arteries : state.vessels.veins;
     bucket.pop();
+    recordHistory();
   }
   redraw();
 }
-function clearVessels() { state.vessels = { arteries: [], veins: [] }; state.stroke = []; redraw(); }
+function clearVessels() { state.vessels = { arteries: [], veins: [] }; state.stroke = []; recordHistory(); redraw(); }
 
 async function saveVessels() {
   requireProject();
@@ -423,16 +488,19 @@ async function saveVessels() {
 
 // ── tissue mask drawing ────────────────────────────────────────────────────────
 function endRegion() {
-  if (state.regionStroke.length >= 3) state.regions.push(state.regionStroke.map(([x, y]) => [x, y]));
+  if (state.regionStroke.length >= 3) {
+    state.regions.push(state.regionStroke.map(([x, y]) => [x, y]));
+    recordHistory();
+  }
   state.regionStroke = [];
   redraw();
 }
 function undoRegion() {
   if (state.regionStroke.length) state.regionStroke.pop();
-  else state.regions.pop();
+  else { state.regions.pop(); recordHistory(); }
   redraw();
 }
-function clearTissue() { state.regions = []; state.regionStroke = []; redraw(); }
+function clearTissue() { state.regions = []; state.regionStroke = []; recordHistory(); redraw(); }
 
 async function saveMask() {
   requireProject();
@@ -455,7 +523,7 @@ async function loadVessels() {
 }
 
 // ── inlets / outlets ──────────────────────────────────────────────────────────
-function clearIO() { state.inlets = []; state.outlets = []; redraw(); }
+function clearIO() { state.inlets = []; state.outlets = []; recordHistory(); redraw(); }
 
 async function saveIO() {
   requireProject();
@@ -500,6 +568,7 @@ async function grow() {
   state.hasResult = false;         // grow invalidates any prior result server-side
   stopFlow(); state.tracer = null; state.fieldData = null;
   await Promise.all([loadNetwork(), loadEditable()]);
+  recordHistory();
   status("arterial tree grown", "ok");
   redraw();
 }
@@ -798,6 +867,19 @@ $("btn-save-file").addEventListener("click", guarded(saveToFile));
 $("btn-load-file").addEventListener("click", () => $("file-load").click());
 $("file-load").addEventListener("change", guarded(loadFromFile));
 $("edit-radius").addEventListener("input", onEditRadius);
+$("edit-radius").addEventListener("change", recordHistory);   // one history entry per resize
+$("btn-hist-undo").addEventListener("click", historyUndo);
+$("btn-hist-redo").addEventListener("click", historyRedo);
+
+document.addEventListener("keydown", (e) => {
+  if (!(e.metaKey || e.ctrlKey)) return;
+  if (e.key.toLowerCase() !== "z" && e.key.toLowerCase() !== "y") return;
+  const t = e.target;
+  if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;   // let text fields keep their own undo
+  e.preventDefault();
+  const redo = (e.key.toLowerCase() === "z" && e.shiftKey) || e.key.toLowerCase() === "y";
+  redo ? historyRedo() : historyUndo();
+});
 $("btn-edit-add").addEventListener("click", toggleAddMode);
 $("btn-edit-del").addEventListener("click", deleteSelectedNode);
 $("btn-edit-save").addEventListener("click", guarded(saveEdits));
@@ -889,6 +971,7 @@ async function openProject(id) {
     setMode("result");
   } else { setMode("vessels"); }
   refreshUI();
+  resetHistory();
   status(`opened ${info.id}`, "ok");
 }
 
