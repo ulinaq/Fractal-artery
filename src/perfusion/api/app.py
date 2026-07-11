@@ -513,17 +513,34 @@ def create_app(store: ProjectStore | None = None,
 
     @app.post("/projects/{pid}/grow", response_model=GrowInfo)
     def grow_vessels(pid: str, body: GrowRequest | None = None) -> GrowInfo:
-        """Grow the arterial tree into the tissue and store it for the next run."""
+        """Grow the arterial *or* venous tree into the tissue (``target``).
+
+        The base is the drawn/segmented vessels of that tree (shape preserved, so
+        branches extend the existing vessels rather than a straight trunk), else
+        the default fractal tree. Artery and vein grow independently, each with
+        its own settings, so you can try variations.
+        """
+        from ..core.geometry import venous_tree
+
         project = _project(pid)
         req = body or GrowRequest()
         if req.method not in ("colonization", "cco"):
             raise HTTPException(422, "method must be 'colonization' or 'cco'")
+        if req.target not in ("artery", "vein"):
+            raise HTTPException(422, "target must be 'artery' or 'vein'")
         domain_limit = project.grid.domain_limit
         mask = (rasterize_mask(project.grid.nx, project.grid.ny, domain_limit, project.regions)
                 if project.regions else np.ones((project.grid.nx, project.grid.ny), bool))
 
-        base = (runner.polylines_to_network(project.arteries)
-                if project.arteries else arterial_tree(project.params.to_core()))
+        prm = project.params.to_core()
+        if req.target == "artery":
+            polys, existing, default = project.arteries, project.artery_network, arterial_tree(prm)
+        else:
+            polys, existing, default = project.veins, project.vein_network, venous_tree(prm)
+        # prefer the drawn strokes (bends kept) so growth extends them, else an
+        # existing segmented/grown tree, else the default fractal tree
+        base = (polys and runner.network_from_strokes(polys)) or existing or default
+
         if req.method == "cco":
             network = growth.cco_grow_in_mask(
                 base, mask, domain_limit, n_terminals=req.n_points, seed=req.seed,
@@ -538,7 +555,10 @@ def create_app(store: ProjectStore | None = None,
                 n_points=req.n_points, seed=req.seed, seed_nodes=seed_nodes,
                 step=req.step, influence_radius=req.influence_radius,
                 kill_radius=req.kill_radius, leaf_radius=req.leaf_radius)
-        project.artery_network = network
+        if req.target == "artery":
+            project.artery_network = network
+        else:
+            project.vein_network = network
         store.clear_result(project)   # persist the tree; invalidate stale result
         return GrowInfo(id=project.id, n_segments=network.n_segments,
                         n_terminals=int(network.terminal_nodes.size))

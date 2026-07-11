@@ -521,6 +521,39 @@ def test_vectorize_handdrawn_to_network_keeps_per_edge_radius(client):
     assert _wait_for_job(client, jid)["state"] == "done"
 
 
+def test_grow_vein_target_and_shape_preserving_base(client):
+    pid = client.post("/projects", json={"name": "grow", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    # a bent artery (3 points) and a bent vein
+    client.put(f"/projects/{pid}/vessels", json={
+        "arteries": [{"points": [[0, 10], [-15, 40], [0, 70]], "radius": 3.0}],
+        "veins": [{"points": [[10, 10], [25, 40], [10, 70]], "radius": 2.5}]})
+
+    ga = client.post(f"/projects/{pid}/grow",
+                     json={"target": "artery", "n_points": 60, "seed": 0}).json()
+    gv = client.post(f"/projects/{pid}/grow",
+                     json={"target": "vein", "n_points": 60, "seed": 1}).json()
+    assert ga["n_segments"] > 2
+    assert gv["n_segments"] > 2
+
+    # the base kept the drawn bend: a node near the artery's mid-point (-15, 40)
+    a = client.get(f"/projects/{pid}/editable").json()["artery"]
+    assert any(abs(x + 15) < 1.0 and abs(y - 40) < 1.0
+               for x, y in zip(a["node_x"], a["node_y"], strict=True))
+    # both trees exist and the coupled system solves + conserves mass
+    assert client.get(f"/projects/{pid}/editable").json()["vein"] is not None
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    s = client.get(f"/projects/{pid}/results").json()
+    assert s["arterial_inflow"] == pytest.approx(s["venous_outflow"], rel=1e-6)
+
+
+def test_grow_rejects_bad_target(client):
+    pid = client.post("/projects", json={"name": "g", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    assert client.post(f"/projects/{pid}/grow", json={"target": "nope"}).status_code == 422
+
+
 def test_vectorize_without_vessels_400(client):
     pid = client.post("/projects", json={"name": "empty", "grid": SMALL_GRID,
                                          "params": FAST_PARAMS}).json()["id"]

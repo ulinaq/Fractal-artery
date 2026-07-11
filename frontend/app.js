@@ -558,18 +558,19 @@ async function uploadImage(file) {
 // ── grow / run ─────────────────────────────────────────────────────────────────
 async function grow() {
   requireProject();
-  if (state.vessels.arteries.length) await saveVessels();
+  const target = document.querySelector("input[name=growtarget]:checked").value;
+  if (state.vessels.arteries.length || state.vessels.veins.length) await saveVessels();
   if (state.regions.length || state.regionStroke.length >= 3) await saveMask();
-  status("growing…");
+  status(`growing ${target}…`);
   const info = await api("POST", `/projects/${state.project}/grow`,
-    { method: $("grow-method").value, n_points: numOf("grow-npts"),
+    { target, method: $("grow-method").value, n_points: numOf("grow-npts"),
       step: numOf("grow-step"), seed: numOf("seed") });
-  $("grow-info").textContent = `grown tree: ${info.n_segments} segments, ${info.n_terminals} terminals`;
+  $("grow-info").textContent = `grown ${target}: ${info.n_segments} segments, ${info.n_terminals} terminals`;
   state.hasResult = false;         // grow invalidates any prior result server-side
   stopFlow(); state.tracer = null; state.fieldData = null;
   await Promise.all([loadNetwork(), loadEditable()]);
   recordHistory();
-  status("arterial tree grown", "ok");
+  status(`${target} tree grown`, "ok");
   redraw();
 }
 

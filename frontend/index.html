@@ -127,8 +127,13 @@
 
       <details class="card" data-mode="vessels">
         <summary>Grow</summary>
-        <p class="muted">Grow the arterial tree into the tissue (from hand-drawn
-          arteries if present, else the fractal trunk).</p>
+        <p class="muted">Grow a tree into the tissue, extending the drawn/segmented
+          vessels of the chosen type (else the fractal trunk). Artery and vein grow
+          independently — pick a target and settings, grow, then try the other.</p>
+        <div class="row">
+          <label class="seg"><input type="radio" name="growtarget" value="artery" checked /> <span class="dot art"></span>artery</label>
+          <label class="seg"><input type="radio" name="growtarget" value="vein" /> <span class="dot ven"></span>vein</label>
+        </div>
         <label>method
           <select id="grow-method">
             <option value="colonization">space colonisation</option>
@@ -139,7 +144,7 @@
           <label>points <input id="grow-npts" type="number" value="400" step="50" /></label>
           <label>step <input id="grow-step" type="number" value="4" step="1" /></label>
         </div>
-        <button id="btn-grow">Grow arterial tree</button>
+        <button id="btn-grow">Grow tree</button>
         <p class="muted" id="grow-info"></p>
       </details>
 

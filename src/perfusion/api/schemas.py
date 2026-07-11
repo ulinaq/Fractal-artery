@@ -100,6 +100,7 @@ class GrowRequest(BaseModel):
     optimisation, adding ``n_points`` terminals spaced at least ``d_min`` apart.
     """
 
+    target: str = "artery"                        # "artery" | "vein" — which tree to grow
     method: str = "colonization"                  # "colonization" | "cco"
     n_points: int = Field(400, ge=1, le=20000)   # attraction points / CCO terminals
     seed: int = 0
