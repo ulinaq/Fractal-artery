@@ -343,6 +343,22 @@ def create_app(store: ProjectStore | None = None,
         store.clear_result(project)     # geometry model changed -> stale result; saves
         return _info(project)
 
+    @app.get("/projects/{pid}/direct")
+    def direct_result(pid: str) -> dict:
+        """Render data for a direct-connection result: arterial/venous vessel
+        segments and the terminal-connection links, each ``[x0,y0,x1,y1,flow]``."""
+        _project(pid)
+        if not store._direct_path(pid).exists():
+            raise HTTPException(409, "no direct-connection result; run with model='direct'")
+        d = store.load_direct(pid)
+        flows = (np.concatenate([d["artery"][:, 4], d["vein"][:, 4]])
+                 if d["artery"].size else np.array([0.0]))
+        return {
+            "artery": d["artery"].tolist(), "vein": d["vein"].tolist(),
+            "connections": d["conn"].tolist(),
+            "flow_max": float(flows.max()) if flows.size else 0.0,
+        }
+
     @app.get("/projects/{pid}/view3d")
     def project_view3d(pid: str) -> dict:
         """This project's result as a 3-D scene: pressure as a relief surface
@@ -640,8 +656,10 @@ def create_app(store: ProjectStore | None = None,
     @app.get("/projects/{pid}/results/field/{name}", response_model=FieldResponse)
     def result_field(pid: str, name: str) -> FieldResponse:
         project = _project(pid)
-        if not project.has_result:
-            raise HTTPException(409, "no result yet; run the simulation first")
+        if not store.result_path(pid).exists():
+            raise HTTPException(409, "no field result; the direct-connection model has no "
+                                "grid field — use GET /projects/{id}/direct" if project.has_result
+                                else "no result yet; run the simulation first")
         if name not in _FIELDS:
             raise HTTPException(404, f"unknown field {name!r}; use {list(_FIELDS)}")
         field = store.result_field(pid, _FIELDS[name])

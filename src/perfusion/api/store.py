@@ -156,6 +156,9 @@ class ProjectStore:
     def result_path(self, pid: str) -> Path:
         return self.blobs / f"{pid}.result.npz"
 
+    def _direct_path(self, pid: str) -> Path:
+        return self.blobs / f"{pid}.direct.npz"
+
     def tracer_path(self, pid: str) -> Path:
         return self.blobs / f"{pid}.tracer.npz"
 
@@ -183,7 +186,7 @@ class ProjectStore:
         if mask.exists():
             with np.load(mask) as d:
                 project.mask = d["mask"]
-        project.has_result = self.result_path(pid).exists()
+        project.has_result = self.result_path(pid).exists() or self._direct_path(pid).exists()
         project.has_tracer = self.tracer_path(pid).exists()
         return project
 
@@ -261,10 +264,44 @@ class ProjectStore:
     def clear_result(self, project: Project) -> None:
         """Invalidate a stale result + tracer (e.g. after regrowing the tree)."""
         self.result_path(project.id).unlink(missing_ok=True)
+        self._direct_path(project.id).unlink(missing_ok=True)
         self.tracer_path(project.id).unlink(missing_ok=True)
         project.summary = None
         project.has_result = project.has_tracer = False
         self.save(project)
+
+    def save_direct_result(self, project: Project, art, ven, sol) -> None:
+        """Persist a direct-connection result: a summary + a render blob (vessel
+        segments and terminal-connection links, with flow magnitudes)."""
+        def seg_lines(net, q):
+            return np.column_stack([
+                net.node_x[net.seg_start], net.node_y[net.seg_start],
+                net.node_x[net.seg_end], net.node_y[net.seg_end], np.abs(q),
+            ]).astype(float)
+
+        conn = np.array([[art.node_x[c.arterial_terminal], art.node_y[c.arterial_terminal],
+                          ven.node_x[c.venous_terminal], ven.node_y[c.venous_terminal], abs(qc)]
+                         for c, qc in zip(sol.connections, sol.q_c, strict=True)], dtype=float)
+        if conn.size == 0:
+            conn = np.zeros((0, 5))
+        np.savez(self._direct_path(project.id), artery=seg_lines(art, sol.q_a),
+                 vein=seg_lines(ven, sol.q_v), conn=conn)
+        self.result_path(project.id).unlink(missing_ok=True)   # not a field result
+        self.tracer_path(project.id).unlink(missing_ok=True)
+        perfusion = float(np.abs(sol.q_c).sum())
+        p_all = np.concatenate([sol.p_a, sol.p_v])
+        project.summary = {
+            "model": "direct", "arterial_inflow": perfusion, "venous_outflow": perfusion,
+            "n_connections": len(sol.connections), "pressure_max": float(p_all.max()),
+            "flux_mean": float(conn[:, 4].mean() if len(conn) else 0.0),
+        }
+        project.has_result = True
+        project.has_tracer = False
+        self.save(project)
+
+    def load_direct(self, pid: str) -> dict:
+        with np.load(self._direct_path(pid)) as d:
+            return {k: d[k] for k in d.files}
 
     def result_field(self, pid: str, name: str) -> np.ndarray:
         """Load one field (``pressure`` / ``flux`` / ``tof``) from the result blob."""

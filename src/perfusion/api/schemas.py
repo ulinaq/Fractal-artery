@@ -88,10 +88,12 @@ class ProjectInfo(BaseModel):
 
 
 class RunRequest(BaseModel):
+    model: str = "hybrid"                          # "hybrid" (Darcy bed) | "direct" (connections)
     nonlinear: bool = False
     use_vessels: bool = False
     max_iter: int = Field(100, ge=1, le=100000)   # nonlinear fixed-point iteration cap
     tol: float = Field(1e-10, gt=0)               # convergence tolerance
+    rho_c: float = Field(0.0, ge=0)               # direct model: terminal connection radius
 
 
 class GrowRequest(BaseModel):
