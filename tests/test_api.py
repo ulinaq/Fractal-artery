@@ -455,6 +455,48 @@ def test_editable_rejects_wrong_counts(client):
     assert bad.status_code == 422
 
 
+def test_editable_add_and_delete_topology(client):
+    pytest.importorskip("skimage")
+    pytest.importorskip("imageio")
+    pid = client.post("/projects/frog").json()["id"]
+    a = client.get(f"/projects/{pid}/editable").json()["artery"]
+    n0, m0 = len(a["node_x"]), len(a["seg_radius"])
+
+    # ADD: a new node joined to node 3 by a new segment
+    add = {"node_x": a["node_x"] + [a["node_x"][3] + 5.0],
+           "node_y": a["node_y"] + [a["node_y"][3] + 5.0],
+           "seg_start": a["seg_start"] + [3], "seg_end": a["seg_end"] + [n0],
+           "seg_radius": a["seg_radius"] + [1.5],
+           "inlet_nodes": a["inlet_nodes"], "root_node": a["root_node"]}
+    assert client.put(f"/projects/{pid}/editable", json={"artery": add}).status_code == 200
+    a2 = client.get(f"/projects/{pid}/editable").json()["artery"]
+    assert len(a2["node_x"]) == n0 + 1
+    assert len(a2["seg_radius"]) == m0 + 1
+
+    # DELETE: drop a leaf's feeding segment -> the leaf becomes isolated and is pruned
+    deg = [0] * len(a2["node_x"])
+    for s in a2["seg_start"] + a2["seg_end"]:
+        deg[s] += 1
+    leaf = next(i for i in range(len(deg)) if deg[i] == 1 and i not in a2["inlet_nodes"])
+    keep = [k for k in range(len(a2["seg_start"]))
+            if a2["seg_start"][k] != leaf and a2["seg_end"][k] != leaf]
+    dele = {"node_x": a2["node_x"], "node_y": a2["node_y"],
+            "seg_start": [a2["seg_start"][k] for k in keep],
+            "seg_end": [a2["seg_end"][k] for k in keep],
+            "seg_radius": [a2["seg_radius"][k] for k in keep],
+            "inlet_nodes": a2["inlet_nodes"], "root_node": a2["root_node"]}
+    assert client.put(f"/projects/{pid}/editable", json={"artery": dele}).status_code == 200
+    a3 = client.get(f"/projects/{pid}/editable").json()["artery"]
+    assert len(a3["node_x"]) == n0        # isolated leaf dropped, back to the start count
+    assert len(a3["seg_radius"]) == m0
+
+    # the rebuilt tree still solves and conserves mass
+    jid = client.post(f"/projects/{pid}/run", json={"use_vessels": True}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    s = client.get(f"/projects/{pid}/results").json()
+    assert s["arterial_inflow"] == pytest.approx(s["venous_outflow"], rel=1e-6)
+
+
 def test_editable_absent_without_networks(client):
     pid = client.post("/projects", json={"name": "empty", "grid": SMALL_GRID,
                                          "params": FAST_PARAMS}).json()["id"]

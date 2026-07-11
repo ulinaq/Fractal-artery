@@ -186,6 +186,73 @@ def _demo3d_payload(gen: int = 6) -> dict:
     return payload
 
 
+def _rebuild_network(template, node_x, node_y, seg_start, seg_end, seg_radius,
+                     inlet_nodes, root_node):
+    """Rebuild a 2-D :class:`Network` from edited nodes + topology.
+
+    Validates indices, drops isolated (degree-0) non-inlet nodes left by
+    deletions, reindexes, re-derives ``node_role`` by degree and recomputes
+    ``seg_length``/``seg_angle``. Connected fragments *without* an inlet are kept
+    — their leaves couple to the Darcy bed, so they stay solvable.
+    """
+    from ..core.geometry import Network, NodeRole
+
+    nx = np.asarray(node_x, float)
+    ny = np.asarray(node_y, float)
+    ss = np.asarray(seg_start, int)
+    se = np.asarray(seg_end, int)
+    radius = np.maximum(np.asarray(seg_radius, float), 1e-3)
+    n = len(nx)
+    if len(ny) != n:
+        raise HTTPException(422, "node_x and node_y must be the same length")
+    if len(ss) != len(se) or len(radius) != len(ss):
+        raise HTTPException(422, "seg_start, seg_end and seg_radius must align")
+    if len(ss) and (ss.min() < 0 or se.min() < 0 or ss.max() >= n or se.max() >= n):
+        raise HTTPException(422, "a segment references an out-of-range node")
+
+    if inlet_nodes is not None:
+        inl = np.array(sorted({int(i) for i in inlet_nodes if 0 <= int(i) < n}), int)
+    else:
+        prev = template.inlet_nodes if template.inlet_nodes is not None else [template.root_node]
+        inl = np.array(sorted({int(i) for i in prev if 0 <= int(i) < n}), int)
+
+    deg = np.zeros(n, int)
+    if len(ss):
+        np.add.at(deg, ss, 1)
+        np.add.at(deg, se, 1)
+    keep = deg > 0
+    keep[inl] = True                      # keep prescribed nodes even if isolated
+    if not keep.any():
+        raise HTTPException(422, "the edit leaves an empty network")
+
+    old2new = np.full(n, -1, int)
+    old2new[np.flatnonzero(keep)] = np.arange(int(keep.sum()))
+    seg_ok = keep[ss] & keep[se]
+    ss2, se2 = old2new[ss[seg_ok]], old2new[se[seg_ok]]
+    r2 = radius[seg_ok]
+    nx2, ny2 = nx[keep], ny[keep]
+    inl2 = old2new[inl] if inl.size else np.array([0], int)
+
+    root2 = 0
+    if root_node is not None and 0 <= root_node < n and keep[root_node]:
+        root2 = int(old2new[root_node])
+    elif inl2.size:
+        root2 = int(inl2[0])
+
+    new_deg = np.zeros(len(nx2), int)
+    if len(ss2):
+        np.add.at(new_deg, ss2, 1)
+        np.add.at(new_deg, se2, 1)
+    role = np.where(new_deg >= 2, int(NodeRole.BIFURCATION), int(NodeRole.TERMINAL))
+    role[inl2] = int(NodeRole.ROOT)
+    return Network(
+        node_x=nx2, node_y=ny2, node_role=role, seg_start=ss2, seg_end=se2,
+        seg_length=np.hypot(nx2[se2] - nx2[ss2], ny2[se2] - ny2[ss2]),
+        seg_radius=r2, seg_angle=np.arctan2(ny2[se2] - ny2[ss2], nx2[se2] - nx2[ss2]),
+        root_node=root2, inlet_nodes=inl2,
+    )
+
+
 def create_app(store: ProjectStore | None = None,
                jobs: JobManager | None = None) -> FastAPI:
     """Build the FastAPI app; inject a store/job-manager for testing."""
@@ -260,6 +327,12 @@ def create_app(store: ProjectStore | None = None,
         project = _project(pid)
 
         def apply(net, edit):
+            if edit.seg_start is not None and edit.seg_end is not None:
+                # topology may have changed (add/delete) -> rebuild from scratch
+                return _rebuild_network(net, edit.node_x, edit.node_y, edit.seg_start,
+                                        edit.seg_end, edit.seg_radius,
+                                        edit.inlet_nodes, edit.root_node)
+            # pure move/resize -> keep topology, just refresh geometry
             nx_ = np.asarray(edit.node_x, float)
             ny_ = np.asarray(edit.node_y, float)
             radius = np.maximum(np.asarray(edit.seg_radius, float), 1e-3)
@@ -323,6 +396,11 @@ def create_app(store: ProjectStore | None = None,
     @app.get("/projects/{pid}", response_model=ProjectInfo)
     def get_project(pid: str) -> ProjectInfo:
         return _info(_project(pid))
+
+    @app.get("/projects/{pid}/vessels", response_model=VesselsIn)
+    def get_vessels(pid: str) -> VesselsIn:
+        project = _project(pid)
+        return VesselsIn(arteries=project.arteries, veins=project.veins)
 
     @app.put("/projects/{pid}/vessels", response_model=ProjectInfo)
     def set_vessels(pid: str, body: VesselsIn) -> ProjectInfo:

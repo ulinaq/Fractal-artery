@@ -46,8 +46,12 @@ const state = {
   outlets: [],               // venous outlet points (domain coords)
   network: null,             // {segments:[...]} overlaid in result mode
   editable: null,            // {artery, vein} node-level trees being edited
+  editSource: null,          // "network" (segmented/grown) | "polyline" (hand-drawn)
+  editStrokes: null,         // polyline source: {artery:[{points,radius}], vein:[...]}
+  editRef: null,             // polyline source: per-node backref {kind:[{s,pi}]}
   editSel: null,             // {kind, node, seg} current selection
   editDrag: false,           // a node is being dragged
+  editAdd: false,            // add-branch mode: clicks append nodes
   fieldData: null,           // {name, shape, data, vmin, vmax}
   tracer: null,              // {shape, times, vmax, frames:[...]}
   flow: { active: false, idx: 0, timer: null },
@@ -166,24 +170,61 @@ function requireProject() {
   return state.project;
 }
 
-// ── interactive vessel-node editing ────────────────────────────────────────────
+// ── interactive vessel editing ─────────────────────────────────────────────────
+// Two sources share one node-handle UI: segmented/grown *networks* (edited via
+// /editable) and hand-drawn *polylines* (edited in place, saved via /vessels).
 let editDirty = false;
 
 async function loadEditable() {
-  state.editable = null; state.editSel = null; clearEditDirty();
-  if (!state.project) return;
+  state.editable = null; state.editSel = null; state.editAdd = false;
+  state.editSource = null; state.editStrokes = null; state.editRef = null;
+  clearEditDirty();
+  if (!state.project) { if (state.mode === "edit") syncEditPanel(); return; }
   try {
     const e = await api("GET", `/projects/${state.project}/editable`);
-    state.editable = (e && (e.artery || e.vein)) ? e : null;
-  } catch { state.editable = null; }
+    if (e && (e.artery || e.vein)) { state.editable = e; state.editSource = "network"; }
+  } catch { /* fall through to polylines */ }
+  if (!state.editSource) buildPolylineEditable();   // no network -> edit hand-drawn strokes
   if (state.mode === "edit") syncEditPanel();
 }
+
+// Build editable node arrays from the hand-drawn polylines (a copy we can mutate).
+function buildPolylineEditable() {
+  const src = { artery: state.vessels.arteries, vein: state.vessels.veins };
+  if (!src.artery.length && !src.vein.length) { state.editable = null; return; }
+  state.editStrokes = { artery: [], vein: [] };
+  state.editRef = { artery: [], vein: [] };
+  const ed = {};
+  for (const kind of ["artery", "vein"]) {
+    state.editStrokes[kind] = src[kind].map((v) => ({ points: v.points.map((p) => [...p]), radius: v.radius }));
+    ed[kind] = state.editStrokes[kind].length ? buildKindArrays(kind) : null;
+  }
+  state.editable = (ed.artery || ed.vein) ? ed : null;
+  state.editSource = state.editable ? "polyline" : null;
+}
+
+// (re)derive node arrays + per-node backrefs for one kind's polyline strokes
+function buildKindArrays(kind) {
+  const strokes = state.editStrokes[kind];
+  const node_x = [], node_y = [], seg_start = [], seg_end = [], seg_radius = [], ref = [];
+  strokes.forEach((st, s) => {
+    const base = node_x.length;
+    st.points.forEach(([x, y], pi) => { node_x.push(x); node_y.push(y); ref.push({ s, pi }); });
+    for (let k = 0; k < st.points.length - 1; k++) {
+      seg_start.push(base + k); seg_end.push(base + k + 1); seg_radius.push(st.radius);
+    }
+  });
+  state.editRef[kind] = ref;
+  return { node_x, node_y, seg_start, seg_end, seg_radius, inlet_nodes: [], root_node: null };
+}
+
+function rebuildKind(kind) { state.editable[kind] = buildKindArrays(kind); }
 
 function hasEditable() { return !!(state.editable && (state.editable.artery || state.editable.vein)); }
 function editKinds() { return ["artery", "vein"].filter((k) => state.editable && state.editable[k]); }
 
 // nearest node handle to a canvas point, within tolerance (px); else null
-function pickNode(px, py, tol = 11) {
+function pickNode(px, py, tol = 12) {
   let best = null, bestD = tol * tol;
   for (const kind of editKinds()) {
     const n = state.editable[kind];
@@ -196,26 +237,118 @@ function pickNode(px, py, tol = 11) {
   return best;
 }
 
-// the vessel to resize for a node: the one feeding it, else an outgoing one (root)
+// the segment to resize for a node: the one feeding it, else an outgoing one
 function nodeSegment(net, node) {
   const s = net.seg_end.indexOf(node);
   return s >= 0 ? s : net.seg_start.indexOf(node);
 }
 
+function selectNode(hit) {
+  hit.seg = nodeSegment(state.editable[hit.kind], hit.node);
+  state.editSel = hit;
+}
+
 function editPointerDown(px, py) {
   if (!hasEditable()) return;
+  if (state.editAdd) { editAddAt(px, py); return; }
   const hit = pickNode(px, py);
-  if (hit) {
-    hit.seg = nodeSegment(state.editable[hit.kind], hit.node);
-    state.editSel = hit; state.editDrag = true;
-  } else {
-    state.editSel = null;
-  }
+  if (hit) { selectNode(hit); state.editDrag = true; } else { state.editSel = null; }
   syncEditPanel(); redraw();
 }
 
+// move a node (drag): update arrays, and the polyline copy for the polyline source
+function moveNode(kind, node, x, y) {
+  const n = state.editable[kind];
+  n.node_x[node] = x; n.node_y[node] = y;
+  if (state.editSource === "polyline") {
+    const { s, pi } = state.editRef[kind][node];
+    state.editStrokes[kind][s].points[pi] = [x, y];
+  }
+}
+
+// add-branch mode: click extends the selected vessel by a new node/segment
+function editAddAt(px, py) {
+  const [x, y] = toDomain(px, py);
+  let sel = state.editSel;
+  if (!sel) { const hit = pickNode(px, py, 1e9); if (!hit) return; selectNode(hit); syncEditPanel(); redraw(); return; }
+  const kind = sel.kind, n = state.editable[kind];
+  if (state.editSource === "polyline") {
+    const { s } = state.editRef[kind][sel.node];
+    state.editStrokes[kind][s].points.push([x, y]);     // extend that stroke
+    rebuildKind(kind);
+    const nb = state.editable[kind].node_x.length - 1;
+    selectNode({ kind, node: nb });
+  } else {
+    const ni = n.node_x.length;
+    n.node_x.push(x); n.node_y.push(y);
+    n.seg_start.push(sel.node); n.seg_end.push(ni);
+    n.seg_radius.push(sel.seg >= 0 ? n.seg_radius[sel.seg] : 2);
+    selectNode({ kind, node: ni });
+  }
+  markEditDirty(); syncEditPanel(); redraw();
+}
+
+function deleteSelectedNode() {
+  if (state.busy) return;
+  const sel = state.editSel;
+  if (!sel) return;
+  const kind = sel.kind, n = state.editable[kind];
+  if (state.editSource === "polyline") {
+    const { s, pi } = state.editRef[kind][sel.node];
+    const st = state.editStrokes[kind][s];
+    st.points.splice(pi, 1);
+    if (st.points.length < 2) state.editStrokes[kind].splice(s, 1);   // drop a degenerate stroke
+    if (!state.editStrokes.artery.length && !state.editStrokes.vein.length) {
+      state.editable = null; state.editSource = null;
+    } else {
+      rebuildKind(kind);
+    }
+  } else {
+    if ((n.inlet_nodes || []).includes(sel.node)) { status("can't delete an inlet/outlet node", "err"); return; }
+    const i = sel.node;
+    const keep = n.seg_start.map((s0, k) => s0 !== i && n.seg_end[k] !== i);
+    const sh = (v) => (v > i ? v - 1 : v);
+    n.seg_start = n.seg_start.filter((_, k) => keep[k]).map(sh);
+    n.seg_end = n.seg_end.filter((_, k) => keep[k]).map(sh);
+    n.seg_radius = n.seg_radius.filter((_, k) => keep[k]);
+    n.node_x.splice(i, 1); n.node_y.splice(i, 1);
+    n.inlet_nodes = (n.inlet_nodes || []).filter((x) => x !== i).map(sh);
+    if (n.root_node != null && n.root_node !== i) n.root_node = sh(n.root_node);
+    pruneNetworkKind(n);        // drop nodes orphaned to degree 0 by the deletion
+  }
+  state.editSel = null; markEditDirty(); syncEditPanel(); redraw();
+}
+
+// network source: drop degree-0 non-inlet nodes, reindex (mirrors the backend)
+function pruneNetworkKind(n) {
+  const N = n.node_x.length;
+  const deg = new Array(N).fill(0);
+  n.seg_start.forEach((s, k) => { deg[s]++; deg[n.seg_end[k]]++; });
+  const inl = new Set(n.inlet_nodes || []);
+  const keep = Array.from({ length: N }, (_, i) => deg[i] > 0 || inl.has(i));
+  const o2n = new Array(N).fill(-1); let j = 0;
+  for (let i = 0; i < N; i++) if (keep[i]) o2n[i] = j++;
+  n.node_x = n.node_x.filter((_, i) => keep[i]);
+  n.node_y = n.node_y.filter((_, i) => keep[i]);
+  n.seg_start = n.seg_start.map((v) => o2n[v]);
+  n.seg_end = n.seg_end.map((v) => o2n[v]);
+  n.inlet_nodes = (n.inlet_nodes || []).filter((i) => keep[i]).map((v) => o2n[v]);
+  if (n.root_node != null) n.root_node = keep[n.root_node] ? o2n[n.root_node] : (n.inlet_nodes[0] ?? null);
+}
+
+function toggleAddMode() {
+  if (!hasEditable()) return;
+  state.editAdd = !state.editAdd;
+  $("btn-edit-add").classList.toggle("active", state.editAdd);
+  canvas.style.cursor = state.editAdd ? "copy" : "pointer";
+  status(state.editAdd ? "add mode: click to extend the selected vessel" : "");
+}
+
 function syncEditPanel() {
-  const sl = $("edit-radius"), sel = state.editSel;
+  const sl = $("edit-radius"), sel = state.editSel, can = hasEditable();
+  $("btn-edit-add").disabled = !can;
+  $("btn-edit-del").disabled = !(sel && can &&
+    !(state.editSource === "network" && (state.editable[sel.kind].inlet_nodes || []).includes(sel.node)));
   if (sel && sel.seg >= 0) {
     const r = state.editable[sel.kind].seg_radius[sel.seg];
     sl.value = r; sl.disabled = false;
@@ -223,9 +356,9 @@ function syncEditPanel() {
     $("edit-sel").textContent = `${sel.kind} node #${sel.node} — drag to move, slider to resize.`;
   } else {
     sl.disabled = true; $("edit-radius-val").textContent = "";
-    $("edit-sel").textContent = hasEditable()
-      ? "Click a node to select it."
-      : "No editable vessels — grow or segment a tree first.";
+    $("edit-sel").textContent = can
+      ? `Editing ${state.editSource === "polyline" ? "hand-drawn" : "segmented/grown"} vessels — click a node.`
+      : "No vessels yet — draw, segment or grow a tree first.";
   }
 }
 
@@ -233,7 +366,14 @@ function onEditRadius() {
   const sel = state.editSel;
   if (!sel || sel.seg < 0) return;
   const r = numOf("edit-radius");
-  state.editable[sel.kind].seg_radius[sel.seg] = r;
+  const n = state.editable[sel.kind];
+  if (state.editSource === "polyline") {
+    const { s } = state.editRef[sel.kind][sel.node];
+    state.editStrokes[sel.kind][s].radius = r;         // per-stroke radius
+    n.seg_radius = n.seg_radius.map((v, k) => (state.editRef[sel.kind][n.seg_start[k]].s === s ? r : v));
+  } else {
+    n.seg_radius[sel.seg] = r;
+  }
   $("edit-radius-val").textContent = r.toFixed(1);
   markEditDirty(); redraw();
 }
@@ -243,13 +383,25 @@ function clearEditDirty() { editDirty = false; if ($("btn-edit-save")) $("btn-ed
 
 async function saveEdits() {
   requireProject();
-  if (!hasEditable()) { status("nothing to edit", "err"); return; }
-  const pack = (k) => {
-    const n = state.editable[k];
-    return n ? { node_x: n.node_x, node_y: n.node_y, seg_radius: n.seg_radius } : null;
-  };
-  await api("PUT", `/projects/${state.project}/editable`,
-            { artery: pack("artery"), vein: pack("vein") });
+  if (state.editSource === "polyline") {
+    const toPolys = (kind) => (state.editStrokes[kind] || [])
+      .filter((st) => st.points.length >= 2)
+      .map((st) => ({ points: st.points, radius: st.radius }));
+    await api("PUT", `/projects/${state.project}/vessels`,
+              { arteries: toPolys("artery"), veins: toPolys("vein") });
+    state.vessels = { arteries: toPolys("artery"), veins: toPolys("vein") };
+  } else if (state.editSource === "network") {
+    const pack = (k) => {
+      const n = state.editable[k];
+      return n ? { node_x: n.node_x, node_y: n.node_y, seg_radius: n.seg_radius,
+                   seg_start: n.seg_start, seg_end: n.seg_end,
+                   inlet_nodes: n.inlet_nodes || null, root_node: n.root_node ?? null } : null;
+    };
+    await api("PUT", `/projects/${state.project}/editable`,
+              { artery: pack("artery"), vein: pack("vein") });
+  } else {
+    status("nothing to edit", "err"); return;
+  }
   state.hasResult = false;                       // geometry changed -> result stale
   stopFlow(); state.tracer = null; state.fieldData = null;
   await Promise.all([loadNetwork(), loadEditable()]);
@@ -258,6 +410,8 @@ async function saveEdits() {
 }
 
 async function revertEdits() {
+  state.editAdd = false; $("btn-edit-add").classList.remove("active");
+  canvas.style.cursor = "pointer";
   await loadEditable();
   syncEditPanel(); redraw();
   status("reverted to saved geometry", "ok");
@@ -285,9 +439,7 @@ canvas.addEventListener("pointermove", (e) => {
   if (state.mode !== "edit" || !state.editDrag || !state.editSel) return;
   const [px, py] = canvasXY(e);
   const [x, y] = toDomain(px, py);
-  const net = state.editable[state.editSel.kind];
-  net.node_x[state.editSel.node] = x;
-  net.node_y[state.editSel.node] = y;
+  moveNode(state.editSel.kind, state.editSel.node, x, y);
   redraw();
 });
 
@@ -356,6 +508,13 @@ async function saveMask() {
 async function loadMask() {
   try { state.regions = (await api("GET", `/projects/${state.project}/mask`)).regions || []; }
   catch { state.regions = []; }
+}
+
+async function loadVessels() {
+  try {
+    const v = await api("GET", `/projects/${state.project}/vessels`);
+    state.vessels = { arteries: v.arteries || [], veins: v.veins || [] };
+  } catch { state.vessels = { arteries: [], veins: [] }; }
 }
 
 // ── inlets / outlets ──────────────────────────────────────────────────────────
@@ -622,6 +781,7 @@ function drawNetworkOverlay() {
 }
 
 function drawVessels() {
+  if (state.mode === "edit") return;      // edit mode draws the editable copy instead
   const paint = (list, color) => {
     ctx.strokeStyle = color; ctx.lineJoin = "round"; ctx.lineCap = "round";
     for (const v of list) {
@@ -684,8 +844,15 @@ function setMode(mode) {
     c.style.display = c.dataset.mode === mode ? "" : "none";
   });
   if (mode !== "result") stopTimer();
+  state.editAdd = false; $("btn-edit-add").classList.remove("active");
   canvas.style.cursor = mode === "result" ? "default" : mode === "edit" ? "pointer" : "crosshair";
-  if (mode === "edit") syncEditPanel();
+  if (mode === "edit") {
+    // pick up hand-drawn strokes made since the last load, then reflect state
+    if (!state.editSource && (state.vessels.arteries.length || state.vessels.veins.length)) {
+      buildPolylineEditable();
+    }
+    syncEditPanel();
+  }
   redraw();
 }
 
@@ -696,6 +863,8 @@ $("btn-save-file").addEventListener("click", guarded(saveToFile));
 $("btn-load-file").addEventListener("click", () => $("file-load").click());
 $("file-load").addEventListener("change", guarded(loadFromFile));
 $("edit-radius").addEventListener("input", onEditRadius);
+$("btn-edit-add").addEventListener("click", toggleAddMode);
+$("btn-edit-del").addEventListener("click", deleteSelectedNode);
 $("btn-edit-save").addEventListener("click", guarded(saveEdits));
 $("btn-edit-revert").addEventListener("click", guarded(revertEdits));
 $("btn-endseg").addEventListener("click", endStroke);
@@ -778,6 +947,7 @@ async function openProject(id) {
   showProjectLink(info.id);
   stopFlow(); state.tracer = null;
   state.hasResult = !!info.has_result;
+  await loadVessels();                       // restore hand-drawn strokes first
   await Promise.all([loadNetwork(), loadMask(), loadIO(), loadEditable()]);
   if (info.has_result) {
     await Promise.all([showSummary(), loadField(state.field)]);
