@@ -26,6 +26,28 @@ def polylines_to_network(polylines, root_xy=None):
                                   radii=[p.radius for p in polylines], root_xy=root_xy)
 
 
+def network_from_strokes(polylines, root_xy=None):
+    """Build a network from polylines while keeping each stroke's *shape*.
+
+    Unlike :func:`polylines_to_network` (which collapses a stroke to a single
+    straight edge between its endpoints — turning a bent vessel into a chord),
+    this explodes every stroke into consecutive 2-point edges, so bends stay as
+    degree-2 nodes and each edge carries the stroke's radius. Used as the base
+    for growth so grown branches extend the drawn vessel, not a straight line.
+    """
+    from itertools import pairwise
+
+    segs, radii = [], []
+    for p in polylines:
+        pts = [list(pt) for pt in p.points]
+        for a, b in pairwise(pts):
+            segs.append([a, b])
+            radii.append(p.radius)
+    if not segs:
+        return None
+    return network_from_polylines(segs, radii=radii, root_xy=root_xy, snap_tol=0.5)
+
+
 def build_grid(project):
     """Grid + its domain window, with the tissue mask: a stored raster mask if
     present (shape must match the grid), else the drawn tissue polygons, else none."""
