@@ -264,8 +264,18 @@ async function ensureNetworkForEdit() {
 function hasEditable() { return !!(state.editable && (state.editable.artery || state.editable.vein)); }
 function editKinds() { return ["artery", "vein"].filter((k) => state.editable && state.editable[k]); }
 
-// nearest node handle to a canvas point, within tolerance (px); else null
-function pickNode(px, py, tol = 12) {
+// squared distance from a point to a segment (canvas px) + the param t along it
+function segDist2(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay, len = dx * dx + dy * dy || 1;
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len));
+  const cx = ax + t * dx, cy = ay + t * dy;
+  return { d: (px - cx) ** 2 + (py - cy) ** 2, t };
+}
+
+// nearest node handle to a canvas point. Tries node handles first (tol px); if
+// none, falls back to clicking *near a vessel edge* -> its nearer endpoint, so a
+// dense network (e.g. the frog) is easy to grab without pixel-hunting the dot.
+function pickNode(px, py, tol = 13) {
   let best = null, bestD = tol * tol;
   for (const kind of editKinds()) {
     const n = state.editable[kind];
@@ -275,7 +285,18 @@ function pickNode(px, py, tol = 12) {
       if (d < bestD) { bestD = d; best = { kind, node: i }; }
     }
   }
-  return best;
+  if (best || tol > 500) return best;         // huge tol (add-mode) skips the edge fallback
+  let edgeD = 11 * 11, pick = null;
+  for (const kind of editKinds()) {
+    const n = state.editable[kind];
+    for (let s = 0; s < n.seg_start.length; s++) {
+      const [ax, ay] = toCanvas(n.node_x[n.seg_start[s]], n.node_y[n.seg_start[s]]);
+      const [bx, by] = toCanvas(n.node_x[n.seg_end[s]], n.node_y[n.seg_end[s]]);
+      const { d, t } = segDist2(px, py, ax, ay, bx, by);
+      if (d < edgeD) { edgeD = d; pick = { kind, node: t < 0.5 ? n.seg_start[s] : n.seg_end[s] }; }
+    }
+  }
+  return pick;
 }
 
 // the edge to resize for a node: the one feeding it, else an outgoing one
