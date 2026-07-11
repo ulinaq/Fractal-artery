@@ -126,7 +126,8 @@ def run_hybrid(prm: Parameters, grid: Grid,
                eps: float = 4.0, nonlinear: bool = False,
                strict_domain: bool = False,
                art: Network | None = None, ven: Network | None = None,
-               art_inlets=None, ven_outlets=None) -> HybridResult:
+               art_inlets=None, ven_outlets=None,
+               max_iter: int = 100, tol: float = 1e-10) -> HybridResult:
     """Build trees (or use the given ones), couple to Darcy, solve, post-process.
 
     Pass ``art``/``ven`` to use pre-built networks -- e.g. segmented from images
@@ -155,7 +156,8 @@ def run_hybrid(prm: Parameters, grid: Grid,
     # Per-segment viscosity (radius-dependent when Fahraeus-Lindqvist is enabled).
     viscosity = (_segment_viscosity(art, prm), _segment_viscosity(ven, prm))
     if nonlinear:
-        sol = network.solve_nonlinear(art, ven, response, prm.p_in, prm.p_out, prm, viscosity)
+        sol = network.solve_nonlinear(art, ven, response, prm.p_in, prm.p_out, prm, viscosity,
+                                      max_iter=max_iter, tol=tol)
     else:
         sol = network.solve_linear(art, ven, response, prm.p_in, prm.p_out, viscosity)
 

@@ -327,6 +327,25 @@ def test_frog_example_project(client):
     assert summary["arterial_inflow"] == pytest.approx(summary["venous_outflow"], rel=1e-6)
 
 
+def test_run_max_iter_surfaces_nonconvergence(client):
+    pytest.importorskip("skimage")
+    pytest.importorskip("imageio")
+    pid = client.post("/projects/frog").json()["id"]
+    # nonlinear solve capped at a single iteration -> should not converge and warn
+    jid = client.post(f"/projects/{pid}/run",
+                      json={"use_vessels": True, "nonlinear": True, "max_iter": 1}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    summary = client.get(f"/projects/{pid}/results").json()
+    assert "notes" in summary
+    assert any("converge" in n.lower() for n in summary["notes"])
+
+    # a generous cap converges cleanly (no notes)
+    jid = client.post(f"/projects/{pid}/run",
+                      json={"use_vessels": True, "nonlinear": True, "max_iter": 200}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    assert "notes" not in client.get(f"/projects/{pid}/results").json()
+
+
 def test_run_zero_pressure_drop_gives_clear_error(client):
     pid = client.post("/projects", json={"name": "flat", "grid": SMALL_GRID,
                                          "params": {"p_in": 5, "p_out": 5}}).json()["id"]

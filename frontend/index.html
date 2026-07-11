@@ -153,6 +153,9 @@
 
       <section class="card run-card">
         <label class="check"><input id="nonlinear" type="checkbox" /> nonlinear (junction losses)</label>
+        <label id="maxiter-row" style="display:none">max iterations (nonlinear fixed-point)
+          <input id="max-iter" type="number" value="100" min="1" step="10" />
+        </label>
         <button id="btn-run" class="primary">▶ Run simulation</button>
         <p class="muted" id="run-info"></p>
       </section>
@@ -174,7 +177,7 @@
           <button class="field" data-field="tof">time-of-flight</button>
         </div>
         <div class="flowbar" id="flowbar">
-          <button id="btn-flow" class="ghost">▶ Flow video</button>
+          <button id="btn-flow" class="ghost" title="tracer kinetics: animate a contrast bolus washing through the solved field">▶ Tracer (kinetic)</button>
           <button id="flow-play" class="ghost" hidden>⏸</button>
           <input id="flow-scrub" type="range" min="0" max="0" value="0" hidden />
           <span id="flow-time" class="muted" hidden></span>
