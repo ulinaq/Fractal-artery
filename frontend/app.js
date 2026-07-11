@@ -239,16 +239,19 @@ function moveNode(kind, node, x, y) {
   n.node_x[node] = x; n.node_y[node] = y;
 }
 
-// add-branch mode: click adds a node joined to the selected node by a new edge
+// add-branch mode: each click grows a new edge *from the selected node* to the
+// click point. The source node stays selected, so clicking several times fans
+// out multiple children — turning it into a bifurcation (add to a node that
+// already has an edge and it becomes a branch point).
 function editAddAt(px, py) {
   const [x, y] = toDomain(px, py);
   const sel = state.editSel;
   if (!sel) { const hit = pickNode(px, py, 1e9); if (!hit) return; selectNode(hit); syncEditPanel(); redraw(); return; }
   const kind = sel.kind, n = state.editable[kind], ni = n.node_x.length;
   n.node_x.push(x); n.node_y.push(y);
-  n.seg_start.push(sel.node); n.seg_end.push(ni);
+  n.seg_start.push(sel.node); n.seg_end.push(ni);           // new child edge from the SAME node
   n.seg_radius.push(sel.seg >= 0 ? n.seg_radius[sel.seg] : 2);   // inherit the parent edge's radius
-  selectNode({ kind, node: ni });
+  selectNode({ kind, node: sel.node });                     // keep the source selected to keep branching
   markEditDirty(); syncEditPanel(); redraw();
 }
 
