@@ -327,6 +327,15 @@ def test_frog_example_project(client):
     assert summary["arterial_inflow"] == pytest.approx(summary["venous_outflow"], rel=1e-6)
 
 
+def test_frontend_version_endpoint(client):
+    h = client.get("/health").json()
+    assert "build" in h                            # health carries the build too
+    v = client.get("/frontend-version").json()
+    assert isinstance(v["build"], str)
+    assert v["build"]
+    assert v["build"] == h["build"]                # same hash from both
+
+
 def test_frontend_is_served(client):
     root = client.get("/")
     assert root.status_code == 200
