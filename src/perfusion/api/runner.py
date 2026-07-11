@@ -97,15 +97,53 @@ def snap_io(net, points):
     return np.array(sorted(idx), dtype=int)
 
 
-def solve(project, *, use_vessels, nonlinear=False):
-    """Build the model (grid, trees, inlet/outlet nodes) and run the hybrid solve."""
+class InputError(ValueError):
+    """A run cannot proceed because of a clear, user-fixable input problem.
+
+    Its message is meant for the user (surfaced verbatim in the UI), so keep it
+    plain and actionable — don't wrap it in a traceback.
+    """
+
+
+def validate_run(project, use_vessels):
+    """Check the model can be solved; raise :class:`InputError` with a clear,
+    actionable message for the common misconfigurations. Returns (grid, art, ven)."""
     prm = project.params.to_core()
-    grid, domain_limit = build_grid(project)
+    grid, _ = build_grid(project)
+    if grid.mask is not None:
+        active = int(np.asarray(grid.mask).sum())
+        if active == 0:
+            raise InputError(
+                "The tissue mask has no active cells — the organ outline is empty or "
+                "falls outside the grid. Redraw the tissue in Tissue mode, or clear it "
+                "to use the whole domain.")
+        from scipy.ndimage import label
+        _, n_blobs = label(np.asarray(grid.mask))
+        if n_blobs > 1:
+            raise InputError(
+                f"The tissue mask is split into {n_blobs} disconnected regions. The Darcy "
+                "solve pins one cell, so only the region containing it is determined and the "
+                "rest make the system singular. Edit the tissue outline so it is one "
+                "connected area (or clear it to use the whole domain).")
+
     art, ven = build_networks(project, use_vessels)
-    if project.inlets and art is None:      # custom inlets on the default tree
+    if project.inlets and art is None:
         art = arterial_tree(prm)
     if project.outlets and ven is None:
         ven = venous_tree(prm)
+    # art/ven None is fine: run_hybrid falls back to the default fractal trees.
+    if prm.p_in == prm.p_out:
+        raise InputError(
+            f"p_in equals p_out ({prm.p_in}); there is no pressure drop to drive flow. "
+            "Set p_in above p_out in Parameters.")
+    return grid, art, ven
+
+
+def solve(project, *, use_vessels, nonlinear=False):
+    """Build the model (grid, trees, inlet/outlet nodes) and run the hybrid solve."""
+    prm = project.params.to_core()
+    grid, art, ven = validate_run(project, use_vessels)
+    domain_limit = project.grid.domain_limit
     return run_hybrid(prm, grid, domain_limit=domain_limit, nonlinear=nonlinear,
                       art=art, ven=ven,
                       art_inlets=snap_io(art, project.inlets),

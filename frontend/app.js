@@ -583,9 +583,16 @@ async function run() {
   const job = await api("POST", `/projects/${state.project}/run`,
     { nonlinear: $("nonlinear").checked, use_vessels: $("use-vessels").checked });
   status("running…");
+  $("run-info").classList.remove("run-error");
   $("run-info").textContent = "job " + job.id;
   const final = await pollJob(job.id);
-  if (final.state === "error") { status("run failed", "err"); $("run-info").textContent = final.error; return; }
+  if (final.state === "error") {
+    status("run failed — see details below", "err");
+    $("run-info").classList.add("run-error");
+    $("run-info").textContent = final.error || "the run failed without an error message";
+    return;
+  }
+  $("run-info").classList.remove("run-error");
   status("solved", "ok");
   state.hasResult = true;
   await Promise.all([loadNetwork(), showSummary(), loadField(state.field)]);

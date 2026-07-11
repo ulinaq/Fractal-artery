@@ -327,6 +327,32 @@ def test_frog_example_project(client):
     assert summary["arterial_inflow"] == pytest.approx(summary["venous_outflow"], rel=1e-6)
 
 
+def test_run_zero_pressure_drop_gives_clear_error(client):
+    pid = client.post("/projects", json={"name": "flat", "grid": SMALL_GRID,
+                                         "params": {"p_in": 5, "p_out": 5}}).json()["id"]
+    client.put(f"/projects/{pid}/vessels", json={
+        "arteries": [{"points": [[0, 10], [0, 60]], "radius": 2.0}], "veins": []})
+    jid = client.post(f"/projects/{pid}/run", json={"use_vessels": True}).json()["id"]
+    final = _wait_for_job(client, jid)
+    assert final["state"] == "error"
+    assert "p_in equals p_out" in final["error"]
+
+
+def test_run_disconnected_mask_gives_clear_error(client):
+    pid = client.post("/projects", json={"name": "split", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    client.put(f"/projects/{pid}/vessels", json={
+        "arteries": [{"points": [[-40, 20], [-40, 60]], "radius": 2.0}], "veins": []})
+    # two separate tissue blobs -> disconnected Darcy domain
+    client.put(f"/projects/{pid}/mask", json={"regions": [
+        [[-60, 10], [-20, 10], [-20, 70], [-60, 70]],
+        [[20, 10], [60, 10], [60, 70], [20, 70]]]})
+    jid = client.post(f"/projects/{pid}/run", json={"use_vessels": True}).json()["id"]
+    final = _wait_for_job(client, jid)
+    assert final["state"] == "error"
+    assert "disconnected regions" in final["error"]
+
+
 def test_frontend_version_endpoint(client):
     h = client.get("/health").json()
     assert "build" in h                            # health carries the build too

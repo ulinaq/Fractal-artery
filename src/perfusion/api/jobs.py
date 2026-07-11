@@ -37,9 +37,23 @@ def execute_job(store, jid: str, project_id: str, kind: str, req_data: dict) -> 
         else:
             runner.run_project(store, project, RunRequest(**req_data))
     except Exception as exc:  # report any failure to the client via job state
-        store.set_job_state(jid, "error", str(exc))
+        store.set_job_state(jid, "error", _describe_error(exc))
     else:
         store.set_job_state(jid, "done")
+
+
+def _describe_error(exc: Exception) -> str:
+    """A useful error string for the UI: a clean message for known input problems,
+    otherwise the exception type + message + a short traceback tail for debugging."""
+    from .runner import InputError
+
+    if isinstance(exc, InputError):
+        return str(exc)                       # already user-facing and actionable
+    import traceback
+
+    head = f"{type(exc).__name__}: {exc}".strip()
+    tail = traceback.format_exc().strip().splitlines()[-3:]
+    return head + "\n\nwhere:\n" + "\n".join(tail)
 
 
 def run_job(store_root: str, jid: str, project_id: str, kind: str, req_data: dict) -> None:
