@@ -206,6 +206,28 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   `node_role`/`seg_length`/`seg_angle` (fragments without an inlet are kept — their
   leaves couple to Darcy). Radii clamp `>= 1e-3`; edits invalidate the stale result.
 
+## Recent web/API additions
+
+- **Run controls**: `RunRequest` carries `model` (`hybrid` Darcy bed | `direct`
+  connections), `nonlinear` + `max_iter`/`tol` (nonlinear fixed-point cap, threaded
+  through `run_hybrid`→`solve_nonlinear`), and `rho_c` (direct connection radius).
+  Non-convergence warnings are captured during the solve and returned in
+  `summary["notes"]`. The **direct** model (`runner.solve_direct_model` →
+  `store.save_direct_result`) has no grid field: it stores a render blob (vessel
+  segments + terminal-connection links with flow) served by `GET /projects/{id}/direct`,
+  and the frontend Result view draws that (flow-weighted) instead of a heatmap,
+  hiding the field picker / tracer / field export. `simulate` MCP tool gained
+  `model`/`rho_c`/`max_iter`.
+- **Clear run errors**: `runner.validate_run` raises `InputError` (a `ValueError`)
+  with actionable messages (empty mask, mask split into disconnected Darcy regions,
+  `p_in == p_out`); `jobs._describe_error` surfaces those verbatim and adds a
+  traceback tail for unexpected errors. The frontend shows it in a styled box.
+- **Frontend UX**: global undo/redo (`recordHistory` snapshots the editable
+  geometry; ⌘/Ctrl+Z), context-aware keyboard shortcuts (Del/Enter/A/V/G/R/Esc/1–5),
+  a build-version badge (`GET /frontend-version`) that flags a stale tab, edge-aware
+  node picking, and a 2-D/3-D view toggle that keeps the project
+  (`GET /projects/{id}/view3d`).
+
 ## Gotchas
 
 - The mollifier uses the thesis power-1 bump `exp(-1/(1-r²))` (not `^8`), restricts

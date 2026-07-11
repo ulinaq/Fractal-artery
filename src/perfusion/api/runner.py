@@ -151,8 +151,29 @@ def solve(project, *, use_vessels, nonlinear=False, max_iter=100, tol=1e-10):
                       max_iter=max_iter, tol=tol)
 
 
+def solve_direct_model(project, use_vessels, rho_c=0.0):
+    """Direct-connection model (Paper C): arterial & venous trees closed by
+    resistive terminal links instead of a Darcy bed. Returns (art, ven, solution)."""
+    from ..core.direct import connect_terminals, solve_direct
+
+    prm = project.params.to_core()
+    if prm.p_in == prm.p_out:
+        raise InputError(f"p_in equals p_out ({prm.p_in}); there is no pressure drop to "
+                         "drive flow. Set p_in above p_out in Parameters.")
+    art, ven = build_networks(project, use_vessels)
+    art = art if art is not None else arterial_tree(prm)
+    ven = ven if ven is not None else venous_tree(prm)
+    conns = connect_terminals(art, ven, rho_c=float(rho_c), viscosity=prm.mu)
+    sol = solve_direct(art, ven, conns, prm.p_in, prm.p_out, viscosity=prm.mu)
+    return art, ven, sol
+
+
 def run_project(store, project, req: RunRequest) -> None:
-    """Execute the hybrid simulation for a project and persist the result."""
+    """Execute the simulation (hybrid Darcy or direct-connection) and persist it."""
+    if getattr(req, "model", "hybrid") == "direct":
+        art, ven, sol = solve_direct_model(project, req.use_vessels, req.rho_c)
+        store.save_direct_result(project, art, ven, sol)
+        return
     import warnings
 
     with warnings.catch_warnings(record=True) as caught:

@@ -346,6 +346,24 @@ def test_run_max_iter_surfaces_nonconvergence(client):
     assert "notes" not in client.get(f"/projects/{pid}/results").json()
 
 
+def test_direct_connection_model_runs_and_renders(client):
+    pid = client.post("/projects", json={"name": "direct", "params": {"p_in": 40, "p_out": 0},
+                                         "grid": SMALL_GRID}).json()["id"]
+    jid = client.post(f"/projects/{pid}/run", json={"model": "direct", "rho_c": 0}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    summary = client.get(f"/projects/{pid}/results").json()
+    assert summary["model"] == "direct"
+    assert summary["n_connections"] > 0
+    assert summary["arterial_inflow"] == pytest.approx(summary["venous_outflow"])   # mass conserved
+    d = client.get(f"/projects/{pid}/direct").json()
+    assert len(d["artery"]) > 0
+    assert len(d["vein"]) > 0
+    assert len(d["connections"]) == summary["n_connections"]
+    assert all(len(seg) == 5 for seg in d["artery"][:3])       # [x0,y0,x1,y1,flow]
+    # a hybrid project has no direct blob
+    assert client.get(f"/projects/{pid}/results/field/pressure").status_code in (404, 409)
+
+
 def test_run_zero_pressure_drop_gives_clear_error(client):
     pid = client.post("/projects", json={"name": "flat", "grid": SMALL_GRID,
                                          "params": {"p_in": 5, "p_out": 5}}).json()["id"]

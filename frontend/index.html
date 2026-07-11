@@ -152,9 +152,18 @@
       </details>
 
       <section class="card run-card">
-        <label class="check"><input id="nonlinear" type="checkbox" /> nonlinear (junction losses)</label>
+        <label>model
+          <select id="run-model">
+            <option value="hybrid">hybrid — Darcy capillary bed</option>
+            <option value="direct">direct — terminal connections</option>
+          </select>
+        </label>
+        <label class="check" id="nonlinear-row"><input id="nonlinear" type="checkbox" /> nonlinear (junction losses)</label>
         <label id="maxiter-row" style="display:none">max iterations (nonlinear fixed-point)
           <input id="max-iter" type="number" value="100" min="1" step="10" />
+        </label>
+        <label id="rhoc-row" style="display:none">connection radius ρc (0 = nearest vein)
+          <input id="rho-c" type="number" value="0" min="0" step="5" />
         </label>
         <button id="btn-run" class="primary">▶ Run simulation</button>
         <p class="muted" id="run-info"></p>

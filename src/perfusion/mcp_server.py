@@ -29,22 +29,33 @@ _LX, _LY = _DOMAIN[1] - _DOMAIN[0], _DOMAIN[3] - _DOMAIN[2]
 
 def simulate(p_in: float = 10.0, p_out: float = 0.0, nx: int = 120, ny: int = 140,
              r_min_frac: float = 0.15, nonlinear: bool = False,
-             max_iter: int = 100) -> dict:
-    """Run a hybrid perfusion simulation on fractal trees; return a JSON summary.
+             max_iter: int = 100, model: str = "hybrid", rho_c: float = 0.0) -> dict:
+    """Run a perfusion simulation on fractal trees; return a JSON summary.
 
-    Couples fractal arterial/venous trees to a Darcy capillary bed and solves the
-    flow, returning scalar results (arterial inflow, venous outflow, and
-    pressure / flux / time-of-flight statistics). ``nx``/``ny`` set the Darcy grid
-    resolution; ``r_min_frac`` controls how deep the trees branch (larger ->
-    shallower, faster). ``max_iter`` caps the nonlinear fixed-point iteration.
+    ``model="hybrid"`` (default) couples arterial/venous trees to a Darcy capillary
+    bed; ``model="direct"`` closes the trees with resistive terminal connections
+    (Paper C) instead — ``rho_c`` is the connection search radius (0 = nearest vein).
+    ``nx``/``ny`` set the Darcy grid resolution; ``r_min_frac`` controls branch depth
+    (larger -> shallower); ``max_iter`` caps the nonlinear fixed-point iteration.
     """
     nx, ny = int(np.clip(nx, 20, 250)), int(np.clip(ny, 20, 250))
     prm = Parameters(p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+    if model == "direct":
+        from .core.direct import connect_terminals, solve_direct
+        from .core.geometry import arterial_tree, venous_tree
+
+        art, ven = arterial_tree(prm), venous_tree(prm)
+        conns = connect_terminals(art, ven, rho_c=float(rho_c), viscosity=prm.mu)
+        sol = solve_direct(art, ven, conns, prm.p_in, prm.p_out, viscosity=prm.mu)
+        perfusion = float(np.abs(sol.q_c).sum())
+        return {"model": "direct", "arterial_inflow": perfusion, "venous_outflow": perfusion,
+                "n_connections": len(conns)}
     grid = Grid(nx=nx, ny=ny, lx=_LX, ly=_LY)
     result = run_hybrid(prm, grid, domain_limit=_DOMAIN, nonlinear=nonlinear,
                         max_iter=int(max_iter))
     summary = results_summary(result)
     summary["grid"] = {"nx": nx, "ny": ny}
+    summary["model"] = "hybrid"
     return summary
 
 

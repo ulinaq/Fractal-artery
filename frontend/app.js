@@ -55,6 +55,9 @@ const state = {
   flow: { active: false, idx: 0, timer: null },
   busy: false,               // a job is running -> lock actions
   hasResult: false,          // a solved result exists (enables Export)
+  resultModel: "hybrid",     // "hybrid" (field) | "direct" (network + connections)
+  direct: null,              // direct-connection render data {artery,vein,connections,flow_max}
+  runNotes: [],              // solver warnings (e.g. non-convergence)
 };
 
 // ── status helpers ────────────────────────────────────────────────────────────
@@ -139,7 +142,8 @@ function refreshUI() {
   $("btn-new").disabled = state.busy;
   $("btn-frog").disabled = state.busy;
   $("btn-load-file").disabled = state.busy;
-  const canExport = !!(state.project && state.hasResult) && !state.busy;
+  const canExport = !!(state.project && state.hasResult) && !state.busy
+    && state.resultModel !== "direct";        // direct has no grid field to export
   $("btn-export").disabled = !canExport;
   $("btn-bundle").disabled = !canExport;
   updateHistoryButtons();
@@ -602,8 +606,9 @@ async function run() {
   if (state.regions.length || state.regionStroke.length >= 3) await saveMask();
   if (state.inlets.length || state.outlets.length) await saveIO();
   const job = await api("POST", `/projects/${state.project}/run`,
-    { nonlinear: $("nonlinear").checked, use_vessels: $("use-vessels").checked,
-      max_iter: numOf("max-iter") });
+    { model: $("run-model").value, nonlinear: $("nonlinear").checked,
+      use_vessels: $("use-vessels").checked, max_iter: numOf("max-iter"),
+      rho_c: numOf("rho-c") });
   status("running…");
   $("run-info").classList.remove("run-error");
   $("run-info").textContent = "job " + job.id;
@@ -617,13 +622,28 @@ async function run() {
   $("run-info").classList.remove("run-error");
   status("solved", "ok");
   state.hasResult = true;
-  await Promise.all([loadNetwork(), showSummary(), loadField(state.field)]);
+  await loadNetwork();
+  await loadResultView();
   setMode("result");
   if (state.runNotes && state.runNotes.length) {   // e.g. non-convergence within max iterations
     status("solved (with warnings)", "ok");
     $("run-info").textContent = "⚠ " + state.runNotes.join(" · ") +
       " — increase max iterations if the result looks off.";
   }
+}
+
+// Load the result view for whichever model solved: a Darcy field, or the
+// direct-connection network (vessels + terminal links).
+async function loadResultView() {
+  await showSummary();                       // sets state.resultModel + runNotes
+  state.direct = null;
+  if (state.resultModel === "direct") await loadDirect();
+  else await loadField(state.field);
+}
+
+async function loadDirect() {
+  try { state.direct = await api("GET", `/projects/${state.project}/direct`); }
+  catch { state.direct = null; }
 }
 
 async function pollJob(jid) {
@@ -637,11 +657,15 @@ async function pollJob(jid) {
 async function showSummary() {
   const s = await api("GET", `/projects/${state.project}/results`);
   state.runNotes = s.notes || [];
+  state.resultModel = s.model || "hybrid";
   const fmt = (v) => (Math.abs(v) < 1e-3 || Math.abs(v) > 1e4) ? v.toExponential(2) : v.toFixed(3);
-  $("summary").innerHTML = [
+  const stats = [
     ["arterial inflow", s.arterial_inflow], ["venous outflow", s.venous_outflow],
     ["pressure max", s.pressure_max], ["flux mean", s.flux_mean],
-  ].map(([k, v]) => `<div class="stat"><b>${fmt(v)}</b><span>${k}</span></div>`).join("");
+  ];
+  if (s.model === "direct") stats.push(["connections", s.n_connections]);
+  $("summary").innerHTML = stats
+    .map(([k, v]) => `<div class="stat"><b>${fmt(v)}</b><span>${k}</span></div>`).join("");
 }
 
 async function loadNetwork() {
@@ -712,6 +736,11 @@ function syncFlowUI() {
 // ── rendering ──────────────────────────────────────────────────────────────────
 function redraw() {
   ctx.clearRect(0, 0, W, H);
+  if (state.mode === "result" && state.resultModel === "direct") {
+    drawDirect();          // network + terminal connections coloured by flow (no field)
+    drawIO();
+    return;
+  }
   if (state.mode === "result") {
     if (state.flow.active && state.tracer) drawTracerFrame(state.flow.idx);
     else if (state.fieldData) drawField();
@@ -722,6 +751,29 @@ function redraw() {
   drawVessels();
   drawStroke();
   drawIO();
+}
+
+function drawDirect() {
+  const d = state.direct;
+  if (!d) return;
+  const fmax = d.flow_max || 1;
+  ctx.globalAlpha = 0.22;                 // terminal-connection links (the capillary bed)
+  ctx.strokeStyle = "#10b981"; ctx.lineWidth = 0.7;
+  for (const [x0, y0, x1, y1] of d.connections) {
+    const [ax, ay] = toCanvas(x0, y0), [bx, by] = toCanvas(x1, y1);
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+  }
+  const paint = (segs, color) => {
+    for (const [x0, y0, x1, y1, f] of segs) {
+      const [ax, ay] = toCanvas(x0, y0), [bx, by] = toCanvas(x1, y1);
+      const t = Math.min(1, f / fmax);
+      ctx.globalAlpha = 0.4 + 0.6 * t; ctx.strokeStyle = color;
+      ctx.lineWidth = Math.max(1, 5 * t); ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+    }
+  };
+  paint(d.artery, getCss("--art")); paint(d.vein, getCss("--ven"));
+  ctx.globalAlpha = 1;
 }
 
 function drawIO() {
@@ -879,9 +931,10 @@ function setMode(mode) {
   $("mode-io").classList.toggle("active", mode === "io");
   $("mode-edit").classList.toggle("active", mode === "edit");
   $("mode-result").classList.toggle("active", mode === "result");
-  $("field-picker").classList.toggle("show", mode === "result");
-  $("flowbar").classList.toggle("show", mode === "result");
-  $("colorbar").hidden = mode !== "result";
+  const fieldResult = mode === "result" && state.resultModel !== "direct";
+  $("field-picker").classList.toggle("show", fieldResult);   // direct has no field to pick
+  $("flowbar").classList.toggle("show", fieldResult);        // ...or tracer through
+  $("colorbar").hidden = !fieldResult;
   // show only the tool card(s) for the active mode (Project/Parameters/Run stay)
   document.querySelectorAll(".card[data-mode]").forEach((c) => {
     c.style.display = c.dataset.mode === mode ? "" : "none";
@@ -982,6 +1035,12 @@ $("btn-run").addEventListener("click", guarded(run));
 $("nonlinear").addEventListener("change", (e) => {   // max-iter only matters for the nonlinear solve
   $("maxiter-row").style.display = e.target.checked ? "" : "none";
 });
+$("run-model").addEventListener("change", (e) => {   // show the settings each model needs
+  const direct = e.target.value === "direct";
+  $("rhoc-row").style.display = direct ? "" : "none";
+  $("nonlinear-row").style.display = direct ? "none" : "";
+  $("maxiter-row").style.display = (!direct && $("nonlinear").checked) ? "" : "none";
+});
 $("btn-export").addEventListener("click", () => {
   window.location = `/projects/${state.project}/export?fmt=${$("export-fmt").value}`;
 });
@@ -1051,7 +1110,7 @@ async function openProject(id) {
   await loadVessels();                       // restore hand-drawn strokes first
   await Promise.all([loadNetwork(), loadMask(), loadIO(), loadEditable()]);
   if (info.has_result) {
-    await Promise.all([showSummary(), loadField(state.field)]);
+    await loadResultView();                  // field or direct-connection view
     setMode("result");
   } else { setMode("vessels"); }
   refreshUI();
