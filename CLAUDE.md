@@ -187,19 +187,24 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   downloads it; `POST /projects/import` restores it as a *new* project. Conversion
   lives in `store.document_from_project` / `project_from_document`; the frontend
   Project card has 💾 Save file / 📂 Load file.
-- **Interactive vessel editing**: the frontend **Edit** mode renders vessels as
-  draggable node handles — drag to move a node, click one and use the radius
-  slider to resize its vessel, ＋ Add branch (click to extend the selected
-  vessel), 🗑 Delete node, then Save. It works on **two sources**: segmented/grown
-  *networks* (via `GET`/`PUT /projects/{id}/editable`, node-level `NetworkModel`;
-  `null` for 3-D trees) and hand-drawn *polylines* (edited in place, saved via
-  `PUT /projects/{id}/vessels` — `GET /vessels` now also exists and `openProject`
-  restores strokes). A move/resize PUT omits `seg_start`/`seg_end` and preserves
-  topology via `dataclasses.replace`; an add/delete PUT includes them and
-  `_rebuild_network` reindexes, drops isolated (degree-0, non-inlet) nodes and
-  re-derives `node_role`/`seg_length`/`seg_angle` (connected fragments without an
-  inlet are kept — their leaves couple to Darcy). Radii clamp `>= 1e-3`; edits
-  invalidate the stale result.
+- **Interactive vessel editing (network/tree model)**: vessels are edited as a
+  **network** — nodes + edges, each edge carrying its own radius (extensible to
+  more per-edge attributes later) — *not* free polylines, which are inaccurate for
+  branching trees. The frontend **Edit** mode renders draggable node handles: drag
+  to move, click a node and the slider sets *that edge's* radius, ＋ Add branch
+  (click to grow a new edge from the selected node), 🗑 Delete node, then Save.
+  Segmented/grown/frog trees are already networks (edited via `GET`/`PUT
+  /projects/{id}/editable`, node-level `NetworkModel`; `null` for 3-D). Hand-drawn
+  strokes are folded into one network by `POST /projects/{id}/vectorize` (auto-run
+  when Edit is opened with only strokes): each stroke explodes into consecutive
+  2-point edges (bends stay as degree-2 nodes, each edge keeps its stroke radius),
+  shared endpoints snap into junctions, and the polylines are cleared so editing
+  and the solver see one graph. (`GET /vessels` exists and `openProject` restores
+  strokes.) A move/resize PUT omits `seg_start`/`seg_end` (topology preserved via
+  `dataclasses.replace`); an add/delete PUT includes them and `_rebuild_network`
+  reindexes, drops isolated (degree-0, non-inlet) nodes and re-derives
+  `node_role`/`seg_length`/`seg_angle` (fragments without an inlet are kept — their
+  leaves couple to Darcy). Radii clamp `>= 1e-3`; edits invalidate the stale result.
 
 ## Gotchas
 

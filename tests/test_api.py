@@ -497,6 +497,36 @@ def test_editable_add_and_delete_topology(client):
     assert s["arterial_inflow"] == pytest.approx(s["venous_outflow"], rel=1e-6)
 
 
+def test_vectorize_handdrawn_to_network_keeps_per_edge_radius(client):
+    pid = client.post("/projects", json={"name": "draw", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    # a Y-shaped artery: three strokes with distinct radii sharing a junction
+    client.put(f"/projects/{pid}/vessels", json={"arteries": [
+        {"points": [[0, 10], [0, 40]], "radius": 3.0},
+        {"points": [[0, 40], [-20, 80]], "radius": 1.5},
+        {"points": [[0, 40], [20, 80]], "radius": 2.0}], "veins": []})
+    assert client.get(f"/projects/{pid}/editable").json() == {"artery": None, "vein": None}
+
+    assert client.post(f"/projects/{pid}/vectorize").status_code == 200
+    a = client.get(f"/projects/{pid}/editable").json()["artery"]
+    assert len(a["node_x"]) == 4                       # trunk base, junction, two tips
+    assert len(a["seg_radius"]) == 3
+    assert sorted(round(r, 1) for r in a["seg_radius"]) == [1.5, 2.0, 3.0]   # per-edge radii kept
+    # the shared branch point is one node, not three coincident ones (a real tree)
+    junction = [i for i in range(4) if abs(a["node_x"][i]) < 0.6 and abs(a["node_y"][i] - 40) < 0.6]
+    assert len(junction) == 1
+    # polylines are consumed; it now solves as a network
+    assert client.get(f"/projects/{pid}").json()["has_vessels"] is False
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+
+
+def test_vectorize_without_vessels_400(client):
+    pid = client.post("/projects", json={"name": "empty", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    assert client.post(f"/projects/{pid}/vectorize").status_code == 400
+
+
 def test_editable_absent_without_networks(client):
     pid = client.post("/projects", json={"name": "empty", "grid": SMALL_GRID,
                                          "params": FAST_PARAMS}).json()["id"]
