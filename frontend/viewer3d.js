@@ -21,7 +21,13 @@ function viridis(t) {
 const view = { yaw: 0.7, pitch: 0.45, zoom: 1, spin: true };
 let data = null, center = [0, 0, 0], scale = 1;
 
+// If arrived from a project (?project=<id>) keep working on it: show ITS result in
+// 3-D. Otherwise fall back to the standalone demos (synthetic / frog).
+const PROJECT = new URLSearchParams(location.search).get("project");
+if (PROJECT) $("link-2d").href = `/?project=${PROJECT}`;   // toggle back keeps the project
+
 async function load() {
+  if (PROJECT) return loadProject();
   const model = $("model").value;
   const gen = $("gen").value;
   $("gen-row").style.display = model === "synthetic" ? "" : "none";
@@ -31,13 +37,32 @@ async function load() {
     const msg = r.status === 501 ? "frog needs the image extra" : "3-D endpoint unavailable";
     $("status").textContent = msg; $("status").className = "status err"; return;
   }
-  data = await r.json();
+  setData(await r.json());
+}
+
+async function loadProject() {
+  $("model-row").style.display = "none";     // project mode: no demo picker
+  $("gen-row").style.display = "none";
+  $("status").textContent = "loading project…";
+  const r = await fetch(`/projects/${PROJECT}/view3d`);
+  if (!r.ok) {
+    $("status").textContent = r.status === 404 ? "project not found" : "3-D view unavailable";
+    $("status").className = "status err"; return;
+  }
+  setData(await r.json());
+  $("status").textContent = data.has_result
+    ? "showing solved result" : "showing vessels — run a simulation for the 3-D field";
+  $("status").className = "status ok";
+}
+
+function setData(d) {
+  data = d;
   const [x0, x1, y0, y1, z0, z1] = data.domain;
   center = [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2];
   const span = Math.max(x1 - x0, y1 - y0, z1 - z0);
   scale = (Math.min(W, H) * 0.42) / span;
   $("info").textContent = `${data.segments.length} segments · ${data.pressure.voxels.length} field points · grid ${data.shape.join("×")}`;
-  $("status").textContent = "ready"; $("status").className = "status ok";
+  if (!PROJECT) { $("status").textContent = "ready"; $("status").className = "status ok"; }
 }
 
 // Rotate a centred point by yaw (about z / vertical) then pitch (about x),

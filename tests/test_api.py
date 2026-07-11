@@ -548,6 +548,24 @@ def test_grow_vein_target_and_shape_preserving_base(client):
     assert s["arterial_inflow"] == pytest.approx(s["venous_outflow"], rel=1e-6)
 
 
+def test_project_view3d_before_and_after_run(client):
+    pytest.importorskip("skimage")
+    pytest.importorskip("imageio")
+    pid = client.post("/projects/frog").json()["id"]
+    before = client.get(f"/projects/{pid}/view3d").json()
+    assert before["has_result"] is False
+    assert len(before["segments"]) > 0            # trees always show (the geometry)
+    assert before["pressure"]["voxels"] == []     # no field until solved
+
+    jid = client.post(f"/projects/{pid}/run", json={"use_vessels": True}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    after = client.get(f"/projects/{pid}/view3d").json()
+    assert after["has_result"] is True
+    assert len(after["pressure"]["voxels"]) > 0   # pressure relief voxels
+    assert after["domain"][5] > 0                 # non-zero z-extent (relief)
+    assert {s[7] for s in after["segments"]} == {0, 1}   # artery + vein
+
+
 def test_grow_rejects_bad_target(client):
     pid = client.post("/projects", json={"name": "g", "grid": SMALL_GRID,
                                          "params": FAST_PARAMS}).json()["id"]

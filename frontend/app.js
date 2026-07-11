@@ -186,6 +186,7 @@ async function newProject() {
 function showProjectLink(id) {
   const url = `${location.origin}/?project=${id}`;
   $("proj-id").innerHTML = `project <a href="${url}" title="shareable link">${id}</a>`;
+  $("link-3d").href = `/viewer3d.html?project=${id}`;    // 3-D view keeps this project
 }
 
 async function loadFrog() {

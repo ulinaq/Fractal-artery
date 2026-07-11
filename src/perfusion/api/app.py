@@ -337,6 +337,49 @@ def create_app(store: ProjectStore | None = None,
         store.clear_result(project)     # geometry model changed -> stale result; saves
         return _info(project)
 
+    @app.get("/projects/{pid}/view3d")
+    def project_view3d(pid: str) -> dict:
+        """This project's result as a 3-D scene: pressure as a relief surface
+        (z ∝ pressure) with the vessel trees at the base. Voxels are included only
+        when a solved result exists; the trees always show (the user's geometry)."""
+        project = _project(pid)
+        grid, dom = runner.build_grid(project)
+        x0, x1, y0, y1 = dom
+        art, ven = runner.build_networks(project, use_vessels=True)
+
+        def segs(net, kind):
+            if net is None:
+                return []
+            return [[float(net.node_x[net.seg_start[s]]), float(net.node_y[net.seg_start[s]]), 0.0,
+                     float(net.node_x[net.seg_end[s]]), float(net.node_y[net.seg_end[s]]), 0.0,
+                     round(float(net.seg_radius[s]), 3), kind]
+                    for s in range(net.n_segments)]
+
+        segments = segs(art, 0) + segs(ven, 1)
+        voxels, pmin, pmax, relief = [], 0.0, 0.0, 35.0
+        zmax = 1.0
+        if project.has_result:
+            p = store.result_field(pid, "pressure")
+            mask = grid.mask if grid.mask is not None else np.ones((grid.nx, grid.ny), bool)
+            finite = np.isfinite(p) & mask
+            if finite.any():
+                vals = p[finite]
+                pmin, pmax = float(vals.min()), float(vals.max())
+                span = (pmax - pmin) or 1.0
+                xc = (np.arange(grid.nx) + 0.5) / grid.nx * (x1 - x0) + x0
+                yc = (np.arange(grid.ny) + 0.5) / grid.ny * (y1 - y0) + y0
+                stride = max(1, round((grid.nx * grid.ny / 2500) ** 0.5))
+                voxels = [
+                    [round(float(xc[ix]), 1), round(float(yc[iy]), 1),
+                     round((p[ix, iy] - pmin) / span * relief, 2), round(float(p[ix, iy]), 4)]
+                    for ix in range(0, grid.nx, stride) for iy in range(0, grid.ny, stride)
+                    if finite[ix, iy]
+                ]
+                zmax = relief
+        return {"shape": [grid.nx, grid.ny, 1], "domain": [x0, x1, y0, y1, 0.0, zmax],
+                "segments": segments, "has_result": project.has_result,
+                "pressure": {"min": pmin, "max": pmax, "voxels": voxels}}
+
     @app.get("/projects/{pid}/editable")
     def get_editable(pid: str) -> dict:
         """Node-level geometry of the arterial/venous trees, for interactive edits.
