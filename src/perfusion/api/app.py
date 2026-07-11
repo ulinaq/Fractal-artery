@@ -299,6 +299,44 @@ def create_app(store: ProjectStore | None = None,
         store.save(project)
         return _info(project)
 
+    @app.post("/projects/{pid}/vectorize", response_model=ProjectInfo)
+    def vectorize(pid: str) -> ProjectInfo:
+        """Turn hand-drawn polylines into an editable vessel **network** (tree/graph).
+
+        Vessels are a network, not free polylines: each drawn stroke is exploded
+        into consecutive 2-point edges (so bends stay as degree-2 nodes and each
+        edge carries its own radius), shared endpoints snap into junctions. The
+        result is stored as ``artery_network``/``vein_network`` and the polylines
+        are cleared, so editing (and the solver) see one consistent graph.
+        """
+        from itertools import pairwise
+
+        from ..core.geometry import network_from_polylines
+
+        project = _project(pid)
+
+        def to_network(existing, polylines):
+            if existing is not None or not polylines:
+                return existing, polylines        # already a network, or nothing to do
+            segs, radii = [], []
+            for p in polylines:
+                pts = [list(pt) for pt in p.points]
+                for a, b in pairwise(pts):
+                    segs.append([a, b])
+                    radii.append(p.radius)
+            if not segs:
+                return existing, polylines
+            return network_from_polylines(segs, radii=radii, snap_tol=0.5), []
+
+        art_net, art_poly = to_network(project.artery_network, project.arteries)
+        ven_net, ven_poly = to_network(project.vein_network, project.veins)
+        project.artery_network, project.arteries = art_net, art_poly
+        project.vein_network, project.veins = ven_net, ven_poly
+        if project.artery_network is None and project.vein_network is None:
+            raise HTTPException(400, "no vessels to convert to a network")
+        store.clear_result(project)     # geometry model changed -> stale result; saves
+        return _info(project)
+
     @app.get("/projects/{pid}/editable")
     def get_editable(pid: str) -> dict:
         """Node-level geometry of the arterial/venous trees, for interactive edits.
