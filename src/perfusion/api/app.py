@@ -271,7 +271,13 @@ def create_app(store: ProjectStore | None = None,
 
     @app.get("/health")
     def health() -> dict:
-        return {"status": "ok", "version": __version__}
+        return {"status": "ok", "version": __version__, "build": _frontend_build()}
+
+    @app.get("/frontend-version")
+    def frontend_version() -> dict:
+        """Current frontend build hash — the open page polls this to detect a
+        stale tab (files changed on disk since it loaded) and offer a reload."""
+        return {"build": _frontend_build()}
 
     @app.post("/projects", response_model=ProjectInfo)
     def create_project(body: ProjectCreate) -> ProjectInfo:
@@ -804,9 +810,32 @@ def _render_gif(tracer: dict, fps: int = 12) -> bytes:
     return buf.getvalue()
 
 
+def _frontend_dir() -> Path:
+    return Path(__file__).resolve().parents[3] / "frontend"
+
+
+def _frontend_build() -> str:
+    """A short hash of the frontend files' (name, size, mtime).
+
+    Changes whenever any .html/.js/.css asset is edited, so an open tab can tell
+    it is running a stale build and offer a reload. Cheap: a handful of files.
+    """
+    import hashlib
+
+    frontend = _frontend_dir()
+    if not frontend.exists():
+        return "none"
+    parts = []
+    for f in sorted(frontend.glob("*")):
+        if f.suffix in (".html", ".js", ".css") and f.is_file():
+            st = f.stat()
+            parts.append(f"{f.name}:{st.st_size}:{st.st_mtime_ns}")
+    return hashlib.sha1("|".join(parts).encode()).hexdigest()[:8]
+
+
 def _mount_frontend(app: FastAPI) -> None:
     """Serve the static 2-D workspace at ``/`` if it is present (dev/editable)."""
-    frontend = Path(__file__).resolve().parents[3] / "frontend"
+    frontend = _frontend_dir()
     if not (frontend / "index.html").exists():
         return
     from fastapi.staticfiles import StaticFiles
