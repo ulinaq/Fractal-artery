@@ -260,13 +260,8 @@ def network_geometry(project: Project = Depends(get_project)) -> dict:
     segments: list[dict] = []
 
     def _add(net, kind: str) -> None:
-        for s in range(net.n_segments):
-            a, b = int(net.seg_start[s]), int(net.seg_end[s])
-            segments.append({
-                "x0": float(net.node_x[a]), "y0": float(net.node_y[a]),
-                "x1": float(net.node_x[b]), "y1": float(net.node_y[b]),
-                "r": float(net.seg_radius[s]), "kind": kind,
-            })
+        for x0, y0, x1, y1, r in helpers.segment_lines(net):
+            segments.append({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "r": r, "kind": kind})
 
     if project.artery_network is not None:
         _add(project.artery_network, "artery")

@@ -106,10 +106,8 @@ def project_view3d(pid: str, project: Project = Depends(get_project),
     def segs(net, kind):
         if net is None:
             return []
-        return [[float(net.node_x[net.seg_start[s]]), float(net.node_y[net.seg_start[s]]), 0.0,
-                 float(net.node_x[net.seg_end[s]]), float(net.node_y[net.seg_end[s]]), 0.0,
-                 round(float(net.seg_radius[s]), 3), kind]
-                for s in range(net.n_segments)]
+        return [[x0, y0, 0.0, x1, y1, 0.0, round(r, 3), kind]
+                for x0, y0, x1, y1, r in helpers.segment_lines(net)]
 
     segments = segs(art, 0) + segs(ven, 1)
     voxels, pmin, pmax, relief = [], 0.0, 0.0, 35.0
