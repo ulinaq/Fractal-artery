@@ -2,21 +2,12 @@
 // Renders the coupled 3-D hybrid result (vessel trees + pressure voxel field)
 // from GET /demo3d. No WebGL / vtk.js, so it works offline and is easy to verify.
 
+import { viridisCss } from "./palette.js";
+
 const $ = (id) => document.getElementById(id);
 const canvas = $("view3d");
 const ctx = canvas.getContext("2d");
 const W = canvas.width, H = canvas.height;
-
-const VIRIDIS = [
-  [68, 1, 84], [72, 40, 120], [62, 74, 137], [49, 104, 142], [38, 130, 142],
-  [31, 158, 137], [53, 183, 121], [109, 205, 89], [180, 222, 44], [253, 231, 37],
-];
-function viridis(t) {
-  t = Math.max(0, Math.min(1, t)) * (VIRIDIS.length - 1);
-  const i = Math.floor(t), f = t - i;
-  const a = VIRIDIS[i], b = VIRIDIS[Math.min(i + 1, VIRIDIS.length - 1)];
-  return `rgb(${a[0] + (b[0] - a[0]) * f | 0},${a[1] + (b[1] - a[1]) * f | 0},${a[2] + (b[2] - a[2]) * f | 0})`;
-}
 
 const view = { yaw: 0.7, pitch: 0.45, zoom: 1, spin: true };
 let data = null, center = [0, 0, 0], scale = 1;
@@ -92,7 +83,7 @@ function render() {
     }).sort((a, b) => a.depth - b.depth);          // painter's: far first
     ctx.globalAlpha = alpha;
     for (const p of pts) {
-      ctx.fillStyle = viridis(p.t);
+      ctx.fillStyle = viridisCss(p.t);
       const r = 2.6 * view.zoom;
       ctx.fillRect(p.sx - r, p.sy - r, 2 * r, 2 * r);
     }
