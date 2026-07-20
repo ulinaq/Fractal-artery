@@ -27,8 +27,8 @@ stays out of it. `core` must stay import-clean without any extra installed.
 | add a network builder | `core/geometry.py` | return a `Network`; classify nodes by **degree** | round-trip / topology test |
 | a new grid field or op | `core/darcy.py`, `core/timeofflight.py` | honour `Grid.mask`; column-major `order="F"` | linear-ramp / mask test |
 | a result exporter | `io.py` | `fields_to_*` take arrays; `save_results_*` wrap a `HybridResult` | write + reparse |
-| an API endpoint | `api/app.py` (+ `schemas.py`, `store.py`) | persist via the store; long work → a job | `tests/test_api.py` (TestClient) |
-| a UI capability | `frontend/{index.html,app.js,style.css}` | reuse `paintHeatmap`/overlay; mode tabs; auto-save on run | `node --check`; live screenshot |
+| an API endpoint | `api/routes_{projects,geometry,solve}.py` (+ `schemas.py`, `store.py`) | add to the matching router; get store/jobs/project via `api.deps` (`Depends`); shared compute → `api/helpers.py`; long work → a job | `tests/test_api.py` (TestClient) |
+| a UI capability | `frontend/` | state/geometry/api in `core.js`, drawing in `render.js`, feature logic + wiring in `app.js`, markup in `index.html`; mode tabs; auto-save on run | `node --check`; live screenshot |
 | an MCP tool | `mcp_server.py` | put logic in a plain function; wrap with `@server.tool()` | `tests/test_mcp.py` |
 | a vessel-growth method | `growth.py` | produce `(pos, parent)` then `_assemble`; Murray radii | valid-tree + mass-conservation |
 
