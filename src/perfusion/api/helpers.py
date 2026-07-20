@@ -16,6 +16,27 @@ FIELDS = {"pressure": "pressure", "flux": "flux", "tof": "tof"}
 _DEMO3D_CACHE: dict = {}
 
 
+def segment_lines(net):
+    """Yield each segment as ``(x0, y0, x1, y1, radius)`` in domain coords (2-D).
+
+    One place for the ``seg_start``/``seg_end`` → node-coordinate lookup that the
+    /network, /view3d and frog-demo serialisers all need.
+    """
+    for s in range(net.n_segments):
+        a, b = int(net.seg_start[s]), int(net.seg_end[s])
+        yield (float(net.node_x[a]), float(net.node_y[a]),
+               float(net.node_x[b]), float(net.node_y[b]), float(net.seg_radius[s]))
+
+
+def segment_lines_3d(net):
+    """Yield each segment as ``(x0, y0, z0, x1, y1, z1, radius)`` (3-D networks)."""
+    for s in range(net.n_segments):
+        a, b = int(net.seg_start[s]), int(net.seg_end[s])
+        yield (float(net.node_x[a]), float(net.node_y[a]), float(net.node_z[a]),
+               float(net.node_x[b]), float(net.node_y[b]), float(net.node_z[b]),
+               float(net.seg_radius[s]))
+
+
 def frog_networks_and_mask(nx: int, ny: int, dom):
     """Segment the bundled frog system into (artery, vein, raster mask) placed in
     ``dom``. Raises ImportError without the ``image`` extra."""
@@ -57,12 +78,9 @@ def demo3d_frog() -> dict:
     ]
 
     def segs(net, kind):
-        return [[round(float(net.node_x[net.seg_start[s]]), 2),
-                 round(float(net.node_y[net.seg_start[s]]), 2), 0.0,
-                 round(float(net.node_x[net.seg_end[s]]), 2),
-                 round(float(net.node_y[net.seg_end[s]]), 2), 0.0,
-                 round(float(net.seg_radius[s]), 2), 0 if kind == "artery" else 1]
-                for s in range(net.n_segments)]
+        k = 0 if kind == "artery" else 1
+        return [[round(x0, 2), round(y0, 2), 0.0, round(x1, 2), round(y1, 2), 0.0, round(r, 2), k]
+                for x0, y0, x1, y1, r in segment_lines(net)]
 
     payload = {"domain": [0.0, 100.0, 0.0, 120.0, 0.0, relief], "shape": [nx, ny, 1],
                "pressure": {"min": pmin, "max": pmax, "voxels": voxels},
@@ -99,14 +117,10 @@ def demo3d_payload(gen: int = 6) -> dict:
     res = run_hybrid_3d(Parameters(p_in=10.0, p_out=0.0, mu=1.0), grid, art, ven, dom, eps=2.0)
 
     def segments(net, kind):
-        out = []
-        for s in range(net.n_segments):
-            a, b = int(net.seg_start[s]), int(net.seg_end[s])
-            out.append([round(float(net.node_x[a]), 2), round(float(net.node_y[a]), 2),
-                        round(float(net.node_z[a]), 2), round(float(net.node_x[b]), 2),
-                        round(float(net.node_y[b]), 2), round(float(net.node_z[b]), 2),
-                        round(float(net.seg_radius[s]), 2), 0 if kind == "artery" else 1])
-        return out
+        k = 0 if kind == "artery" else 1
+        return [[round(x0, 2), round(y0, 2), round(z0, 2), round(x1, 2), round(y1, 2),
+                 round(z1, 2), round(r, 2), k]
+                for x0, y0, z0, x1, y1, z1, r in segment_lines_3d(net)]
 
     p, mask = res.pressure, grid.mask
     nx, ny, nz = grid.nx, grid.ny, grid.nz
