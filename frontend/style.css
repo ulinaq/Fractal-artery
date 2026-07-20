@@ -85,6 +85,9 @@ input[type=text], input[type=number] {
 }
 input:focus { outline: 2px solid #bfdbfe; border-color: var(--accent); }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+/* compact 2-column button grid — equal cells, no full-width primary hogging a row */
+.btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.btn-grid button { width: 100%; }
 .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
 .check { display: flex; align-items: center; gap: 7px; margin: 6px 0 10px; }
 .check input { margin: 0; }

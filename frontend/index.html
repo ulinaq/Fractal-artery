@@ -32,17 +32,14 @@
       <details class="card" open>
         <summary>Project</summary>
         <label>Name <input id="proj-name" type="text" value="workspace" /></label>
-        <div class="row">
-          <button id="btn-new" class="primary">New project</button>
+        <div class="btn-grid">
+          <button id="btn-new" class="primary" title="start a new project">New</button>
           <button id="btn-frog" title="load the segmented frog-tongue example">🐸 Frog</button>
-        </div>
-        <div class="row">
-          <button id="btn-save-file" title="download this project as a .json file to continue later">💾 Save file</button>
-          <button id="btn-load-file" title="restore a project from a saved .json file">📂 Load file</button>
+          <button id="btn-save-file" title="download this project as a .json file to continue later">💾 Save</button>
+          <button id="btn-load-file" title="restore a project from a saved .json file">📂 Load</button>
           <input id="file-load" type="file" accept=".json,application/json" hidden />
         </div>
         <p class="muted" id="proj-id">no project yet</p>
-        <p class="muted">Tools below follow the tab above the canvas.</p>
       </details>
 
       <details class="card">
