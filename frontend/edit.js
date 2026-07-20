@@ -10,7 +10,8 @@ import {
   api, canvas, editKinds, hasEditable, numOf, state, status, toCanvas, toDomain, $,
 } from "./core.js";
 import { redraw } from "./render.js";
-import { loadNetwork, loadVessels, recordHistory, refreshUI, requireProject, stopFlow } from "./app.js";
+import { loadVessels, recordHistory, refreshUI, requireProject } from "./app.js";
+import { loadNetwork, stopFlow } from "./run.js";
 
 let editDirty = false;
 
