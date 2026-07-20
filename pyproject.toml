@@ -55,5 +55,10 @@ target-version = "py310"
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "PERF", "NPY", "PT"]
 ignore = ["E741"]  # ambiguous variable names (l, I) are common in the math here
 
+[tool.ruff.lint.per-file-ignores]
+# FastAPI's `Depends()`-in-argument-defaults is the intended injection idiom.
+"src/perfusion/api/routes_*.py" = ["B008"]
+"src/perfusion/api/deps.py" = ["B008"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

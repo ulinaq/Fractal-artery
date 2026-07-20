@@ -14,7 +14,15 @@ pure compute engine (NumPy/SciPy only, no I/O/viz/web deps); `io`, `viz`,
 `segmentation`, `growth`, `optimize` are service layers built on it; `api`
 (FastAPI back-end — see `perfusion/api/`) sits on top and also serves the
 zero-build 2-D web `frontend/` (plain HTML/CSS/ES-modules, mounted at `/` by
-`api.app._mount_frontend`, no build step). The API's `ProjectStore` persists to
+`api.app._mount_frontend`, no build step). `api.app.create_app` is thin — it sets
+`app.state.store`/`jobs`, exposes `/health` + `/frontend-version`, mounts the
+frontend, and includes three `APIRouter` modules grouped by concern:
+`routes_projects` (lifecycle + frog + save-file document), `routes_geometry`
+(vessels/mask/io/editable/vectorize/image/grow/network), `routes_solve`
+(run/tracer/jobs/results/field/export/direct/view3d/demo3d). Handlers reach the
+store/jobs/project through `api.deps` (`get_store`/`get_jobs`/`get_project`
++ `project_info`); shared compute lives in `api.helpers` (frog & demo 3-D scenes,
+`rebuild_network`, `render_gif`). The API's `ProjectStore` persists to
 SQLite + a filesystem blob store (grown/segmented networks + result & tracer
 `.npz`) under `$PERFUSION_DATA`, so projects/results survive a restart; heavy
 binary artefacts never go in the DB. Jobs are also in SQLite (a durable
