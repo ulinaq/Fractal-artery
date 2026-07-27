@@ -152,17 +152,31 @@ def tracer_kinetics(pid: str, model: str = "1CM",
     }
 
 
+_SEMI_FIELDS = ("Fp", "vp")
+_DECONV_FIELDS = ("Fp", "CBV", "MTT")
+
+
 @router.get("/projects/{pid}/kinetics/maps", response_model=FieldResponse)
-def kinetic_map(pid: str, field: str = "Fp", project: Project = Depends(get_project),
+def kinetic_map(pid: str, field: str = "Fp", method: str = "semi",
+                oi: float = 0.1, project: Project = Depends(get_project),
                 store: ProjectStore = Depends(get_store)) -> FieldResponse:
-    """Voxel-wise parametric map from the tracer: ``field='Fp'`` (max-slope plasma
-    flow) or ``'vp'`` (AUC blood volume) — model-free DCE-style perfusion maps."""
+    """Voxel-wise parametric map from the tracer.
+
+    ``method='semi'`` (default) — model-free heuristics: ``field='Fp'`` (max-slope
+    plasma flow) or ``'vp'`` (AUC blood volume). ``method='deconv'`` — truncated-SVD
+    residue **deconvolution** (Østergaard): ``field`` in ``Fp`` (residue peak), ``CBV``
+    (∫residue) or ``MTT`` (CBV/Fp); ``oi`` is the SVD truncation fraction. Absolute
+    deconvolution accuracy needs the transit time well-sampled (raise the tracer's
+    ``n_frames``); relative maps (rCBF/rCBV/rMTT) are robust — the clinical norm."""
     from ..core import tkm
 
     if not project.has_tracer:
         raise HTTPException(409, "no tracer yet; POST to /tracer first")
-    if field not in ("Fp", "vp"):
-        raise HTTPException(404, "field must be 'Fp' or 'vp'")
+    allowed = _DECONV_FIELDS if method == "deconv" else _SEMI_FIELDS
+    if method not in ("semi", "deconv"):
+        raise HTTPException(404, "method must be 'semi' or 'deconv'")
+    if field not in allowed:
+        raise HTTPException(404, f"field must be one of {allowed} for method='{method}'")
     d = store.load_tracer(pid)
     times, frames, mask = d["times"], d["frames"], d["mask"]
     if "aif" in d:
@@ -170,7 +184,10 @@ def kinetic_map(pid: str, field: str = "Fp", project: Project = Depends(get_proj
     else:
         dur = float(times[-1]) if len(times) else 1.0
         ca = tkm.gamma_variate_aif(times, t0=0.08 * dur, A=3.0, B=max(0.06 * dur, 1e-6))
-    m = tkm.kinetic_maps(frames, times, ca, mask=mask)[field]
+    if method == "deconv":
+        m = tkm.deconvolution_maps(frames, times, ca, mask=mask, oi=float(oi))[field]
+    else:
+        m = tkm.kinetic_maps(frames, times, ca, mask=mask)[field]
     data = np.where(np.isfinite(m), m, None)
     return FieldResponse(name=field, shape=m.shape, data=data.tolist())
 

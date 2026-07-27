@@ -83,6 +83,12 @@ def test_perfusion_maps_summarises_active_tissue():
     assert r["Fp"]["max"] > 0                       # some perfused tissue
     assert r["vp"]["mean"] is not None
 
+    d = mcp_server.perfusion_maps(nx=45, ny=52, n_frames=16, r_min_frac=0.5, method="deconv")
+    json.dumps(d)
+    assert d["method"] == "deconv"
+    assert {"Fp", "CBV", "MTT"} <= set(d)           # deconvolution reports transit time
+    assert d["MTT"]["mean"] is not None
+
 
 def test_simulate_is_json_serialisable():
     import json

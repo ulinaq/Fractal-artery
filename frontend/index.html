@@ -173,9 +173,12 @@
         <canvas id="tkm-chart" width="288" height="120"></canvas>
         <p class="muted" id="tkm-info"></p>
         <p class="muted">Voxel-wise maps (shown on the main canvas):</p>
+        <label class="muted"><input type="checkbox" id="map-deconv" />
+          SVD deconvolution (residue-based rCBF/rCBV/rMTT)</label>
         <div class="row">
-          <button id="btn-map-fp" title="max-slope plasma-flow map">Fp map</button>
-          <button id="btn-map-vp" title="AUC blood-volume map">BV map</button>
+          <button id="btn-map-fp" title="plasma-flow map">Fp map</button>
+          <button id="btn-map-vp" title="blood-volume map">BV map</button>
+          <button id="btn-map-mtt" title="mean transit time (deconvolution)">MTT map</button>
         </div>
       </details>
 

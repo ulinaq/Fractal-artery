@@ -133,10 +133,14 @@ def pulsatile_response(r_total: float, compliance_total: float, p_mean: float = 
 
 
 def perfusion_maps(nx: int = 70, ny: int = 80, n_frames: int = 24,
-                   p_in: float = 10.0, p_out: float = 0.0, r_min_frac: float = 0.15) -> dict:
+                   p_in: float = 10.0, p_out: float = 0.0, r_min_frac: float = 0.15,
+                   method: str = "semi", oi: float = 0.1) -> dict:
     """Synthesise a contrast bolus on the fractal trees and reduce it to voxel-wise
-    perfusion maps (Paper B); return summary statistics of the Fp and blood-volume
-    maps over the active tissue (the app renders the full 2-D fields)."""
+    perfusion maps (Paper B); return summary statistics over the active tissue (the
+    app renders the full 2-D fields).
+
+    ``method='semi'`` gives max-slope ``Fp`` + AUC ``vp``; ``method='deconv'`` gives
+    residue-deconvolution ``Fp``/``CBV``/``MTT`` (``oi`` = SVD truncation)."""
     from .core import tkm, transport
 
     nx, ny = int(np.clip(nx, 30, 160)), int(np.clip(ny, 30, 160))
@@ -158,7 +162,11 @@ def perfusion_maps(nx: int = 70, ny: int = 80, n_frames: int = 24,
                                        result.solution.terminal_flux, aif, dt, theta=1.0)
     stride = max(1, n_steps // n_frames)
     frames, times = full[::stride][:n_frames], t[::stride][:n_frames]
-    m = tkm.kinetic_maps(frames, times, aif[::stride][:n_frames], mask=grid.mask)
+    ca = aif[::stride][:n_frames]
+    if method == "deconv":
+        m = tkm.deconvolution_maps(frames, times, ca, mask=grid.mask, oi=float(oi))
+    else:
+        m = tkm.kinetic_maps(frames, times, ca, mask=grid.mask)
 
     def stat(a):
         a = a[np.isfinite(a)]
@@ -166,8 +174,9 @@ def perfusion_maps(nx: int = 70, ny: int = 80, n_frames: int = 24,
             return {"mean": None, "max": None}
         return {"mean": float(a.mean()), "max": float(a.max())}
 
-    return {"grid": {"nx": nx, "ny": ny}, "n_frames": len(times),
-            "Fp": stat(m["Fp"]), "vp": stat(m["vp"])}
+    out = {"grid": {"nx": nx, "ny": ny}, "n_frames": len(times), "method": method}
+    out.update({k: stat(v) for k, v in m.items()})
+    return out
 
 
 def model_info() -> dict:
@@ -251,13 +260,15 @@ def build_server():
     @server.tool()
     def perfusion_parameter_maps(nx: int = 70, ny: int = 80, n_frames: int = 24,
                                  p_in: float = 10.0, p_out: float = 0.0,
-                                 r_min_frac: float = 0.15) -> dict:
+                                 r_min_frac: float = 0.15, method: str = "semi",
+                                 oi: float = 0.1) -> dict:
         """Advect a synthetic contrast bolus through the fractal trees and reduce it
-        to voxel-wise perfusion maps: plasma flow Fp (max-slope) and blood volume vp
-        (area-under-curve ratio). Returns mean/max of each map over the active tissue.
+        to voxel-wise perfusion maps. method='semi' -> max-slope Fp + AUC blood
+        volume vp; method='deconv' -> residue-deconvolution Fp / CBV / MTT (oi = SVD
+        truncation fraction). Returns mean/max of each map over the active tissue.
         Each call is a full hybrid solve + transport — keep the grid coarse."""
-        return perfusion_maps(nx=nx, ny=ny, n_frames=n_frames, p_in=p_in,
-                              p_out=p_out, r_min_frac=r_min_frac)
+        return perfusion_maps(nx=nx, ny=ny, n_frames=n_frames, p_in=p_in, p_out=p_out,
+                              r_min_frac=r_min_frac, method=method, oi=oi)
 
     @server.tool()
     def describe_model() -> dict:

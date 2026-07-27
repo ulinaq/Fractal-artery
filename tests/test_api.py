@@ -705,6 +705,16 @@ def test_kinetic_maps_endpoint(client):
     assert tuple(fp["shape"]) == (SMALL_GRID["nx"], SMALL_GRID["ny"])
     assert any(v is not None for row in fp["data"] for v in row)   # some perfused voxels
     assert client.get(f"/projects/{pid}/kinetics/maps", params={"field": "nope"}).status_code == 404
+    # deconvolution method exposes CBV / MTT
+    mtt = client.get(f"/projects/{pid}/kinetics/maps",
+                     params={"field": "MTT", "method": "deconv"})
+    assert mtt.status_code == 200
+    assert tuple(mtt.json()["shape"]) == (SMALL_GRID["nx"], SMALL_GRID["ny"])
+    # MTT is a deconv-only field; unknown method rejected
+    assert client.get(f"/projects/{pid}/kinetics/maps",
+                      params={"field": "MTT", "method": "semi"}).status_code == 404
+    assert client.get(f"/projects/{pid}/kinetics/maps",
+                      params={"field": "Fp", "method": "bogus"}).status_code == 404
 
 
 def test_transit_409_without_field_result(client):

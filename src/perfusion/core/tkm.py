@@ -140,3 +140,65 @@ def kinetic_maps(frames: np.ndarray, times: np.ndarray, aif: np.ndarray,
         fp = np.where(m, fp, np.nan)
         vp = np.where(m, vp, np.nan)
     return {"Fp": fp, "vp": vp}
+
+
+def deconvolve(times: np.ndarray, ca: np.ndarray, curves: np.ndarray,
+               oi: float = 0.1) -> np.ndarray:
+    """Truncated-SVD deconvolution of the residue function (Østergaard 1996).
+
+    Solves ``C = A k`` for ``k = Fp·R`` (flow-scaled residue), where ``A`` is the
+    lower-triangular convolution matrix of the AIF ``ca`` on a uniform grid.
+    Singular values below ``oi · max(s)`` are truncated (Tikhonov-like
+    regularisation) to stabilise the ill-posed inverse. One SVD of ``A`` is reused
+    across every column of ``curves`` (shape ``(n_t,)`` or ``(n_t, n_curves)``),
+    so a whole voxel field deconvolves in a single factorisation.
+    """
+    times = np.asarray(times, dtype=float)
+    ca = np.asarray(ca, dtype=float)
+    curves = np.asarray(curves, dtype=float)
+    n = len(times)
+    dt = float(np.mean(np.diff(times))) if n > 1 else 1.0
+    # Lower-triangular Toeplitz convolution matrix A[i, j] = dt · ca[i-j] (i >= j).
+    a = np.zeros((n, n))
+    idx = np.arange(n)
+    lower = idx[:, None] - idx[None, :]
+    valid = lower >= 0
+    a[valid] = ca[lower[valid]] * dt
+    u, s, vt = np.linalg.svd(a)
+    s_inv = np.where(s >= oi * (s.max() if s.size else 0.0), 1.0 / np.where(s > 0, s, 1.0), 0.0)
+    # k = V diag(s_inv) Uᵀ C, reusing the factorisation for all columns.
+    k = vt.T @ (s_inv[:, None] * (u.T @ np.atleast_2d(curves.T).T))
+    return k
+
+
+def deconvolution_maps(frames: np.ndarray, times: np.ndarray, aif: np.ndarray,
+                       mask: np.ndarray | None = None, oi: float = 0.1) -> dict:
+    """Model-free perfusion maps by residue-function **deconvolution**.
+
+    Unlike :func:`kinetic_maps` (max-slope / AUC heuristics), this recovers the
+    flow-scaled residue ``k = Fp·R`` per voxel by truncated-SVD deconvolution and
+    reads off, via the central-volume theorem:
+
+    - ``Fp`` — plasma flow, ``max_t k`` (the residue is 1 at ``t=0``),
+    - ``CBV`` — blood volume, ``∫k dt`` (== ``Fp·MTT``),
+    - ``MTT`` — mean transit time, ``CBV / Fp``.
+
+    All ``(nx, ny)``; inactive voxels (``mask`` False) are NaN.
+    """
+    frames = np.asarray(frames, dtype=float)
+    times = np.asarray(times, dtype=float)
+    aif = np.asarray(aif, dtype=float)
+    n_t, nx, ny = frames.shape
+    flat = frames.reshape(n_t, nx * ny)
+    m = np.ones(nx * ny, dtype=bool) if mask is None else np.asarray(mask, dtype=bool).ravel()
+    fp = np.full(nx * ny, np.nan)
+    cbv = np.full(nx * ny, np.nan)
+    mtt = np.full(nx * ny, np.nan)
+    if m.any():
+        k = deconvolve(times, aif, flat[:, m], oi=oi)         # (n_t, n_active)
+        fp_a = k.max(axis=0)
+        cbv_a = np.trapezoid(k, times, axis=0)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            mtt_a = np.where(fp_a > 0, cbv_a / fp_a, np.nan)
+        fp[m], cbv[m], mtt[m] = fp_a, cbv_a, mtt_a
+    return {"Fp": fp.reshape(nx, ny), "CBV": cbv.reshape(nx, ny), "MTT": mtt.reshape(nx, ny)}

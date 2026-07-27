@@ -162,20 +162,26 @@ function drawTransient(el, d) {
   ctx.fillText("— inlet p   — tissue flow (rel. to mean)", pad.l, H - 4);
 }
 
-// voxel-wise parametric map (Fp / vp) rendered on the main result canvas
-export async function loadKineticMap(which) {
+// voxel-wise parametric map rendered on the main result canvas.
+// method "semi" -> field Fp|vp; method "deconv" (SVD residue) -> field Fp|CBV|MTT.
+const MAP_LABELS = {
+  Fp: "Fp (perfusion)", vp: "BV (blood volume)",
+  CBV: "CBV (blood volume)", MTT: "MTT (transit time)",
+};
+export async function loadKineticMap(which, method = "semi") {
   requireProject();
   if (state.resultModel !== "hybrid") { status("maps need the hybrid tracer", "err"); return; }
+  const q = `field=${which}&method=${method}`;
   let f;
-  try { f = await api("GET", `/projects/${state.project}/kinetics/maps?field=${which}`); }
+  try { f = await api("GET", `/projects/${state.project}/kinetics/maps?${q}`); }
   catch (e) { status(/409/.test(e.message) ? "compute the ▶ Tracer first" : e.message, "err"); return; }
   let vmin = Infinity, vmax = -Infinity;
   for (const row of f.data) for (const v of row) if (v !== null) { if (v < vmin) vmin = v; if (v > vmax) vmax = v; }
   stopFlow();
   state.fieldData = { ...f, vmin, vmax };
-  state.field = which === "Fp" ? "Fp (perfusion)" : "BV (blood volume)";
+  state.field = MAP_LABELS[which] || which;
   redraw();
-  status(`${which} map`, "ok");
+  status(`${which} map${method === "deconv" ? " (deconv)" : ""}`, "ok");
 }
 
 function drawTKM(el, d) {
