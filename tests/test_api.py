@@ -399,6 +399,32 @@ def test_frontend_version_endpoint(client):
     assert v["build"] == h["build"]                # same hash from both
 
 
+def test_explore_evaluate_returns_field_tree_objective(client):
+    r = client.post("/explore", json={"a_gamma": 1.4, "v_gamma": 1.2, "kind": "flux_std",
+                                      "field": "flux", "nx": 40, "ny": 46})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["objective"] > 0
+    assert d["field"]["name"] == "flux"
+    assert d["field"]["shape"] == [40, 46]
+    assert len(d["segments"]) > 0
+    assert len(d["segments"][0]) == 6            # x0,y0,x1,y1,r,kind
+    assert {s[5] for s in d["segments"]} == {0, 1}   # artery + vein
+
+
+def test_explore_optimize_improves(client):
+    o = client.post("/explore/optimize", json={"kind": "flux_std", "method": "local",
+                                               "maxiter": 6, "nx": 40, "ny": 46}).json()
+    assert o["best"] <= o["start"] + 1e-9
+    assert o["n_eval"] > 0
+    assert 1.0 <= o["a_gamma"] <= 1.9
+
+
+def test_explorer_page_served(client):
+    assert client.get("/explorer.html").status_code == 200
+    assert client.get("/explorer.js").status_code == 200
+
+
 def test_frontend_is_served(client):
     root = client.get("/")
     assert root.status_code == 200

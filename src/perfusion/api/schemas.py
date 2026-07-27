@@ -96,6 +96,35 @@ class RunRequest(BaseModel):
     rho_c: float = Field(0.0, ge=0)               # direct model: terminal connection radius
 
 
+class ExploreRequest(BaseModel):
+    """A project-independent fractal-tree evaluation for the Tree Explorer.
+
+    Builds an ``optimize.alpha`` vector from these tunables, solves the hybrid
+    model on a coarse grid, and returns a field + the tree geometry + the chosen
+    homogeneity objective.
+    """
+
+    a_gamma: float = Field(1.4, ge=1.0, le=1.9)          # arterial branching asymmetry
+    v_gamma: float = Field(1.2, ge=1.0, le=1.9)          # venous branching asymmetry
+    length_to_radius: float = Field(10.0, ge=4.0, le=18.0)
+    exponent: float = Field(2.8, ge=2.0, le=3.5)         # Murray bifurcation exponent
+    rv_scale: float = Field(1.2, ge=0.8, le=1.8)         # venous radius scale
+    kind: str = "tof_std"                                # objective (flux_*/tof_*)
+    field: str = "flux"                                  # field to render (pressure/flux/tof)
+    nx: int = Field(60, ge=20, le=140)
+    ny: int = Field(70, ge=20, le=160)
+
+
+class ExploreOptimizeRequest(BaseModel):
+    """Optimise the tree for homogeneity (Tree Explorer 'Optimise' button)."""
+
+    kind: str = "tof_std"
+    method: str = "local"                                # "local" | "global"
+    maxiter: int = Field(15, ge=1, le=60)
+    nx: int = Field(50, ge=20, le=120)
+    ny: int = Field(58, ge=20, le=140)
+
+
 class GrowRequest(BaseModel):
     """Grow the arterial tree into the tissue.
 

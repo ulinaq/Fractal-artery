@@ -381,6 +381,9 @@ a research project. Each notes where it lands in the tree.
 - ✅ **Optimisation driver** (`optimize.optimize_tree`) — minimise flux-/TOF-homogeneity
   over the tree's branching asymmetries (Nelder-Mead or differential evolution); MCP
   `optimize_tree_config` tool.
+- ✅ **Tree Explorer** page (`explorer.html`, `POST /explore` + `/explore/optimize`) —
+  interactive fractal-tree parameter sliders with a live field/tree render and a
+  one-click optimiser; reachable from the workspace topbar.
 - ✅ **Tracer-kinetic fitting** wired to the tracer — AIF stored with the tracer,
   `GET /projects/{id}/kinetics` fits a TKM to the tissue curve, result-view card
   (measured vs fitted curve + Fp/vp/PS/ve), MCP `fit_tracer_kinetics` tool.
