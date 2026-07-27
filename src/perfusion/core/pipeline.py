@@ -127,7 +127,8 @@ def run_hybrid(prm: Parameters, grid: Grid,
                strict_domain: bool = False,
                art: Network | None = None, ven: Network | None = None,
                art_inlets=None, ven_outlets=None,
-               max_iter: int = 100, tol: float = 1e-10) -> HybridResult:
+               max_iter: int = 100, tol: float = 1e-10,
+               phase_separation: bool = False) -> HybridResult:
     """Build trees (or use the given ones), couple to Darcy, solve, post-process.
 
     Pass ``art``/``ven`` to use pre-built networks -- e.g. segmented from images
@@ -154,12 +155,29 @@ def run_hybrid(prm: Parameters, grid: Grid,
     response, field_response, sources = darcy.terminal_response(grid, terminal_cells, eps)
 
     # Per-segment viscosity (radius-dependent when Fahraeus-Lindqvist is enabled).
-    viscosity = (_segment_viscosity(art, prm), _segment_viscosity(ven, prm))
-    if nonlinear:
-        sol = network.solve_nonlinear(art, ven, response, prm.p_in, prm.p_out, prm, viscosity,
-                                      max_iter=max_iter, tol=tol)
+    def _solve(visc):
+        if nonlinear:
+            return network.solve_nonlinear(art, ven, response, prm.p_in, prm.p_out, prm, visc,
+                                           max_iter=max_iter, tol=tol)
+        return network.solve_linear(art, ven, response, prm.p_in, prm.p_out, visc)
+
+    mu_ven = _segment_viscosity(ven, prm)
+    if phase_separation and prm.fahraeus_lindqvist:
+        # Couple RBC phase separation to viscosity: iterate arterial hematocrit
+        # (Pries skimming) <-> Fahraeus-Lindqvist viscosity until it converges.
+        from .hematocrit import segment_hematocrit
+
+        d_art = 2.0 * art.seg_radius * prm.radius_to_um
+        hd = np.full(art.n_segments, prm.hematocrit)
+        for _ in range(max(1, max_iter)):
+            sol = _solve((apparent_viscosity(d_art, hd, prm.mu), mu_ven))
+            hd_new = segment_hematocrit(art, np.abs(sol.q_a), prm.hematocrit, prm.radius_to_um)
+            if np.max(np.abs(hd_new - hd)) <= 1e-4:
+                hd = hd_new
+                break
+            hd = hd_new
     else:
-        sol = network.solve_linear(art, ven, response, prm.p_in, prm.p_out, viscosity)
+        sol = _solve((_segment_viscosity(art, prm), mu_ven))
 
     pressure = darcy.reconstruct_field(field_response, sol.terminal_flux, balance=True)
     pressure = pressure.reshape(grid.nx, grid.ny, order="F")
