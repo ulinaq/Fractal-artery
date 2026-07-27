@@ -72,7 +72,17 @@ def test_server_registers_expected_tools():
     server = mcp_server.build_server()
     tools = {t.name for t in asyncio.run(server.list_tools())}
     assert {"run_simulation", "run_sweep", "perfusion_parameter_maps",
-            "direct_transit_metrics", "describe_model"} <= tools
+            "direct_transit_metrics", "oxygen_extraction_map", "describe_model"} <= tools
+
+
+def test_oxygen_extraction_increases_with_rate():
+    import json
+
+    lo = mcp_server.oxygen_extraction(k=0.3, nx=45, ny=52, r_min_frac=0.5)
+    hi = mcp_server.oxygen_extraction(k=3.0, nx=45, ny=52, r_min_frac=0.5)
+    json.dumps(lo)
+    assert 0.0 < lo["oef"] < hi["oef"] < 1.0
+    assert 0.0 <= hi["min_saturation"] <= hi["mean_saturation"] <= 1.0 + 1e-9
 
 
 def test_direct_transit_metrics_sweep_order():

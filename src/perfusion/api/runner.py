@@ -192,6 +192,20 @@ def run_project(store, project, req: RunRequest) -> None:
     store.save_result(project, result, notes=notes or None)
 
 
+def oxygen_field(project, field: str, k: float = 1.0, c_art: float = 1.0,
+                 diffusivity: float = 0.0):
+    """Re-solve the hybrid model and derive an oxygen/solute map (steady
+    advection–reaction–diffusion). Returns ``(array, oef)`` for the requested field
+    (``saturation`` / ``consumption`` / ``concentration``)."""
+    from ..core import oxygen
+
+    result = solve(project, use_vessels=True)
+    ox = oxygen.oxygen_from_result(result, c_art=c_art, k=k, diffusivity=diffusivity)
+    array = {"saturation": ox.saturation, "consumption": ox.extraction_rate,
+             "concentration": ox.concentration}[field]
+    return array, ox.oef
+
+
 def run_network_tracer(store, project, req: TracerRequest) -> None:
     """Direct-model tracer: no grid, so animate the bolus along the vascular network
     using per-element transit times (arterial → connection → venous)."""

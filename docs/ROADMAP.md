@@ -329,7 +329,7 @@ a research project. Each notes where it lands in the tree.
 | Pulsatile / transient flow | cardiac-cycle dynamics via RLC / Windkessel + inertance | new `core/transient.py` | L |
 | ✅ Hematocrit phase-separation at bifurcations (Pries plasma-skimming) | unequal RBC split → per-segment hematocrit & viscosity vary (`core/hematocrit.py`, coupled in `run_hybrid(phase_separation=True)`) | `core/hematocrit.py` + `pipeline` | done |
 | Multi-compartment Darcy (arteriole/capillary/venule beds) | replace the single porous bed with coupled compartments (Hyde–Smith) | `core/darcy` + `pipeline` | L |
-| Oxygen / solute transport + extraction | advection–diffusion–reaction on the Darcy field coupled to vessels (Krogh) | extend `core/transport.py` | M–L |
+| ✅ Oxygen / solute transport + extraction | steady advection–reaction(–diffusion) of a blood-borne solute (`core/oxygen.py`): delivery at feeds, first-order tissue uptake at Damköhler rate k, venous washout → saturation / uptake maps + global OEF | `core/oxygen.py` | done |
 | Heterogeneous / anisotropic permeability | per-cell `K(x)` (or tensor) instead of a scalar | `Grid.permeability` → field; harmonic-mean transmissibilities | M |
 | Structural adaptation / autoregulation (Pries–Secomb) | radii evolve toward a wall-shear/metabolic set-point → emergent networks | iterate `growth` + solve | L |
 | Poroelasticity (Biot) | tissue deformation ↔ perfusion coupling | new module | XL |
@@ -419,3 +419,17 @@ a research project. Each notes where it lands in the tree.
   returns the cycle + inlet-vs-tissue pulsatility (damping), a result-view chart,
   and the MCP `pulsatile_windkessel` tool. Default `perfusion-api` port is now 8010
   (`PERFUSION_PORT` to override).
+- ✅ **Voxel-wise perfusion maps** (`core/tkm.py`) — semi-quantitative (max-slope Fp,
+  AUC blood volume) and residue-**deconvolution** (truncated-SVD Fp/CBV/MTT) maps from
+  the tracer; `GET /projects/{id}/kinetics/maps?method=&field=`, TKM-card buttons + SVD
+  toggle, MCP `perfusion_parameter_maps`.
+- ✅ **Network-transit kinetics for the direct model** (`core/network_transit.py`) — bolus
+  timed along the vasculature (τ = volume/flow, pressure-ordered loop-robust sweep);
+  `POST /tracer` on a direct result → `GET /projects/{id}/network-tracer`, the ▶ Tracer
+  button animates the bolus over the vessels, MCP `direct_transit_metrics`.
+- ✅ **Oxygen / solute transport + extraction** (`core/oxygen.py`) — steady
+  advection–reaction(–diffusion) of a blood-borne solute: arterial delivery, first-order
+  tissue uptake at dimensionless Damköhler rate k, venous washout; a non-singular
+  M-matrix solve (C ≥ 0, mass-conservative). Global OEF sits below the well-mixed Kety
+  limit 1−e^{−k} exactly as transit heterogeneity predicts. `GET /projects/{id}/oxygen`
+  (saturation / uptake maps + OEF), an Oxygen result card, MCP `oxygen_extraction_map`.

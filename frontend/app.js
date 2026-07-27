@@ -11,8 +11,9 @@ import {
   moveNode, onEditRadius, revertEdits, saveEdits, syncEditPanel, toggleAddMode,
 } from "./edit.js";
 import {
-  computeFlow, fitKinetics, grow, loadField, loadKineticMap, loadNetwork, loadResultView,
-  pauseFlow, run, runTransient, stopFlow, stopTimer, syncFlowUI, toggleFlowPlay,
+  computeFlow, fitKinetics, grow, loadField, loadKineticMap, loadNetwork, loadOxygen,
+  loadResultView, pauseFlow, run, runTransient, stopFlow, stopTimer, syncFlowUI,
+  toggleFlowPlay,
 } from "./run.js";
 
 // ── undo / redo (workspace geometry history) ───────────────────────────────────
@@ -490,6 +491,8 @@ $("btn-map-fp").addEventListener("click", guarded(() => loadKineticMap("Fp", map
 $("btn-map-vp").addEventListener("click",
   guarded(() => loadKineticMap(mapMethod() === "deconv" ? "CBV" : "vp", mapMethod())));
 $("btn-map-mtt").addEventListener("click", guarded(() => loadKineticMap("MTT", "deconv")));
+$("btn-o2-sat").addEventListener("click", guarded(() => loadOxygen("saturation")));
+$("btn-o2-cons").addEventListener("click", guarded(() => loadOxygen("consumption")));
 $("tkm-model").addEventListener("change", () => { if (state.tracer) fitKinetics().catch(() => {}); });
 $("flow-play").addEventListener("click", toggleFlowPlay);
 $("flow-scrub").addEventListener("input", (e) => {
