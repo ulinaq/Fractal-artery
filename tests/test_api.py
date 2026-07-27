@@ -364,6 +364,27 @@ def test_direct_connection_model_runs_and_renders(client):
     assert client.get(f"/projects/{pid}/results/field/pressure").status_code in (404, 409)
 
 
+def test_direct_network_tracer(client):
+    pid = client.post("/projects", json={"name": "nettracer", "params": {"p_in": 40, "p_out": 0},
+                                         "grid": SMALL_GRID}).json()["id"]
+    jid = client.post(f"/projects/{pid}/run", json={"model": "direct", "rho_c": 0}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    # no network tracer until we ask for one
+    assert client.get(f"/projects/{pid}/network-tracer").status_code == 409
+    jid = client.post(f"/projects/{pid}/tracer", json={"n_frames": 20}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    t = client.get(f"/projects/{pid}/network-tracer").json()
+    assert t["n_frames"] == 20
+    n_elem = len(t["lines"])
+    assert n_elem > 0
+    assert len(t["frames"]) == 20
+    assert all(len(f) == n_elem for f in t["frames"])
+    assert set(t["kind"]) <= {0, 1, 2}
+    assert all(len(ln) == 4 for ln in t["lines"][:3])          # [x0,y0,x1,y1]
+    # the bolus lights up at least some elements
+    assert max(max(f) for f in t["frames"]) > 0.5
+
+
 def test_run_zero_pressure_drop_gives_clear_error(client):
     pid = client.post("/projects", json={"name": "flat", "grid": SMALL_GRID,
                                          "params": {"p_in": 5, "p_out": 5}}).json()["id"]

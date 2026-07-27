@@ -332,8 +332,8 @@ export function setMode(mode) {
   $("mode-result").classList.toggle("active", mode === "result");
   const fieldResult = mode === "result" && state.resultModel !== "direct";
   $("field-picker").classList.toggle("show", fieldResult);   // direct has no field to pick
-  $("flowbar").classList.toggle("show", fieldResult);        // ...or tracer through
-  $("colorbar").hidden = !fieldResult;
+  $("flowbar").classList.toggle("show", mode === "result");  // tracer: field (hybrid) or network (direct)
+  $("colorbar").hidden = !fieldResult;                       // network animation unhides it on demand
   // show only the tool card(s) for the active mode (Project/Parameters/Run stay)
   document.querySelectorAll(".card[data-mode]").forEach((c) => {
     c.style.display = c.dataset.mode === mode ? "" : "none";

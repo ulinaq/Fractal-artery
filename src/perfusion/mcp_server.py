@@ -179,6 +179,41 @@ def perfusion_maps(nx: int = 70, ny: int = 80, n_frames: int = 24,
     return out
 
 
+def direct_transit(rho_c: float = 0.0, p_in: float = 10.0, p_out: float = 0.0,
+                   r_min_frac: float = 0.15) -> dict:
+    """Network-transit kinetics for the direct-connection model (Paper C).
+
+    Solves the direct model on the fractal trees and times a bolus along the
+    vasculature (``τ = volume/|flow|`` accumulated arterial → connection → venous).
+    Returns transit-time statistics: mean arrival by element class and the overall
+    mean transit time (MTT) to the venous outlet."""
+    from .core import network_transit as nt
+    from .core.direct import connect_terminals, solve_direct
+    from .core.geometry import arterial_tree, venous_tree
+
+    prm = Parameters(p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+    art, ven = arterial_tree(prm), venous_tree(prm)
+    conns = connect_terminals(art, ven, rho_c=float(rho_c), viscosity=prm.mu)
+    sol = solve_direct(art, ven, conns, prm.p_in, prm.p_out, viscosity=prm.mu)
+    anim = nt.transit_animation(art, ven, conns, sol, n_frames=2)
+    arr, kind = anim["arrivals"], anim["kind"]
+    t_ven = nt.arrival_times(art, ven, conns, sol)[1]
+
+    def mean_arr(sel):
+        a = arr[sel & np.isfinite(arr)]
+        return float(a.mean()) if a.size else None
+
+    outlets = np.array([int(n) for n in ven.inlet_nodes])
+    mtt = t_ven[outlets]
+    mtt = mtt[np.isfinite(mtt)]
+    return {"n_connections": len(conns),
+            "reachable_fraction": float(np.mean(np.isfinite(arr))),
+            "mean_arrival_arterial": mean_arr(kind == 0),
+            "mean_arrival_connection": mean_arr(kind == 2),
+            "mean_arrival_venous": mean_arr(kind == 1),
+            "mtt_to_outlet": float(mtt.mean()) if mtt.size else None}
+
+
 def model_info() -> dict:
     """Describe what the perfusion model computes and the fields it returns."""
     return {
@@ -269,6 +304,16 @@ def build_server():
         Each call is a full hybrid solve + transport — keep the grid coarse."""
         return perfusion_maps(nx=nx, ny=ny, n_frames=n_frames, p_in=p_in, p_out=p_out,
                               r_min_frac=r_min_frac, method=method, oi=oi)
+
+    @server.tool()
+    def direct_transit_metrics(rho_c: float = 0.0, p_in: float = 10.0, p_out: float = 0.0,
+                               r_min_frac: float = 0.15) -> dict:
+        """Network-transit kinetics for the direct-connection model: solve it on the
+        fractal trees and time a bolus along the vasculature (transit time =
+        volume/flow, accumulated arterial -> capillary connection -> venous).
+        Returns the mean bolus arrival time by element class and the overall mean
+        transit time to the venous outlet. `rho_c` is the connection search radius."""
+        return direct_transit(rho_c=rho_c, p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
 
     @server.tool()
     def describe_model() -> dict:

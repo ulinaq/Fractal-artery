@@ -351,8 +351,14 @@ a research project. Each notes where it lands in the tree.
 
 ## 9.4 Tracer kinetics & perfusion analysis
 
-- **Network-transit kinetics for the direct model** — per-connection transit time → a bolus
-  animation for the field-less direct model.
+- ✅ **Network-transit kinetics for the direct model** — `core/network_transit.py` times a
+  bolus along the vasculature (`τ = volume/|flow|` per element, accumulated arterial →
+  capillary connection → venous via a pressure-ordered, loop-robust sweep from the inlet)
+  and produces a per-element animation. The field-less direct model now animates the bolus
+  on the network: `POST /tracer` on a direct result runs `run_network_tracer`,
+  `GET …/network-tracer` serves the element lines + concentration frames, and the ▶ Tracer
+  button sweeps the viridis bolus across the vessels (MCP `direct_transit_metrics` reports
+  the transit statistics).
 - ✅ **DCE/DSC-MRI tracer-kinetic fitting** — `core/tkm.py` fits MS/1CM/2CUM/2CXM
   (`Fp, vp, PS, ve`); now wired to the app: the tracer stores its AIF, and
   `GET /projects/{id}/kinetics` fits the model to the tissue curve (result-view card +

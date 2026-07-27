@@ -192,8 +192,24 @@ def run_project(store, project, req: RunRequest) -> None:
     store.save_result(project, result, notes=notes or None)
 
 
+def run_network_tracer(store, project, req: TracerRequest) -> None:
+    """Direct-model tracer: no grid, so animate the bolus along the vascular network
+    using per-element transit times (arterial → connection → venous)."""
+    from ..core import network_transit as nt
+
+    art, ven, sol = solve_direct_model(project, use_vessels=True)
+    anim = nt.transit_animation(art, ven, sol.connections, sol, n_frames=req.n_frames)
+    store.save_network_tracer(project, **anim)
+
+
 def run_tracer(store, project, req: TracerRequest) -> None:
-    """Solve the flow, advect a contrast bolus, and persist the animation frames."""
+    """Solve the flow, advect a contrast bolus, and persist the animation frames.
+
+    The direct-connection model has no Darcy field, so it animates the bolus along
+    the network (:func:`run_network_tracer`) instead of advecting it on the grid."""
+    if store._direct_path(project.id).exists():
+        run_network_tracer(store, project, req)
+        return
     result = solve(project, use_vessels=True)
 
     # Time-scale from a characteristic transit time; long tail so the animation

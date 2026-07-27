@@ -260,6 +260,24 @@ def direct_result(pid: str, project: Project = Depends(get_project),
     }
 
 
+@router.get("/projects/{pid}/network-tracer")
+def network_tracer(pid: str, project: Project = Depends(get_project),
+                   store: ProjectStore = Depends(get_store)) -> dict:
+    """Direct-model bolus animation: each vascular element ``[x0,y0,x1,y1]`` with a
+    per-frame concentration (0 arterial / 1 venous / 2 connection), computed from
+    network transit times. POST /tracer on a direct result produces it."""
+    if not store._nettracer_path(pid).exists():
+        raise HTTPException(409, "no network tracer; run the direct model then POST /tracer")
+    d = store.load_network_tracer(pid)
+    return {
+        "id": pid, "n_frames": int(d["frames"].shape[0]),
+        "lines": d["lines"].tolist(), "kind": d["kind"].astype(int).tolist(),
+        "frames": d["frames"].astype(float).tolist(), "times": d["times"].tolist(),
+        "arrivals": np.where(np.isfinite(d["arrivals"]), d["arrivals"], None).tolist(),
+        "vmax": float(d["vmax"]),
+    }
+
+
 @router.get("/projects/{pid}/view3d")
 def project_view3d(pid: str, project: Project = Depends(get_project),
                    store: ProjectStore = Depends(get_store)) -> dict:
