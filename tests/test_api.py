@@ -738,6 +738,26 @@ def test_kinetic_maps_endpoint(client):
                       params={"field": "Fp", "method": "bogus"}).status_code == 404
 
 
+def test_oxygen_endpoint(client):
+    pid = client.post("/projects", json={"name": "o2", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    assert client.get(f"/projects/{pid}/oxygen").status_code == 409   # no result yet
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    sat = client.get(f"/projects/{pid}/oxygen", params={"field": "saturation", "k": 1.0}).json()
+    assert sat["name"] == "saturation"
+    assert tuple(sat["shape"]) == (SMALL_GRID["nx"], SMALL_GRID["ny"])
+    assert 0.0 < sat["oef"] < 1.0
+    vals = [v for row in sat["data"] for v in row if v is not None]
+    assert vals
+    assert max(vals) <= 1.0 + 1e-9
+    assert min(vals) >= 0.0
+    # more extraction with larger k
+    hi = client.get(f"/projects/{pid}/oxygen", params={"field": "saturation", "k": 5.0}).json()
+    assert hi["oef"] > sat["oef"]
+    assert client.get(f"/projects/{pid}/oxygen", params={"field": "nope"}).status_code == 404
+
+
 def test_transit_409_without_field_result(client):
     pid = client.post("/projects", json={"name": "d", "params": {"p_in": 40, "p_out": 0},
                                          "grid": SMALL_GRID}).json()["id"]

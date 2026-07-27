@@ -214,6 +214,27 @@ def direct_transit(rho_c: float = 0.0, p_in: float = 10.0, p_out: float = 0.0,
             "mtt_to_outlet": float(mtt.mean()) if mtt.size else None}
 
 
+def oxygen_extraction(k: float = 1.0, diffusivity: float = 0.0, c_art: float = 1.0,
+                      nx: int = 90, ny: int = 110, p_in: float = 10.0, p_out: float = 0.0,
+                      r_min_frac: float = 0.15) -> dict:
+    """Steady oxygen / solute extraction on the Darcy field (Krogh/Kety).
+
+    Runs the hybrid model, delivers a blood-borne solute at the feeds and consumes
+    it in tissue at dimensionless Damköhler rate ``k``. Returns the global oxygen
+    extraction fraction (OEF) and mean tissue saturation. ``k`` sets extraction vs.
+    perfusion: OEF ≈ 1−e^{−k} in the well-mixed limit, lower with transit heterogeneity."""
+    from .core import oxygen
+
+    nx, ny = int(np.clip(nx, 30, 200)), int(np.clip(ny, 30, 200))
+    prm = Parameters(p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+    grid = Grid(nx=nx, ny=ny, lx=_LX, ly=_LY)
+    result = run_hybrid(prm, grid, domain_limit=_DOMAIN)
+    ox = oxygen.oxygen_from_result(result, c_art=c_art, k=k, diffusivity=diffusivity)
+    sat = ox.saturation
+    return {"k": k, "oef": ox.oef, "delivery": ox.delivery, "consumption": ox.consumption,
+            "mean_saturation": float(np.nanmean(sat)), "min_saturation": float(np.nanmin(sat))}
+
+
 def model_info() -> dict:
     """Describe what the perfusion model computes and the fields it returns."""
     return {
@@ -314,6 +335,18 @@ def build_server():
         Returns the mean bolus arrival time by element class and the overall mean
         transit time to the venous outlet. `rho_c` is the connection search radius."""
         return direct_transit(rho_c=rho_c, p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+
+    @server.tool()
+    def oxygen_extraction_map(k: float = 1.0, diffusivity: float = 0.0, c_art: float = 1.0,
+                              nx: int = 90, ny: int = 110, p_in: float = 10.0,
+                              p_out: float = 0.0, r_min_frac: float = 0.15) -> dict:
+        """Steady oxygen / solute extraction (Krogh/Kety) on the hybrid Darcy field:
+        deliver a blood-borne solute at the feeds, consume it in tissue at
+        dimensionless Damköhler rate `k`, and report the global oxygen-extraction
+        fraction (OEF) + mean/min tissue saturation. `diffusivity` adds tissue
+        diffusion. Each call is a full hybrid solve — keep the grid coarse."""
+        return oxygen_extraction(k=k, diffusivity=diffusivity, c_art=c_art, nx=nx, ny=ny,
+                                 p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
 
     @server.tool()
     def describe_model() -> dict:

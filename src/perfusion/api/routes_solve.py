@@ -192,6 +192,31 @@ def kinetic_map(pid: str, field: str = "Fp", method: str = "semi",
     return FieldResponse(name=field, shape=m.shape, data=data.tolist())
 
 
+_OXYGEN_FIELDS = ("saturation", "consumption", "concentration")
+
+
+@router.get("/projects/{pid}/oxygen")
+def oxygen_map(pid: str, field: str = "saturation", k: float = 1.0, c_art: float = 1.0,
+               diffusivity: float = 0.0, project: Project = Depends(get_project),
+               store: ProjectStore = Depends(get_store)) -> dict:
+    """Steady oxygen / solute map on the Darcy field (Krogh-style advection–reaction).
+
+    ``field`` in ``saturation`` (C/c_art, ≈1 near feeds → 0 downstream),
+    ``consumption`` (local uptake k·C) or ``concentration``. ``k`` is the
+    dimensionless Damköhler number (extraction rate relative to perfusion; the global
+    OEF ≈ 1−e^{−k} in the well-mixed limit, lower with transit heterogeneity).
+    ``diffusivity`` adds tissue diffusion. Hybrid model only — re-solves the field."""
+    if not store.result_path(pid).exists():
+        raise HTTPException(409, "no field result; the direct-connection model has no grid "
+                            "field" if project.has_result else "no result yet; run first")
+    if field not in _OXYGEN_FIELDS:
+        raise HTTPException(404, f"field must be one of {_OXYGEN_FIELDS}")
+    array, oef = runner.oxygen_field(project, field, k=k, c_art=c_art, diffusivity=diffusivity)
+    data = np.where(np.isfinite(array), array, None)
+    return {"name": field, "shape": list(array.shape), "data": data.tolist(),
+            "oef": oef, "k": k}
+
+
 @router.get("/projects/{pid}/transient")
 def transient_response(pid: str, period: float = 1.0, pulse: float = 0.5,
                        compliance: float = 0.02, cycles: int = 4, proximal: float = 0.1,

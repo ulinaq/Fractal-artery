@@ -196,6 +196,22 @@
         <p class="muted" id="tr-info"></p>
       </details>
 
+      <details class="card" data-mode="result">
+        <summary>Oxygen / solute extraction</summary>
+        <p class="muted">Steady advection–reaction transport of a blood-borne solute
+          (Krogh/Kety). Blood delivers it at the feeds; tissue consumes it at
+          Damköhler rate k. Shown on the main canvas.</p>
+        <div class="grid2">
+          <label>k (Damköhler) <input id="o2-k" type="number" value="1.0" step="0.25" min="0.05" /></label>
+          <label>diffusivity <input id="o2-diff" type="number" value="0" step="0.25" min="0" /></label>
+        </div>
+        <div class="row">
+          <button id="btn-o2-sat" title="C / c_art — fraction of arterial level remaining">O₂ saturation</button>
+          <button id="btn-o2-cons" title="k·C — local tissue uptake">O₂ uptake</button>
+        </div>
+        <p class="muted" id="o2-info"></p>
+      </details>
+
       <section class="card run-card">
         <label>model
           <select id="run-model">

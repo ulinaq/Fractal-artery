@@ -185,6 +185,26 @@ export async function loadKineticMap(which, method = "semi") {
   status(`${which} map${method === "deconv" ? " (deconv)" : ""}`, "ok");
 }
 
+// steady oxygen/solute map (saturation or uptake) rendered on the main heatmap
+export async function loadOxygen(which) {
+  requireProject();
+  if (state.resultModel !== "hybrid") { status("oxygen needs a hybrid result", "err"); return; }
+  const k = numOf("o2-k"), diff = numOf("o2-diff");
+  const q = `field=${which}&k=${k}&diffusivity=${diff}`;
+  $("o2-info").textContent = "solving oxygen transport…";
+  let f;
+  try { f = await api("GET", `/projects/${state.project}/oxygen?${q}`); }
+  catch (e) { status(e.message, "err"); $("o2-info").textContent = e.message; return; }
+  let vmin = Infinity, vmax = -Infinity;
+  for (const row of f.data) for (const v of row) if (v !== null) { if (v < vmin) vmin = v; if (v > vmax) vmax = v; }
+  stopFlow();
+  state.fieldData = { ...f, vmin, vmax };
+  state.field = which === "saturation" ? "O₂ saturation" : "O₂ uptake (k·C)";
+  redraw();
+  $("o2-info").textContent = `global OEF = ${(f.oef * 100).toFixed(1)}%  (k=${f.k})`;
+  status(`O₂ ${which}`, "ok");
+}
+
 function drawTKM(el, d) {
   const ctx = el.getContext("2d"), W = el.width, H = el.height;
   ctx.clearRect(0, 0, W, H);
