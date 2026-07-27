@@ -85,3 +85,42 @@ def test_kinetic_maps_perfusion_and_mask():
     assert m["Fp"].shape == (nx, ny)
     assert m["Fp"][0, 0] > m["Fp"][1, 0]        # higher flow -> higher max-slope Fp
     assert np.isnan(m["Fp"][2, 1])              # inactive voxel masked out
+
+
+def test_deconvolution_recovers_flow_and_transit_time():
+    import numpy as np
+
+    from perfusion.core.tkm import (
+        deconvolution_maps,
+        deconvolve,
+        gamma_variate_aif,
+        one_compartment,
+    )
+
+    # well-resolved system (~40 samples per MTT) so the SVD is accurate
+    t = np.linspace(0, 40, 800)
+    ca = gamma_variate_aif(t, t0=2.0, A=3.0, B=2.0)
+    ca = ca / ca.max()
+    Fp_true, mtt_true = 0.5, 2.0
+    curve = one_compartment(t, ca, Fp=Fp_true, vp=Fp_true * mtt_true)
+
+    k = deconvolve(t, ca, curve, oi=0.01).ravel()
+    fp = k.max()
+    cbv = np.trapezoid(k, t)
+    mtt = cbv / fp
+    assert abs(fp - Fp_true) / Fp_true < 0.15         # residue peak ~ Fp
+    assert abs(mtt - mtt_true) / mtt_true < 0.2       # central-volume theorem
+    assert abs(cbv - Fp_true * mtt_true) / (Fp_true * mtt_true) < 0.1
+
+    # map form: higher-flow voxel maps to higher Fp; masked voxel is NaN
+    nx, ny = 3, 2
+    frames = np.zeros((len(t), nx, ny))
+    frames[:, 0, 0] = one_compartment(t, ca, Fp=0.8, vp=0.8 * mtt_true)
+    frames[:, 1, 0] = one_compartment(t, ca, Fp=0.3, vp=0.3 * mtt_true)
+    mask = np.ones((nx, ny), bool)
+    mask[2, 1] = False
+    m = deconvolution_maps(frames, t, ca, mask=mask, oi=0.01)
+    assert set(m) == {"Fp", "CBV", "MTT"}
+    assert m["Fp"][0, 0] > m["Fp"][1, 0]
+    assert np.isnan(m["Fp"][2, 1])
+    assert np.isnan(m["MTT"][2, 1])

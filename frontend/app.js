@@ -485,8 +485,11 @@ document.querySelectorAll(".field").forEach((b) => b.addEventListener("click", (
 $("btn-flow").addEventListener("click", guarded(computeFlow));
 $("btn-tkm").addEventListener("click", guarded(fitKinetics));
 $("btn-transient").addEventListener("click", guarded(runTransient));
-$("btn-map-fp").addEventListener("click", guarded(() => loadKineticMap("Fp")));
-$("btn-map-vp").addEventListener("click", guarded(() => loadKineticMap("vp")));
+const mapMethod = () => ($("map-deconv").checked ? "deconv" : "semi");
+$("btn-map-fp").addEventListener("click", guarded(() => loadKineticMap("Fp", mapMethod())));
+$("btn-map-vp").addEventListener("click",
+  guarded(() => loadKineticMap(mapMethod() === "deconv" ? "CBV" : "vp", mapMethod())));
+$("btn-map-mtt").addEventListener("click", guarded(() => loadKineticMap("MTT", "deconv")));
 $("tkm-model").addEventListener("change", () => { if (state.tracer) fitKinetics().catch(() => {}); });
 $("flow-play").addEventListener("click", toggleFlowPlay);
 $("flow-scrub").addEventListener("input", (e) => {

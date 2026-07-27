@@ -361,8 +361,16 @@ a research project. Each notes where it lands in the tree.
   the tracer time-series into per-voxel **Fp** (max-slope `maxₜ dC/dt / max(Cₐ)`) and
   **vp/blood-volume** (AUC ratio `∫C/∫Cₐ`) maps, NaN on inactive voxels;
   `GET /projects/{id}/kinetics/maps?field=Fp|vp` returns the field and the TKM card's
-  **Fp map / BV map** buttons render it on the main heatmap. *(Next: model-based
-  voxel fitting + deconvolution residue maps.)*
+  **Fp map / BV map** buttons render it on the main heatmap.
+- ✅ **Residue-deconvolution maps** — `tkm.deconvolve` (truncated-SVD, Østergaard) and
+  `tkm.deconvolution_maps` recover the flow-scaled residue `k = Fp·R` per voxel and read
+  off **Fp** (residue peak), **CBV** (∫k) and **MTT** (CBV/Fp) via the central-volume
+  theorem. Exposed as `GET …/kinetics/maps?method=deconv&field=Fp|CBV|MTT` (+`oi`), a
+  **SVD deconvolution** toggle / **MTT map** button in the TKM card, and the MCP
+  `perfusion_parameter_maps(method="deconv")` tool. Validated to ~15 % on a well-sampled
+  synthetic 1CM curve; absolute accuracy needs the transit time well-resolved (more
+  `n_frames`), while relative rCBF/rCBV/rMTT are robust — the clinical norm. *(Next:
+  block-circulant oSVD for delay-insensitivity; per-voxel model fitting.)*
 - **Transit-time distributions & CTH** → MTT, CTH and oxygen-extraction limits
   (Jespersen–Østergaard). Reuses `core/timeofflight`. *(Started — see 9.6.)*
 
