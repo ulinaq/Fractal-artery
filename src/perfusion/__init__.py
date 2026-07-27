@@ -28,6 +28,7 @@ from .core import (
     geometry,
     network,
     parameters,
+    perfusion_metrics,
     pipeline,
     pipeline3d,
     timeofflight,
@@ -38,6 +39,7 @@ from .core import (
 from .core.darcy import Grid
 from .core.geometry import Network, arterial_tree, grow_tree_3d, venous_tree
 from .core.parameters import Parameters
+from .core.perfusion_metrics import transit_metrics
 from .core.pipeline import HybridResult, run_hybrid
 from .core.pipeline3d import HybridResult3D, run_hybrid_3d
 
@@ -58,12 +60,14 @@ __all__ = [
     "growth",
     "network",
     "parameters",
+    "perfusion_metrics",
     "pipeline",
     "pipeline3d",
     "run_hybrid",
     "run_hybrid_3d",
     "timeofflight",
     "tkm",
+    "transit_metrics",
     "transport",
     "venous_tree",
     "viscosity",

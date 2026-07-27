@@ -313,3 +313,65 @@ imports move to `perfusion.core.*`.
 
 Each step is independently useful and testable; the API contract lets the
 front-end be built in parallel.
+
+# 9. Research & algorithm backlog
+
+Directions to grow the science and the platform, roughly ordered by value ÷ effort
+within each group. Effort: **S** ≲ a day, **M** a few days, **L** a week+, **XL**
+a research project. Each notes where it lands in the tree.
+
+## 9.1 Physics & modelling
+
+| Idea | What it adds | Lands in | Effort |
+|---|---|---|---|
+| **Transit-time distribution & CTH** *(in progress — see 9.6)* | turn the TOF field into MTT, capillary transit-time heterogeneity (σ) and an oxygen-extraction estimate | `core/perfusion_metrics.py` | S |
+| Vessel-wall elasticity (thesis Eq. 4.9) | pressure-dependent radii; step toward pulsatile flow | `core/network.solve_nonlinear` (hook already there) | M |
+| Pulsatile / transient flow | cardiac-cycle dynamics via RLC / Windkessel + inertance | new `core/transient.py` | L |
+| Hematocrit phase-separation at bifurcations (Pries plasma-skimming) | unequal RBC split → local viscosity varies; beyond radius-only Fåhræus–Lindqvist | `core/network` + `geometry` | M–L |
+| Multi-compartment Darcy (arteriole/capillary/venule beds) | replace the single porous bed with coupled compartments (Hyde–Smith) | `core/darcy` + `pipeline` | L |
+| Oxygen / solute transport + extraction | advection–diffusion–reaction on the Darcy field coupled to vessels (Krogh) | extend `core/transport.py` | M–L |
+| Heterogeneous / anisotropic permeability | per-cell `K(x)` (or tensor) instead of a scalar | `Grid.permeability` → field; harmonic-mean transmissibilities | M |
+| Structural adaptation / autoregulation (Pries–Secomb) | radii evolve toward a wall-shear/metabolic set-point → emergent networks | iterate `growth` + solve | L |
+| Poroelasticity (Biot) | tissue deformation ↔ perfusion coupling | new module | XL |
+
+## 9.2 Numerics & solvers
+
+- **Newton with analytic Jacobian** for the nonlinear solve (vs. the current fixed-point) — M.
+- **AMG preconditioning** (pyamg) for the Darcy TPFA system; scales the 3-D solve — M.
+- **MPFA-O flux** for anisotropic / non-K-orthogonal media (TPFA is inconsistent there) — M.
+- **GPU / matrix-free** (cupy) for `darcy3d` on large grids — L.
+- **Uncertainty quantification** (Monte-Carlo / polynomial chaos over parameters) — M.
+
+## 9.3 Growth & geometry
+
+- 3-D CCO and staged/optimised CCO (bifurcation-angle & Murray-exponent optimisation).
+- Loopy venous networks / anastomoses (growth is tree-only today; veins are cyclic).
+- Data-constrained growth (match a measured perfusion-density map or Strahler-order stats).
+- Domain-aware growth (respect organ sub-regions / obstacles).
+
+## 9.4 Tracer kinetics & perfusion analysis
+
+- **Network-transit kinetics for the direct model** — per-connection transit time → a bolus
+  animation for the field-less direct model.
+- **DCE/DSC-MRI forward + inverse model** — convolve an AIF with the tissue residue function;
+  fit `Fp, vp, PS, ve` (extended Tofts, 2-compartment exchange). `core/tkm.py` already
+  round-trips `(Fp, vp)`; extend it to fitting/deconvolution.
+- **Transit-time distributions & CTH** → MTT, CTH and oxygen-extraction limits
+  (Jespersen–Østergaard). Reuses `core/timeofflight`. *(Started — see 9.6.)*
+
+## 9.5 Optimisation, inverse problems, platform
+
+- **Optimisation driver** over `optimize.objective` (Paper D flux-vs-TOF) with
+  `scipy.optimize` / particle-swarm.
+- Calibration / parameter estimation to data; inverse recovery of boundary pressures or
+  permeability from a perfusion map; adjoint gradients.
+- **Frontend automated tests** (Playwright) — codify the CDP smoke flow for CI.
+- Property-based conservation tests (hypothesis); run-comparison view; parameter-sweep UI;
+  units safety (pint); network VTK `.vtp` export; benchmark harness (asv).
+
+## 9.6 In progress
+
+- **Transit-time distribution & CTH** (`core/perfusion_metrics.py`): MTT, CTH (σ of the
+  transit-time distribution), relative dispersion RD = CTH/MTT, and a Kety-model oxygen
+  extraction fraction over the empirical distribution — surfaced in the result summary,
+  a `GET /projects/{id}/transit` endpoint (histogram), and the MCP `simulate` output.
