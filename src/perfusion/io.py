@@ -66,10 +66,14 @@ def load_synthetic_perfusion(path: str | Path | None = None) -> dict:
 
 def results_summary(result: HybridResult) -> dict:
     """JSON-serialisable scalar summary of a hybrid simulation result."""
+    from .core.perfusion_metrics import transit_metrics
+
     art, ven, sol = result.art, result.ven, result.solution
     n_art = art.terminal_nodes.size
     tof = result.tof[np.isfinite(result.tof)]
     flux = result.flux[np.isfinite(result.flux)]
+    # flow-weighted transit-time distribution -> MTT, CTH (heterogeneity), RD
+    tm = transit_metrics(result.tof, weights=result.flux)
     return {
         "arterial_nodes": int(art.n_nodes),
         "arterial_segments": int(art.n_segments),
@@ -83,6 +87,9 @@ def results_summary(result: HybridResult) -> dict:
         "flux_std": float(flux.std()) if flux.size else 0.0,
         "tof_mean": float(tof.mean()) if tof.size else 0.0,
         "tof_std": float(tof.std()) if tof.size else 0.0,
+        "mtt": tm.mtt,          # mean transit time (flow-weighted)
+        "cth": tm.cth,          # capillary transit-time heterogeneity (std dev)
+        "rd": tm.rd,            # relative dispersion = cth / mtt
     }
 
 

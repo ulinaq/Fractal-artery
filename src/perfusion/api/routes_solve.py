@@ -77,6 +77,33 @@ def result_field(pid: str, name: str, project: Project = Depends(get_project),
     return FieldResponse(name=name, shape=field.shape, data=data.tolist())
 
 
+@router.get("/projects/{pid}/transit")
+def transit_distribution(pid: str, bins: int = 40, k: float = 1.0,
+                         project: Project = Depends(get_project),
+                         store: ProjectStore = Depends(get_store)) -> dict:
+    """Transit-time distribution of the solved field: MTT, CTH (heterogeneity),
+    relative dispersion, a Kety-model oxygen-extraction fraction, and h(τ)."""
+    from ..core.perfusion_metrics import (
+        oxygen_extraction_fraction,
+        transit_histogram,
+        transit_metrics,
+    )
+
+    if not store.result_path(pid).exists():
+        raise HTTPException(409, "no transit-time field; run the hybrid model first "
+                            "(the direct-connection model has no grid field)")
+    bins = int(np.clip(bins, 5, 200))
+    tof = np.where(store.result_field(pid, "mask"), store.result_field(pid, "tof"), np.nan)
+    flux = store.result_field(pid, "flux")
+    tm = transit_metrics(tof, weights=flux)
+    centres, density = transit_histogram(tof, weights=flux, bins=bins)
+    return {
+        "mtt": tm.mtt, "cth": tm.cth, "rd": tm.rd, "n": tm.n,
+        "oef": oxygen_extraction_fraction(tof, weights=flux, k=k), "k": k,
+        "histogram": {"centres": centres.tolist(), "density": density.tolist()},
+    }
+
+
 @router.get("/projects/{pid}/direct")
 def direct_result(pid: str, project: Project = Depends(get_project),
                   store: ProjectStore = Depends(get_store)) -> dict:

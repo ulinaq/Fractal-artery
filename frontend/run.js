@@ -93,6 +93,7 @@ async function showSummary() {
     ["pressure max", s.pressure_max], ["flux mean", s.flux_mean],
   ];
   if (s.model === "direct") stats.push(["connections", s.n_connections]);
+  if (s.mtt != null) stats.push(["MTT", s.mtt], ["CTH", s.cth], ["RD", s.rd]);   // transit-time metrics
   $("summary").innerHTML = stats
     .map(([k, v]) => `<div class="stat"><b>${fmt(v)}</b><span>${k}</span></div>`).join("");
 }

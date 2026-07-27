@@ -620,6 +620,35 @@ def test_grow_vein_target_and_shape_preserving_base(client):
     assert s["arterial_inflow"] == pytest.approx(s["venous_outflow"], rel=1e-6)
 
 
+def test_transit_metrics_in_summary_and_endpoint(client):
+    pid = client.post("/projects", json={"name": "ttd", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    summary = client.get(f"/projects/{pid}/results").json()
+    for key in ("mtt", "cth", "rd"):
+        assert key in summary
+    assert summary["mtt"] > 0
+    assert summary["rd"] == pytest.approx(summary["cth"] / summary["mtt"], rel=1e-6)
+
+    t = client.get(f"/projects/{pid}/transit", params={"bins": 30}).json()
+    assert t["mtt"] == pytest.approx(summary["mtt"])
+    assert 0.0 <= t["oef"] <= 1.0
+    c = t["histogram"]["centres"]
+    d = t["histogram"]["density"]
+    assert len(c) == len(d) == 30
+    width = c[1] - c[0]
+    assert sum(d) * width == pytest.approx(1.0, rel=1e-6)     # normalised density
+
+
+def test_transit_409_without_field_result(client):
+    pid = client.post("/projects", json={"name": "d", "params": {"p_in": 40, "p_out": 0},
+                                         "grid": SMALL_GRID}).json()["id"]
+    jid = client.post(f"/projects/{pid}/run", json={"model": "direct"}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    assert client.get(f"/projects/{pid}/transit").status_code == 409   # no grid field
+
+
 def test_project_view3d_before_and_after_run(client):
     pytest.importorskip("skimage")
     pytest.importorskip("imageio")
