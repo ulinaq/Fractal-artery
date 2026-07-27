@@ -356,7 +356,13 @@ a research project. Each notes where it lands in the tree.
 - ✅ **DCE/DSC-MRI tracer-kinetic fitting** — `core/tkm.py` fits MS/1CM/2CUM/2CXM
   (`Fp, vp, PS, ve`); now wired to the app: the tracer stores its AIF, and
   `GET /projects/{id}/kinetics` fits the model to the tissue curve (result-view card +
-  MCP `fit_tracer_kinetics` tool). *(Next: per-region / voxel-wise maps, deconvolution.)*
+  MCP `fit_tracer_kinetics` tool).
+- ✅ **Voxel-wise parametric maps** — `tkm.kinetic_maps(frames, times, aif, mask)` turns
+  the tracer time-series into per-voxel **Fp** (max-slope `maxₜ dC/dt / max(Cₐ)`) and
+  **vp/blood-volume** (AUC ratio `∫C/∫Cₐ`) maps, NaN on inactive voxels;
+  `GET /projects/{id}/kinetics/maps?field=Fp|vp` returns the field and the TKM card's
+  **Fp map / BV map** buttons render it on the main heatmap. *(Next: model-based
+  voxel fitting + deconvolution residue maps.)*
 - **Transit-time distributions & CTH** → MTT, CTH and oxygen-extraction limits
   (Jespersen–Østergaard). Reuses `core/timeofflight`. *(Started — see 9.6.)*
 

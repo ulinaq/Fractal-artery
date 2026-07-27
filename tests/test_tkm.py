@@ -65,3 +65,23 @@ def test_two_compartment_exchange_curve(timeline):
     C = tkm.two_compartment_exchange(t, aif, Fp=30.0, vp=5.0, PS=2.0, ve=10.0)
     assert C.shape == t.shape
     assert np.all(np.isfinite(C))
+
+
+def test_kinetic_maps_perfusion_and_mask():
+    import numpy as np
+
+    from perfusion.core.tkm import gamma_variate_aif, kinetic_maps, one_compartment
+
+    t = np.linspace(0, 10, 120)
+    ca = gamma_variate_aif(t, t0=0.5, A=3.0, B=1.0)
+    nx, ny = 3, 2
+    frames = np.zeros((len(t), nx, ny))
+    frames[:, 0, 0] = one_compartment(t, ca, Fp=2.0, vp=0.2)   # well perfused
+    frames[:, 1, 0] = one_compartment(t, ca, Fp=0.5, vp=0.2)   # poorly perfused
+    mask = np.ones((nx, ny), bool)
+    mask[2, 1] = False
+
+    m = kinetic_maps(frames, t, ca, mask=mask)
+    assert m["Fp"].shape == (nx, ny)
+    assert m["Fp"][0, 0] > m["Fp"][1, 0]        # higher flow -> higher max-slope Fp
+    assert np.isnan(m["Fp"][2, 1])              # inactive voxel masked out

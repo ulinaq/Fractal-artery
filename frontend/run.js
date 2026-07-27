@@ -162,6 +162,22 @@ function drawTransient(el, d) {
   ctx.fillText("— inlet p   — tissue flow (rel. to mean)", pad.l, H - 4);
 }
 
+// voxel-wise parametric map (Fp / vp) rendered on the main result canvas
+export async function loadKineticMap(which) {
+  requireProject();
+  if (state.resultModel !== "hybrid") { status("maps need the hybrid tracer", "err"); return; }
+  let f;
+  try { f = await api("GET", `/projects/${state.project}/kinetics/maps?field=${which}`); }
+  catch (e) { status(/409/.test(e.message) ? "compute the ▶ Tracer first" : e.message, "err"); return; }
+  let vmin = Infinity, vmax = -Infinity;
+  for (const row of f.data) for (const v of row) if (v !== null) { if (v < vmin) vmin = v; if (v > vmax) vmax = v; }
+  stopFlow();
+  state.fieldData = { ...f, vmin, vmax };
+  state.field = which === "Fp" ? "Fp (perfusion)" : "BV (blood volume)";
+  redraw();
+  status(`${which} map`, "ok");
+}
+
 function drawTKM(el, d) {
   const ctx = el.getContext("2d"), W = el.width, H = el.height;
   ctx.clearRect(0, 0, W, H);

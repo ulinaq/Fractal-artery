@@ -113,3 +113,30 @@ def gamma_variate_aif(t: np.ndarray, t0: float = 0.1, A: float = 3.0,
     """Gamma-variate arterial input function (Eq. 11 of Paper C)."""
     tt = np.clip(t - t0, 0.0, None)
     return C0 * tt**A * np.exp(-tt / B)
+
+
+def kinetic_maps(frames: np.ndarray, times: np.ndarray, aif: np.ndarray,
+                 mask: np.ndarray | None = None) -> dict:
+    """Model-free voxel-wise perfusion maps from a tracer time series.
+
+    ``frames`` is ``(n_t, nx, ny)`` tissue concentration. Returns per-voxel:
+
+    - ``Fp`` — plasma flow by the **maximum-slope** method,
+      ``max_t dC/dt / max(ca)`` (Eqs. 3.18-3.19): fast and fit-free.
+    - ``vp`` — blood volume as the area-under-curve ratio ``∫C / ∫ca`` (the
+      tracer's distribution volume for an intravascular agent).
+
+    Both are ``(nx, ny)``; inactive voxels (``mask`` False) are NaN.
+    """
+    frames = np.asarray(frames, dtype=float)
+    times = np.asarray(times, dtype=float)
+    aif = np.asarray(aif, dtype=float)
+    dcdt = np.gradient(frames, times, axis=0)
+    fp = dcdt.max(axis=0) / max(float(aif.max()), 1e-12)
+    aif_auc = float(np.trapezoid(aif, times)) or 1e-12
+    vp = np.trapezoid(frames, times, axis=0) / aif_auc
+    if mask is not None:
+        m = np.asarray(mask, dtype=bool)
+        fp = np.where(m, fp, np.nan)
+        vp = np.where(m, vp, np.nan)
+    return {"Fp": fp, "vp": vp}

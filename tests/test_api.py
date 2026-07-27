@@ -694,6 +694,19 @@ def test_transient_pulsatile_damping(client):
     assert d["tissue_pulsatility"] < d["inlet_pulsatility"]      # compliance damps the pulse
 
 
+def test_kinetic_maps_endpoint(client):
+    pid = client.post("/projects", json={"name": "maps", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    assert client.get(f"/projects/{pid}/kinetics/maps").status_code == 409   # no tracer
+    jid = client.post(f"/projects/{pid}/tracer", json={"n_frames": 24}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    fp = client.get(f"/projects/{pid}/kinetics/maps", params={"field": "Fp"}).json()
+    assert fp["name"] == "Fp"
+    assert tuple(fp["shape"]) == (SMALL_GRID["nx"], SMALL_GRID["ny"])
+    assert any(v is not None for row in fp["data"] for v in row)   # some perfused voxels
+    assert client.get(f"/projects/{pid}/kinetics/maps", params={"field": "nope"}).status_code == 404
+
+
 def test_transit_409_without_field_result(client):
     pid = client.post("/projects", json={"name": "d", "params": {"p_in": 40, "p_out": 0},
                                          "grid": SMALL_GRID}).json()["id"]
