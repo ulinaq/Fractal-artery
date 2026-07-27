@@ -439,6 +439,32 @@ def rasterize_mask(nx: int, ny: int,
     return inside.reshape(nx, ny)
 
 
+def rasterize_permeability(nx: int, ny: int,
+                           domain_limit: tuple[float, float, float, float],
+                           lesions, base: float = 1.0) -> np.ndarray:
+    """Rasterise a heterogeneous permeability field from ``lesions`` onto ``(nx, ny)``.
+
+    Starts from a uniform ``base`` permeability; each lesion is ``(polygon, k)`` (a
+    list of ``(x, y)`` vertices in the ``domain_limit`` frame and its permeability),
+    and every cell whose centre falls inside overwrites to that ``k`` (later lesions
+    win on overlap). With no lesions the field is uniform ``base``. Cell centres match
+    :func:`rasterize_mask` so the field aligns with the mask and network coordinates.
+    """
+    field = np.full((nx, ny), float(base))
+    if not lesions:
+        return field
+    xmin, xmax, ymin, ymax = domain_limit
+    xc = xmin + (np.arange(nx) + 0.5) * (xmax - xmin) / nx
+    yc = ymin + (np.arange(ny) + 0.5) * (ymax - ymin) / ny
+    gx, gy = np.meshgrid(xc, yc, indexing="ij")
+    px, py = gx.ravel(), gy.ravel()
+    flat = field.ravel()
+    for poly, k in lesions:
+        inside = _points_in_polygon(px, py, poly)
+        flat[inside] = float(k)
+    return flat.reshape(nx, ny)
+
+
 def _rotate(vec: np.ndarray, axis: np.ndarray, angle: float) -> np.ndarray:
     """Rodrigues rotation of ``vec`` about unit ``axis`` by ``angle``."""
     c, s = np.cos(angle), np.sin(angle)

@@ -27,7 +27,7 @@ class Grid:
     ny: int
     lx: float = 1.0
     ly: float = 1.0
-    permeability: float = 1.0       # isotropic, homogeneous K
+    permeability: float | np.ndarray = 1.0   # isotropic K: scalar or a per-cell (nx, ny) field
     viscosity: float = 1.0
     porosity: float = 1.0
     thickness: float = 1.0          # out-of-plane thickness (2.5D)
@@ -41,6 +41,18 @@ class Grid:
         self.hy = self.ly / self.ny
         if self.mask is None:
             self.mask = np.ones((self.nx, self.ny), dtype=bool)
+        if np.ndim(self.permeability) != 0:
+            k = np.asarray(self.permeability, dtype=float)
+            if k.shape != (self.nx, self.ny):
+                raise ValueError(
+                    f"permeability field {k.shape} must be (nx, ny) = {(self.nx, self.ny)}")
+            self.permeability = k
+
+    def permeability_field(self) -> np.ndarray:
+        """Per-cell permeability as an ``(nx, ny)`` array (broadcasts a scalar K)."""
+        if np.ndim(self.permeability) == 0:
+            return np.full((self.nx, self.ny), float(self.permeability))
+        return self.permeability
 
     @property
     def n_cells(self) -> int:
@@ -63,27 +75,37 @@ class Grid:
 
 
 def face_conductance(grid: Grid) -> float:
-    """Constant interface conductance ``K/mu * A_face / h`` (homogeneous K).
+    """Constant interface conductance ``K/mu`` for the *homogeneous* case.
 
-    For the isotropic uniform grid used here the harmonic mean in Eq. (5.1)
-    collapses to this constant, identical on x- and y-faces since ``hx = hy`` is
-    not assumed — the two directions are returned by :func:`transmissibilities`.
+    Retained as a convenience for scalar K; heterogeneous grids use the per-face
+    harmonic mean assembled directly in :func:`transmissibilities`.
     """
+    if np.ndim(grid.permeability) != 0:
+        raise ValueError("face_conductance is scalar-only; use transmissibilities()")
     return grid.permeability / grid.viscosity
+
+
+def _harmonic(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Harmonic mean ``2ab/(a+b)`` of adjacent-cell permeabilities (0 if both 0)."""
+    denom = a + b
+    return np.divide(2.0 * a * b, denom, out=np.zeros_like(denom), where=denom > 0.0)
 
 
 def transmissibilities(grid: Grid) -> tuple[np.ndarray, np.ndarray]:
     """Interface transmissibilities ``(Tx, Ty)`` with no-flow outer boundaries.
 
     Shapes ``(nx+1, ny)`` and ``(nx, ny+1)``; only interior faces are non-zero.
-    Faces touching an inactive (masked-out) cell also carry no flow, so the
-    active domain is hydraulically isolated from the surroundings.
+    The interface permeability is the **harmonic mean** of the two adjacent cells'
+    permeabilities (Eq. 5.1) — exact for a uniform grid and the correct averaging
+    for a heterogeneous ``K`` field (a low-K cell throttles both its faces). Faces
+    touching an inactive (masked-out) cell carry no flow, so the active domain is
+    hydraulically isolated from the surroundings.
     """
-    k = face_conductance(grid)
+    kf = grid.permeability_field() / grid.viscosity
     tx = np.zeros((grid.nx + 1, grid.ny))
     ty = np.zeros((grid.nx, grid.ny + 1))
-    tx[1:grid.nx, :] = k * grid.hy * grid.thickness / grid.hx
-    ty[:, 1:grid.ny] = k * grid.hx * grid.thickness / grid.hy
+    tx[1:grid.nx, :] = _harmonic(kf[:-1, :], kf[1:, :]) * grid.hy * grid.thickness / grid.hx
+    ty[:, 1:grid.ny] = _harmonic(kf[:, :-1], kf[:, 1:]) * grid.hx * grid.thickness / grid.hy
     # a face conducts only when both adjacent cells are active
     active = grid.mask
     tx[1:grid.nx, :] *= active[:-1, :] & active[1:, :]

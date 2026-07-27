@@ -214,6 +214,34 @@ def direct_transit(rho_c: float = 0.0, p_in: float = 10.0, p_out: float = 0.0,
             "mtt_to_outlet": float(mtt.mean()) if mtt.size else None}
 
 
+def heterogeneous_perfusion(lesion_k: float = 0.02, radius_frac: float = 0.2,
+                            nx: int = 90, ny: int = 110, p_in: float = 10.0,
+                            p_out: float = 0.0, r_min_frac: float = 0.15) -> dict:
+    """Perfusion with a heterogeneous permeability field (a low-``K`` tissue lesion).
+
+    Places a central elliptical patch of permeability ``lesion_k`` (relative to the
+    healthy ``K = 1``) covering ``radius_frac`` of the domain, runs the hybrid model,
+    and compares the mean Darcy flux inside vs. outside the lesion — showing how a
+    low-permeability region starves local perfusion (ischemia). Uses the harmonic-mean
+    transmissibilities so the lesion throttles flow at its boundary faces."""
+    nx, ny = int(np.clip(nx, 30, 200)), int(np.clip(ny, 30, 200))
+    ix, iy = np.meshgrid(np.arange(nx), np.arange(ny), indexing="ij")
+    rx, ry = radius_frac * nx, radius_frac * ny
+    lesion = ((ix - nx / 2) / rx) ** 2 + ((iy - ny / 2) / ry) ** 2 <= 1.0
+    kfield = np.ones((nx, ny))
+    kfield[lesion] = float(lesion_k)
+
+    prm = Parameters(p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+    grid = Grid(nx=nx, ny=ny, lx=_LX, ly=_LY, permeability=kfield)
+    result = run_hybrid(prm, grid, domain_limit=_DOMAIN)
+    flux = result.flux
+    inside = float(flux[lesion].mean())
+    outside = float(flux[~lesion].mean())
+    return {"lesion_k": lesion_k, "flux_in_lesion": inside, "flux_outside": outside,
+            "starvation_ratio": inside / outside if outside > 0 else None,
+            "flux_mean": float(flux.mean()), "flux_std": float(flux.std())}
+
+
 def oxygen_extraction(k: float = 1.0, diffusivity: float = 0.0, c_art: float = 1.0,
                       nx: int = 90, ny: int = 110, p_in: float = 10.0, p_out: float = 0.0,
                       r_min_frac: float = 0.15) -> dict:
@@ -335,6 +363,18 @@ def build_server():
         Returns the mean bolus arrival time by element class and the overall mean
         transit time to the venous outlet. `rho_c` is the connection search radius."""
         return direct_transit(rho_c=rho_c, p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+
+    @server.tool()
+    def heterogeneous_perfusion_lesion(lesion_k: float = 0.02, radius_frac: float = 0.2,
+                                       nx: int = 90, ny: int = 110, p_in: float = 10.0,
+                                       p_out: float = 0.0, r_min_frac: float = 0.15) -> dict:
+        """Perfusion with a heterogeneous permeability field: place a central low-`K`
+        tissue lesion (permeability `lesion_k` relative to healthy K=1, covering
+        `radius_frac` of the domain) and compare the mean Darcy flux inside vs.
+        outside — showing how low permeability starves local perfusion (ischemia).
+        Uses harmonic-mean transmissibilities. A full hybrid solve — keep grid coarse."""
+        return heterogeneous_perfusion(lesion_k=lesion_k, radius_frac=radius_frac, nx=nx,
+                                       ny=ny, p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
 
     @server.tool()
     def oxygen_extraction_map(k: float = 1.0, diffusivity: float = 0.0, c_art: float = 1.0,
