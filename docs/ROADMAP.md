@@ -361,17 +361,22 @@ a research project. Each notes where it lands in the tree.
 
 ## 9.5 Optimisation, inverse problems, platform
 
-- **Optimisation driver** over `optimize.objective` (Paper D flux-vs-TOF) with
-  `scipy.optimize` / particle-swarm.
+- ✅ **Optimisation driver** over `optimize.objective` (Paper D flux-vs-TOF) —
+  `optimize.optimize_tree` (Nelder-Mead / differential-evolution over the tree's
+  branching asymmetries), exposed as the MCP `optimize_tree_config` tool.
 - Calibration / parameter estimation to data; inverse recovery of boundary pressures or
   permeability from a perfusion map; adjoint gradients.
 - **Frontend automated tests** (Playwright) — codify the CDP smoke flow for CI.
 - Property-based conservation tests (hypothesis); run-comparison view; parameter-sweep UI;
   units safety (pint); network VTK `.vtp` export; benchmark harness (asv).
 
-## 9.6 In progress
+## 9.6 Delivered from this backlog
 
-- **Transit-time distribution & CTH** (`core/perfusion_metrics.py`): MTT, CTH (σ of the
+- ✅ **Transit-time distribution & CTH** (`core/perfusion_metrics.py`): MTT, CTH (σ of the
   transit-time distribution), relative dispersion RD = CTH/MTT, and a Kety-model oxygen
   extraction fraction over the empirical distribution — surfaced in the result summary,
-  a `GET /projects/{id}/transit` endpoint (histogram), and the MCP `simulate` output.
+  a `GET /projects/{id}/transit` endpoint + an h(τ) chart in the result view, and the MCP
+  `simulate` output.
+- ✅ **Optimisation driver** (`optimize.optimize_tree`) — minimise flux-/TOF-homogeneity
+  over the tree's branching asymmetries (Nelder-Mead or differential evolution); MCP
+  `optimize_tree_config` tool.
