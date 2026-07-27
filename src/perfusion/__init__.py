@@ -33,6 +33,7 @@ from .core import (
     pipeline3d,
     timeofflight,
     tkm,
+    transient,
     transport,
     viscosity,
 )
@@ -67,6 +68,7 @@ __all__ = [
     "run_hybrid_3d",
     "timeofflight",
     "tkm",
+    "transient",
     "transit_metrics",
     "transport",
     "venous_tree",

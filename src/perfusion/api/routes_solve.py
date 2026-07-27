@@ -152,6 +152,57 @@ def tracer_kinetics(pid: str, model: str = "1CM",
     }
 
 
+@router.get("/projects/{pid}/transient")
+def transient_response(pid: str, period: float = 1.0, pulse: float = 0.5,
+                       compliance: float = 0.02, cycles: int = 4, proximal: float = 0.1,
+                       project: Project = Depends(get_project)) -> dict:
+    """Pulsatile (Windkessel) response over one cardiac cycle.
+
+    Uses the steady result's inflow for the total resistance R, the vessel
+    geometry + ``compliance`` for the total compliance C, then drives a
+    ``p_mean ± pulse·ΔP`` sinusoid: the compliance buffers the pulse so tissue
+    flow is smoother than the inlet. Needs a solved (hybrid) result."""
+    from ..core import transient
+
+    s = project.summary
+    if not s or not s.get("arterial_inflow"):
+        raise HTTPException(409, "run a simulation first (its steady inflow sets R)")
+    p_mean, p_out = float(project.params.p_in), float(project.params.p_out)
+    q_steady = float(s["arterial_inflow"])
+    if q_steady <= 0 or p_mean <= p_out:
+        raise HTTPException(422, "need a positive steady inflow and p_in > p_out")
+    r_total = (p_mean - p_out) / q_steady
+    art, ven = runner.build_networks(project, use_vessels=True)
+    if art is None or ven is None:            # a vessel-less run used the default trees
+        from ..core.geometry import arterial_tree, venous_tree
+
+        prm = project.params.to_core()
+        art = art if art is not None else arterial_tree(prm)
+        ven = ven if ven is not None else venous_tree(prm)
+    c_total = transient.compliance_total([art, ven], compliance)
+
+    cycles = min(max(cycles, 1), 20)
+    dt = period / 100.0
+    amp = pulse * (p_mean - p_out)
+    t, p_in = transient.pulsatile_inlet(p_mean, amp, period, dt, cycles)
+    wk = transient.windkessel(p_in, r_total, c_total, dt, p_out=p_out, proximal_fraction=proximal)
+    npc = max(1, round(period / dt))
+    sl = slice(-npc, None)                              # last cycle = periodic steady state
+
+    def pulsatility(a):
+        a = np.asarray(a, float)
+        return float((a.max() - a.min()) / max(a.mean(), 1e-12))
+
+    return {
+        "R": r_total, "C": c_total, "period": period,
+        "t": (t[sl] - t[sl][0]).tolist(), "p_in": p_in[sl].tolist(),
+        "P": wk["P"][sl].tolist(), "q_in": wk["q_in"][sl].tolist(),
+        "q_tissue": wk["q_tissue"][sl].tolist(),
+        "inlet_pulsatility": pulsatility(p_in[sl]),
+        "tissue_pulsatility": pulsatility(wk["q_tissue"][sl]),
+    }
+
+
 @router.get("/projects/{pid}/direct")
 def direct_result(pid: str, project: Project = Depends(get_project),
                   store: ProjectStore = Depends(get_store)) -> dict:

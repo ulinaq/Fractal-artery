@@ -8,7 +8,7 @@ single-page app (plain HTML/CSS/ES-modules) served directly by the
 
 ```bash
 uv sync --extra api
-uv run perfusion-api        # then open http://127.0.0.1:8000/
+uv run perfusion-api        # then open http://127.0.0.1:8010/
 ```
 
 The API mounts this directory at `/` (see `_mount_frontend` in

@@ -42,7 +42,7 @@ uv run perfusion-tree        # Paper D: hybrid on a synthetic fractal tree
 uv run perfusion-frog        # Paper A: hybrid on the frog-tongue domain
 uv run python -m perfusion.examples.tkm_demo   # Paper C: TKM comparison
 uv run python scripts/generate_data.py         # regenerate bundled datasets
-uv run perfusion-api         # start the FastAPI back-end (http://127.0.0.1:8000)
+uv run perfusion-api         # start the FastAPI back-end (http://127.0.0.1:8010)
 uv run --extra mcp perfusion-mcp   # start the MCP server (stdio)
 uv run perfusion-darcy3d     # 3-D Darcy source→sink slices
 uv run perfusion-hybrid3d    # Phase 4: full 3-D hybrid (3-D trees + 3-D Darcy)
@@ -51,7 +51,7 @@ uv run perfusion-hybrid3d    # Phase 4: full 3-D hybrid (3-D trees + 3-D Darcy)
 ### Web app
 
 `uv run perfusion-api` starts the FastAPI back-end **and** serves a zero-build
-2-D workspace (no Node/npm) at `http://127.0.0.1:8000/`. **🐸 Load frog example**
+2-D workspace (no Node/npm) at `http://127.0.0.1:8010/`. **🐸 Load frog example**
 gives you a real segmented frog-tongue system (arteries + veins + organ mask) in
 one click, ready to Run. Or create a project, draw
 vessels (or **segment them from an uploaded image**), **outline the tissue** (so
@@ -73,14 +73,14 @@ the UI above.
 
 ```bash
 uv run perfusion-api
-curl -s localhost:8000/health
+curl -s localhost:8010/health
 # create a project, run it, poll the job, get the summary:
-pid=$(curl -s -XPOST localhost:8000/projects -H 'content-type: application/json' \
+pid=$(curl -s -XPOST localhost:8010/projects -H 'content-type: application/json' \
       -d '{"name":"demo"}' | python -c 'import sys,json;print(json.load(sys.stdin)["id"])')
-jid=$(curl -s -XPOST localhost:8000/projects/$pid/run -d '{}' \
+jid=$(curl -s -XPOST localhost:8010/projects/$pid/run -d '{}' \
       -H 'content-type: application/json' | python -c 'import sys,json;print(json.load(sys.stdin)["id"])')
-curl -s localhost:8000/jobs/$jid          # -> {"state":"done",...}
-curl -s localhost:8000/projects/$pid/results
+curl -s localhost:8010/jobs/$jid          # -> {"state":"done",...}
+curl -s localhost:8010/projects/$pid/results
 ```
 
 Endpoints: `health`, `projects` (CRUD) + `projects/frog` (one-click example),

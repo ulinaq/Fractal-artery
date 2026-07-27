@@ -113,6 +113,25 @@ def fit_kinetics(t, aif, concentration, model: str = "2CXM") -> dict:
             "PS": num(r.PS), "ve": num(r.ve)}
 
 
+def pulsatile_response(r_total: float, compliance_total: float, p_mean: float = 10.0,
+                       p_out: float = 0.0, pulse: float = 0.5, period: float = 1.0) -> dict:
+    """Windkessel pulsatile response: how much a compliant vasculature damps the
+    inlet pulse before it reaches the tissue."""
+    from .core import transient
+
+    dt = period / 100.0
+    _, p_in = transient.pulsatile_inlet(p_mean, pulse * (p_mean - p_out), period, dt, n_cycles=4)
+    wk = transient.windkessel(p_in, r_total, compliance_total, dt, p_out=p_out)
+    last = slice(-100, None)
+
+    def puls(a):
+        a = np.asarray(a[last], float)
+        return float((a.max() - a.min()) / max(a.mean(), 1e-12))
+
+    return {"R": r_total, "C": compliance_total,
+            "inlet_pulsatility": puls(p_in), "tissue_pulsatility": puls(wk["q_tissue"])}
+
+
 def model_info() -> dict:
     """Describe what the perfusion model computes and the fields it returns."""
     return {
@@ -181,6 +200,15 @@ def build_server():
         function `aif`, and the tissue curve `concentration`. Returns plasma flow
         Fp, plasma volume vp, and PS / ve for the two-compartment models."""
         return fit_kinetics(t, aif, concentration, model=model)
+
+    @server.tool()
+    def pulsatile_windkessel(r_total: float, compliance_total: float, p_mean: float = 10.0,
+                             p_out: float = 0.0, pulse: float = 0.5, period: float = 1.0) -> dict:
+        """Lumped Windkessel transient response: given a total resistance `r_total`
+        and compliance `compliance_total`, drive a pulsatile inlet and report the
+        inlet vs tissue-flow pulsatility — i.e. how much vessel compliance damps the
+        pulse (the gateway to transient/pulsatile perfusion)."""
+        return pulsatile_response(r_total, compliance_total, p_mean, p_out, pulse, period)
 
     @server.tool()
     def describe_model() -> dict:

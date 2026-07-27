@@ -12,7 +12,7 @@ import {
 } from "./edit.js";
 import {
   computeFlow, fitKinetics, grow, loadField, loadNetwork, loadResultView, pauseFlow, run,
-  stopFlow, stopTimer, syncFlowUI, toggleFlowPlay,
+  runTransient, stopFlow, stopTimer, syncFlowUI, toggleFlowPlay,
 } from "./run.js";
 
 // ── undo / redo (workspace geometry history) ───────────────────────────────────
@@ -484,6 +484,7 @@ document.querySelectorAll(".field").forEach((b) => b.addEventListener("click", (
 
 $("btn-flow").addEventListener("click", guarded(computeFlow));
 $("btn-tkm").addEventListener("click", guarded(fitKinetics));
+$("btn-transient").addEventListener("click", guarded(runTransient));
 $("tkm-model").addEventListener("change", () => { if (state.tracer) fitKinetics().catch(() => {}); });
 $("flow-play").addEventListener("click", toggleFlowPlay);
 $("flow-scrub").addEventListener("input", (e) => {

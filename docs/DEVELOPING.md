@@ -56,7 +56,7 @@ touching `api`, `segmentation`, or `mcp`.
 ## Running the pieces
 
 ```bash
-uv run perfusion-api                       # web app + API at :8000  (extra: api)
+uv run perfusion-api                       # web app + API at :8010  (extra: api)
 uv run --extra mcp perfusion-mcp           # MCP server over stdio   (extra: mcp)
 uv run perfusion-tree | perfusion-frog     # example drivers
 ```
