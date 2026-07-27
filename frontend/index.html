@@ -148,6 +148,14 @@
         <p class="muted" id="grow-info"></p>
       </details>
 
+      <details class="card" data-mode="result" open>
+        <summary>Transit-time distribution</summary>
+        <p class="muted">h(τ): how long blood takes to cross the tissue. Wider
+          spread = more heterogeneous perfusion (higher CTH → less O₂ extraction).</p>
+        <canvas id="ttd" width="288" height="150"></canvas>
+        <p class="muted" id="ttd-info"></p>
+      </details>
+
       <section class="card run-card">
         <label>model
           <select id="run-model">

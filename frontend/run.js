@@ -4,7 +4,7 @@
 //
 // Cross-module refs (app wires the buttons; edit reuses loadNetwork/stopFlow) are
 // resolved by ES-module live bindings — every call happens at runtime.
-import { $, api, numOf, state, status } from "./core.js";
+import { $, api, getCss, numOf, state, status } from "./core.js";
 import { redraw } from "./render.js";
 import { loadEditable } from "./edit.js";
 import {
@@ -68,11 +68,60 @@ export async function loadResultView() {
   state.direct = null;
   if (state.resultModel === "direct") await loadDirect();
   else await loadField(state.field);
+  await loadTransit();                        // h(τ) chart (hybrid) or a note (direct)
 }
 
 async function loadDirect() {
   try { state.direct = await api("GET", `/projects/${state.project}/direct`); }
   catch { state.direct = null; }
+}
+
+// ── transit-time distribution chart ────────────────────────────────────────────
+const ttdFmt = (v) => (Math.abs(v) < 1e-3 || Math.abs(v) > 1e4) ? v.toExponential(1) : v.toFixed(2);
+
+async function loadTransit() {
+  const el = $("ttd");
+  if (!el) return;
+  const ctx = el.getContext("2d");
+  ctx.clearRect(0, 0, el.width, el.height);
+  if (state.resultModel !== "hybrid") {
+    $("ttd-info").textContent = "the direct-connection model has no transit-time field";
+    return;
+  }
+  let d;
+  try { d = await api("GET", `/projects/${state.project}/transit?bins=32`); }
+  catch { $("ttd-info").textContent = ""; return; }
+  drawTTD(el, d);
+  $("ttd-info").textContent =
+    `MTT ${ttdFmt(d.mtt)} · CTH ${ttdFmt(d.cth)} · RD ${d.rd.toFixed(2)} · OEF ${(d.oef * 100).toFixed(0)}%`;
+}
+
+function drawTTD(el, d) {
+  const ctx = el.getContext("2d"), W = el.width, H = el.height;
+  const { centres, density } = d.histogram;
+  if (!centres.length) return;
+  const pad = { l: 8, r: 8, t: 12, b: 18 };
+  const x0 = centres[0], x1 = centres[centres.length - 1] || 1;
+  const dmax = Math.max(...density) || 1;
+  const bw = (W - pad.l - pad.r) / centres.length;
+  const plotH = H - pad.t - pad.b;
+  ctx.fillStyle = getCss("--accent");
+  centres.forEach((_, i) => {
+    const h = (density[i] / dmax) * plotH;
+    ctx.fillRect(pad.l + i * bw, H - pad.b - h, Math.max(1, bw - 1), h);
+  });
+  // MTT marker (dashed red line + label)
+  const mttX = pad.l + ((d.mtt - x0) / ((x1 - x0) || 1)) * (W - pad.l - pad.r);
+  ctx.strokeStyle = getCss("--art"); ctx.setLineDash([4, 3]);
+  ctx.beginPath(); ctx.moveTo(mttX, pad.t); ctx.lineTo(mttX, H - pad.b); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = getCss("--art"); ctx.font = "10px -apple-system, sans-serif";
+  ctx.fillText("MTT", Math.min(mttX + 3, W - 28), pad.t + 8);
+  // baseline + axis label
+  ctx.strokeStyle = getCss("--line");
+  ctx.beginPath(); ctx.moveTo(pad.l, H - pad.b); ctx.lineTo(W - pad.r, H - pad.b); ctx.stroke();
+  ctx.fillStyle = getCss("--muted");
+  ctx.fillText("τ (transit time) →", pad.l, H - 5);
 }
 
 async function pollJob(jid) {

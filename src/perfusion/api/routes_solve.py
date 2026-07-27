@@ -78,11 +78,16 @@ def result_field(pid: str, name: str, project: Project = Depends(get_project),
 
 
 @router.get("/projects/{pid}/transit")
-def transit_distribution(pid: str, bins: int = 40, k: float = 1.0,
+def transit_distribution(pid: str, bins: int = 40, k: float = 0.0,
                          project: Project = Depends(get_project),
                          store: ProjectStore = Depends(get_store)) -> dict:
     """Transit-time distribution of the solved field: MTT, CTH (heterogeneity),
-    relative dispersion, a Kety-model oxygen-extraction fraction, and h(τ)."""
+    relative dispersion, a Kety-model oxygen-extraction fraction, and h(τ).
+
+    ``k`` is the extraction rate; ``k <= 0`` (default) auto-scales it to ``1/MTT``,
+    giving a unit-free heterogeneity index (≈0.63 for homogeneous flow, lower as
+    CTH grows). Pass a positive ``k`` for a fixed physical rate.
+    """
     from ..core.perfusion_metrics import (
         oxygen_extraction_fraction,
         transit_histogram,
@@ -96,10 +101,11 @@ def transit_distribution(pid: str, bins: int = 40, k: float = 1.0,
     tof = np.where(store.result_field(pid, "mask"), store.result_field(pid, "tof"), np.nan)
     flux = store.result_field(pid, "flux")
     tm = transit_metrics(tof, weights=flux)
+    kk = k if k > 0 else (1.0 / tm.mtt if tm.mtt > 0 else 1.0)
     centres, density = transit_histogram(tof, weights=flux, bins=bins)
     return {
         "mtt": tm.mtt, "cth": tm.cth, "rd": tm.rd, "n": tm.n,
-        "oef": oxygen_extraction_fraction(tof, weights=flux, k=k), "k": k,
+        "oef": oxygen_extraction_fraction(tof, weights=flux, k=kk), "k": kk,
         "histogram": {"centres": centres.tolist(), "density": density.tolist()},
     }
 
