@@ -132,6 +132,44 @@ def pulsatile_response(r_total: float, compliance_total: float, p_mean: float = 
             "inlet_pulsatility": puls(p_in), "tissue_pulsatility": puls(wk["q_tissue"])}
 
 
+def perfusion_maps(nx: int = 70, ny: int = 80, n_frames: int = 24,
+                   p_in: float = 10.0, p_out: float = 0.0, r_min_frac: float = 0.15) -> dict:
+    """Synthesise a contrast bolus on the fractal trees and reduce it to voxel-wise
+    perfusion maps (Paper B); return summary statistics of the Fp and blood-volume
+    maps over the active tissue (the app renders the full 2-D fields)."""
+    from .core import tkm, transport
+
+    nx, ny = int(np.clip(nx, 30, 160)), int(np.clip(ny, 30, 160))
+    prm = Parameters(p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+    grid = Grid(nx=nx, ny=ny, lx=_LX, ly=_LY)
+    result = run_hybrid(prm, grid, domain_limit=_DOMAIN)
+
+    finite = result.tof[np.isfinite(result.tof)]
+    t_char = float(np.percentile(finite, 80)) if finite.size else 5.0
+    duration = 5.0 * max(t_char, 1e-3)
+    n_steps = max(n_frames, 500)
+    dt = duration / n_steps
+    t = np.arange(n_steps) * dt
+    aif = tkm.gamma_variate_aif(t, t0=0.08 * duration, A=3.0, B=max(0.06 * duration, dt))
+    peak = float(aif.max())
+    if peak > 0:
+        aif = aif / peak
+    full = transport.transport_forward(grid, result.fx, result.fy, result.sources,
+                                       result.solution.terminal_flux, aif, dt, theta=1.0)
+    stride = max(1, n_steps // n_frames)
+    frames, times = full[::stride][:n_frames], t[::stride][:n_frames]
+    m = tkm.kinetic_maps(frames, times, aif[::stride][:n_frames], mask=grid.mask)
+
+    def stat(a):
+        a = a[np.isfinite(a)]
+        if not a.size:
+            return {"mean": None, "max": None}
+        return {"mean": float(a.mean()), "max": float(a.max())}
+
+    return {"grid": {"nx": nx, "ny": ny}, "n_frames": len(times),
+            "Fp": stat(m["Fp"]), "vp": stat(m["vp"])}
+
+
 def model_info() -> dict:
     """Describe what the perfusion model computes and the fields it returns."""
     return {
@@ -209,6 +247,17 @@ def build_server():
         inlet vs tissue-flow pulsatility — i.e. how much vessel compliance damps the
         pulse (the gateway to transient/pulsatile perfusion)."""
         return pulsatile_response(r_total, compliance_total, p_mean, p_out, pulse, period)
+
+    @server.tool()
+    def perfusion_parameter_maps(nx: int = 70, ny: int = 80, n_frames: int = 24,
+                                 p_in: float = 10.0, p_out: float = 0.0,
+                                 r_min_frac: float = 0.15) -> dict:
+        """Advect a synthetic contrast bolus through the fractal trees and reduce it
+        to voxel-wise perfusion maps: plasma flow Fp (max-slope) and blood volume vp
+        (area-under-curve ratio). Returns mean/max of each map over the active tissue.
+        Each call is a full hybrid solve + transport — keep the grid coarse."""
+        return perfusion_maps(nx=nx, ny=ny, n_frames=n_frames, p_in=p_in,
+                              p_out=p_out, r_min_frac=r_min_frac)
 
     @server.tool()
     def describe_model() -> dict:

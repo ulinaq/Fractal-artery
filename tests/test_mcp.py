@@ -71,7 +71,17 @@ def test_server_registers_expected_tools():
 
     server = mcp_server.build_server()
     tools = {t.name for t in asyncio.run(server.list_tools())}
-    assert {"run_simulation", "run_sweep", "describe_model"} <= tools
+    assert {"run_simulation", "run_sweep", "perfusion_parameter_maps", "describe_model"} <= tools
+
+
+def test_perfusion_maps_summarises_active_tissue():
+    import json
+
+    r = mcp_server.perfusion_maps(nx=45, ny=52, n_frames=16, r_min_frac=0.5)  # shallow -> fast
+    json.dumps(r)
+    assert r["n_frames"] == 16
+    assert r["Fp"]["max"] > 0                       # some perfused tissue
+    assert r["vp"]["mean"] is not None
 
 
 def test_simulate_is_json_serialisable():
