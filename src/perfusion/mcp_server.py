@@ -80,6 +80,25 @@ def sweep(param: str, values, **base) -> dict:
     return {"param": param, "points": points}
 
 
+def optimize_structure(kind: str = "tof_std", method: str = "local", maxiter: int = 30,
+                       nx: int = 70, ny: int = 80) -> dict:
+    """Optimise the fractal-tree configuration to homogenise perfusion (Paper D).
+
+    Minimises flux- or time-of-flight heterogeneity over the tree's branching
+    asymmetries; returns the best objective and the key resulting parameters.
+    """
+    from .core.darcy import Grid
+    from .optimize import optimize_tree
+
+    nx, ny = int(np.clip(nx, 30, 160)), int(np.clip(ny, 30, 160))
+    grid = Grid(nx=nx, ny=ny, lx=_LX, ly=_LY)
+    r = optimize_tree(kind=kind, grid=grid, domain_limit=_DOMAIN, method=method,
+                      maxiter=int(maxiter))
+    return {"kind": r.kind, "objective": r.objective, "n_eval": r.n_eval,
+            "success": r.success, "free": r.free,
+            "a_gamma": r.alpha[0], "v_gamma": r.alpha[1], "exponent": r.alpha[8]}
+
+
 def model_info() -> dict:
     """Describe what the perfusion model computes and the fields it returns."""
     return {
@@ -128,6 +147,17 @@ def build_server():
         quick way to see how perfusion responds to a parameter."""
         base = {"p_in": p_in, "p_out": p_out, "nx": nx, "ny": ny, "r_min_frac": r_min_frac}
         return sweep(param, values, **base)
+
+    @server.tool()
+    def optimize_tree_config(kind: str = "tof_std", method: str = "local",
+                             maxiter: int = 30, nx: int = 70, ny: int = 80) -> dict:
+        """Optimise the fractal arterial/venous tree to homogenise perfusion
+        (Paper D): minimise flux- or time-of-flight heterogeneity. `kind` in
+        {flux_std, flux_range, flux_l2, flux_mean, tof_std, tof_max}; `method` is
+        'local' (Nelder-Mead) or 'global' (differential evolution). Returns the
+        best objective and key tree parameters. Each step is a full solve — keep
+        the grid coarse and `maxiter` modest."""
+        return optimize_structure(kind=kind, method=method, maxiter=maxiter, nx=nx, ny=ny)
 
     @server.tool()
     def describe_model() -> dict:

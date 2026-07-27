@@ -24,6 +24,16 @@ def test_simulate_clamps_resolution():
     assert 20 <= summary["grid"]["ny"] <= 250
 
 
+def test_optimize_structure_returns_best_config():
+    start = mcp_server.simulate(nx=45, ny=52, r_min_frac=0.5)["flux_std"]
+    r = mcp_server.optimize_structure(kind="flux_std", method="local", maxiter=6, nx=45, ny=52)
+    assert r["kind"] == "flux_std"
+    assert r["n_eval"] > 0
+    assert r["objective"] <= start + 1e-9           # optimiser doesn't worsen the start
+    assert "a_gamma" in r
+    assert "v_gamma" in r
+
+
 def test_model_info_shape():
     info = mcp_server.model_info()
     assert info["name"] == "perfusion"
