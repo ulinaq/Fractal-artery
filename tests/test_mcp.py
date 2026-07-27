@@ -71,7 +71,20 @@ def test_server_registers_expected_tools():
 
     server = mcp_server.build_server()
     tools = {t.name for t in asyncio.run(server.list_tools())}
-    assert {"run_simulation", "run_sweep", "perfusion_parameter_maps", "describe_model"} <= tools
+    assert {"run_simulation", "run_sweep", "perfusion_parameter_maps",
+            "direct_transit_metrics", "describe_model"} <= tools
+
+
+def test_direct_transit_metrics_sweep_order():
+    import json
+
+    r = mcp_server.direct_transit(rho_c=0.0, p_in=10.0, r_min_frac=0.5)
+    json.dumps(r)
+    assert r["n_connections"] > 0
+    assert 0.0 < r["reachable_fraction"] <= 1.0
+    # bolus reaches arteries before connections before veins
+    assert r["mean_arrival_arterial"] < r["mean_arrival_connection"]
+    assert r["mean_arrival_connection"] < r["mean_arrival_venous"]
 
 
 def test_perfusion_maps_summarises_active_tissue():

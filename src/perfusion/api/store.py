@@ -159,6 +159,9 @@ class ProjectStore:
     def _direct_path(self, pid: str) -> Path:
         return self.blobs / f"{pid}.direct.npz"
 
+    def _nettracer_path(self, pid: str) -> Path:
+        return self.blobs / f"{pid}.nettracer.npz"
+
     def tracer_path(self, pid: str) -> Path:
         return self.blobs / f"{pid}.tracer.npz"
 
@@ -253,6 +256,8 @@ class ProjectStore:
         """
         io.save_results(result, self.result_path(project.id))
         self.tracer_path(project.id).unlink(missing_ok=True)   # stale
+        self._nettracer_path(project.id).unlink(missing_ok=True)
+        self._direct_path(project.id).unlink(missing_ok=True)  # switching model → drop direct blob
         summary = io.results_summary(result)
         if notes:
             summary["notes"] = list(notes)
@@ -266,6 +271,7 @@ class ProjectStore:
         self.result_path(project.id).unlink(missing_ok=True)
         self._direct_path(project.id).unlink(missing_ok=True)
         self.tracer_path(project.id).unlink(missing_ok=True)
+        self._nettracer_path(project.id).unlink(missing_ok=True)
         project.summary = None
         project.has_result = project.has_tracer = False
         self.save(project)
@@ -288,6 +294,7 @@ class ProjectStore:
                  vein=seg_lines(ven, sol.q_v), conn=conn)
         self.result_path(project.id).unlink(missing_ok=True)   # not a field result
         self.tracer_path(project.id).unlink(missing_ok=True)
+        self._nettracer_path(project.id).unlink(missing_ok=True)   # stale animation
         perfusion = float(np.abs(sol.q_c).sum())
         p_all = np.concatenate([sol.p_a, sol.p_v])
         project.summary = {
@@ -301,6 +308,20 @@ class ProjectStore:
 
     def load_direct(self, pid: str) -> dict:
         with np.load(self._direct_path(pid)) as d:
+            return {k: d[k] for k in d.files}
+
+    def save_network_tracer(self, project: Project, lines, kind, frames, times,
+                            arrivals, vmax) -> None:
+        """Persist the direct-model network-transit animation (element lines +
+        per-element concentration frames); the direct model has no grid field."""
+        np.savez(self._nettracer_path(project.id),
+                 lines=np.asarray(lines, dtype=float), kind=np.asarray(kind, dtype=np.int8),
+                 frames=np.asarray(frames, dtype=np.float32),
+                 times=np.asarray(times, dtype=float),
+                 arrivals=np.asarray(arrivals, dtype=float), vmax=float(vmax))
+
+    def load_network_tracer(self, pid: str) -> dict:
+        with np.load(self._nettracer_path(pid)) as d:
             return {k: d[k] for k in d.files}
 
     def result_field(self, pid: str, name: str) -> np.ndarray:

@@ -66,6 +66,7 @@ export async function run() {
 // direct-connection network (vessels + terminal links).
 export async function loadResultView() {
   await showSummary();                       // sets state.resultModel + runNotes
+  stopFlow(); state.tracer = null;           // drop any stale (field or network) tracer
   state.direct = null;
   if (state.resultModel === "direct") await loadDirect();
   else await loadField(state.field);
@@ -284,6 +285,7 @@ export function stopTimer() {
 
 export async function computeFlow() {
   requireProject();
+  if (state.resultModel === "direct") { await computeNetworkFlow(); return; }
   if (!state.tracer) {
     try {
       await loadTracer();                 // reuse a previously computed tracer
@@ -308,6 +310,32 @@ async function loadTracer() {
   state.flow.idx = 0;
   $("flow-scrub").max = t.n_frames - 1;
   $("flow-gif").href = `/projects/${state.project}/tracer.gif`;
+}
+
+// direct model: animate the bolus along the vascular network (transit-time based)
+async function computeNetworkFlow() {
+  const load = async () => {
+    const t = await api("GET", `/projects/${state.project}/network-tracer`);
+    state.tracer = { ...t, network: true };
+    state.flow.idx = 0;
+    $("flow-scrub").max = t.n_frames - 1;
+  };
+  if (!(state.tracer && state.tracer.network)) {
+    try {
+      await load();
+    } catch {
+      status("computing network transit… (solves + times the bolus)");
+      const job = await api("POST", `/projects/${state.project}/tracer`, { n_frames: 48 });
+      const final = await pollJob(job.id);
+      if (final.state === "error") { status(final.error || "flow failed", "err"); return; }
+      await load();
+      status("network transit ready", "ok");
+    }
+  }
+  state.flow.active = true;
+  ["flow-play", "flow-scrub", "flow-time"].forEach((id) => ($(id).hidden = false));
+  $("flow-gif").hidden = true;                 // no GIF for the network animation
+  playFlow();
 }
 
 function playFlow() {

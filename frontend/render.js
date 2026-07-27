@@ -10,7 +10,11 @@ import { VIRIDIS, viridis } from "./palette.js";
 export function redraw() {
   ctx.clearRect(0, 0, W, H);
   if (state.mode === "result" && state.resultModel === "direct") {
-    drawDirect();          // network + terminal connections coloured by flow (no field)
+    if (state.flow.active && state.tracer && state.tracer.network) {
+      drawNetworkTracerFrame(state.flow.idx);   // bolus swept along the vessels
+    } else {
+      drawDirect();        // network + terminal connections coloured by flow (no field)
+    }
     drawIO();
     return;
   }
@@ -31,6 +35,34 @@ export function drawTracerFrame(idx) {
   const t = state.tracer;
   paintHeatmap(t.frames[idx], t.shape[0], t.shape[1], 0, t.vmax);
   updateColorbar(0, t.vmax, "tracer");
+}
+
+// direct-model bolus animation: the vessel network as a faint substrate, with the
+// contrast bolus lit up per element by its concentration at this frame (viridis).
+function drawNetworkTracerFrame(idx) {
+  const t = state.tracer;
+  const conc = t.frames[idx];
+  const artC = getCss("--art"), venC = getCss("--ven");
+  ctx.lineCap = "round";
+  t.lines.forEach((ln, i) => {
+    const [ax, ay] = toCanvas(ln[0], ln[1]), [bx, by] = toCanvas(ln[2], ln[3]);
+    const k = t.kind[i];
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
+    ctx.globalAlpha = k === 2 ? 0.1 : 0.18;      // faint anatomical substrate
+    ctx.strokeStyle = k === 0 ? artC : k === 1 ? venC : "#10b981";
+    ctx.lineWidth = k === 2 ? 0.7 : 1.2;
+    ctx.stroke();
+    const c = Math.max(0, Math.min(1, conc[i] / (t.vmax || 1)));
+    if (c > 0.03) {                               // bolus overlay where present
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
+      ctx.globalAlpha = 0.25 + 0.75 * c;
+      ctx.strokeStyle = viridis(c);
+      ctx.lineWidth = (k === 2 ? 1.5 : 3) * (0.5 + c);
+      ctx.stroke();
+    }
+  });
+  ctx.globalAlpha = 1;
+  updateColorbar(0, 1, "bolus");
 }
 
 function drawDirect() {
@@ -54,6 +86,7 @@ function drawDirect() {
   };
   paint(d.artery, getCss("--art")); paint(d.vein, getCss("--ven"));
   ctx.globalAlpha = 1;
+  $("colorbar").hidden = true;            // static direct view has no scalar scale
 }
 
 function drawIO() {
