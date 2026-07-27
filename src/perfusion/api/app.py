@@ -37,7 +37,7 @@ def create_app(store: ProjectStore | None = None,
                jobs: JobManager | None = None) -> FastAPI:
     """Build the FastAPI app; inject a store/job-manager for testing."""
     from .. import __version__
-    from . import routes_geometry, routes_projects, routes_solve
+    from . import routes_explore, routes_geometry, routes_projects, routes_solve
 
     store = store or ProjectStore()
     jobs = jobs or _default_jobs(store)
@@ -59,6 +59,7 @@ def create_app(store: ProjectStore | None = None,
     app.include_router(routes_projects.router)
     app.include_router(routes_geometry.router)
     app.include_router(routes_solve.router)
+    app.include_router(routes_explore.router)
     _mount_frontend(app)
     return app
 

@@ -35,13 +35,18 @@ def default_alpha() -> np.ndarray:
     return a
 
 
-def params_from_alpha(alpha: Sequence[float]) -> Parameters:
-    """Build :class:`Parameters` from an optimisation vector."""
+def params_from_alpha(alpha: Sequence[float], r_min_frac: float = 0.15) -> Parameters:
+    """Build :class:`Parameters` from an optimisation vector.
+
+    ``r_min_frac`` sets the tree depth (smaller = deeper/slower); the interactive
+    explorer passes a larger value for a shallow, fast tree.
+    """
     a = np.asarray(alpha, dtype=float)
     prm = Parameters(
         length_to_radius=a[2], exponent=a[8], rv_scale=a[3],
         a_init=(a[6], 0.0), v_init=(a[7], 160.0),
         a_theta=a[4], v_theta=a[5], a_gamma=a[0], v_gamma=a[1],
+        r_min_frac=r_min_frac,
     )
     # Override the deeper-generation asymmetries deterministically from alpha.
     p0, r0 = bifurcation_geometry(a[0], a[8])
@@ -65,7 +70,8 @@ def params_from_alpha(alpha: Sequence[float]) -> Parameters:
 
 def objective(alpha: Sequence[float], kind: str = "tof_std",
               grid: Grid | None = None,
-              domain_limit=(-70, 70, 0, 160), strict: bool = False) -> float:
+              domain_limit=(-70, 70, 0, 160), strict: bool = False,
+              r_min_frac: float = 0.15) -> float:
     """Scalar objective for an optimisation vector.
 
     ``kind`` in {``flux_range``, ``flux_std``, ``flux_l2``, ``flux_mean``,
@@ -76,7 +82,7 @@ def objective(alpha: Sequence[float], kind: str = "tof_std",
     if grid is None:
         grid = Grid(nx=140, ny=160, lx=140, ly=160)
     try:
-        res = run_hybrid(params_from_alpha(alpha), grid, domain_limit,
+        res = run_hybrid(params_from_alpha(alpha, r_min_frac=r_min_frac), grid, domain_limit,
                          strict_domain=strict)
     except (ValueError, np.linalg.LinAlgError):
         return float("inf")
@@ -131,7 +137,8 @@ def optimize_tree(kind: str = "tof_std", *, grid: Grid | None = None,
                   domain_limit=(-70, 70, 0, 160), free: Sequence[int] | None = None,
                   bounds: Sequence[tuple[float, float]] | None = None,
                   method: str = "local", maxiter: int = 40, seed: int = 0,
-                  strict: bool = False, alpha0: Sequence[float] | None = None) -> OptimizeResult:
+                  strict: bool = False, alpha0: Sequence[float] | None = None,
+                  r_min_frac: float = 0.15) -> OptimizeResult:
     """Optimise the fractal-tree configuration to homogenise perfusion (Paper D).
 
     Minimises :func:`objective` (``kind`` selects flux- or TOF-homogeneity) over
@@ -155,7 +162,8 @@ def optimize_tree(kind: str = "tof_std", *, grid: Grid | None = None,
         n_eval += 1
         a = base.copy()
         a[free] = x
-        return objective(a, kind=kind, grid=grid, domain_limit=domain_limit, strict=strict)
+        return objective(a, kind=kind, grid=grid, domain_limit=domain_limit, strict=strict,
+                         r_min_frac=r_min_frac)
 
     if method == "global":
         res = differential_evolution(f, bnds, maxiter=maxiter, seed=seed,
