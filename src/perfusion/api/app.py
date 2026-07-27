@@ -110,13 +110,18 @@ app = create_app()
 
 
 def main() -> None:
-    """Run the dev server (``perfusion-api``)."""
+    """Run the dev server (``perfusion-api``). Port defaults to 8010 (8000 is a
+    common conflict); override with ``PERFUSION_PORT``."""
+    import os
+
     import uvicorn
 
     from .store import _default_root
+    port = int(os.environ.get("PERFUSION_PORT", "8010"))
+    print(f"perfusion-api: http://127.0.0.1:{port}  (set PERFUSION_PORT to change)")
     print(f"perfusion-api: persisting projects under {_default_root()}  "
           f"(set PERFUSION_DATA to change)")
-    uvicorn.run("perfusion.api.app:app", host="127.0.0.1", port=8000, reload=False)
+    uvicorn.run("perfusion.api.app:app", host="127.0.0.1", port=port, reload=False)
 
 
 if __name__ == "__main__":

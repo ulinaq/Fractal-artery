@@ -680,6 +680,20 @@ def test_tracer_kinetics_fit(client):
     assert len(k["times"]) == len(k["measured"]) == len(k["fitted"]) == len(k["aif"])
 
 
+def test_transient_pulsatile_damping(client):
+    pid = client.post("/projects", json={"name": "tr", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    assert client.get(f"/projects/{pid}/transient").status_code == 409   # no result yet
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    d = client.get(f"/projects/{pid}/transient",
+                   params={"period": 1.0, "pulse": 0.5, "compliance": 0.05}).json()
+    assert d["R"] > 0
+    assert d["C"] > 0
+    assert len(d["t"]) == len(d["p_in"]) == len(d["q_tissue"])
+    assert d["tissue_pulsatility"] < d["inlet_pulsatility"]      # compliance damps the pulse
+
+
 def test_transit_409_without_field_result(client):
     pid = client.post("/projects", json={"name": "d", "params": {"p_in": 40, "p_out": 0},
                                          "grid": SMALL_GRID}).json()["id"]

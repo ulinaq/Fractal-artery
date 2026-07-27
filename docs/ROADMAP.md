@@ -393,5 +393,9 @@ a research project. Each notes where it lands in the tree.
   flag and a Run-card toggle.
 - ✅ **Vessel-wall elasticity** (`Parameters.compliance`, `run_hybrid(elasticity=True)`) —
   radii swell with transmural pressure (r = r0(1 + C(p − p_out))), solved as a
-  fixed-point; `RunRequest.elasticity`/`compliance` + a Run-card toggle. Gateway to
-  pulsatile flow.
+  fixed-point; `RunRequest.elasticity`/`compliance` + a Run-card toggle.
+- ✅ **Transient / pulsatile (0-D Windkessel)** (`core/transient.py`) — steady R +
+  elastic compliance C driven by a pulsatile inlet; `GET /projects/{id}/transient`
+  returns the cycle + inlet-vs-tissue pulsatility (damping), a result-view chart,
+  and the MCP `pulsatile_windkessel` tool. Default `perfusion-api` port is now 8010
+  (`PERFUSION_PORT` to override).

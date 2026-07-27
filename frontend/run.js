@@ -117,6 +117,51 @@ export async function fitKinetics() {
   status("kinetics fitted", "ok");
 }
 
+// ── transient (pulsatile / Windkessel) response ─────────────────────────────
+export async function runTransient() {
+  requireProject();
+  if (state.resultModel !== "hybrid") { status("transient needs a hybrid result", "err"); return; }
+  let d;
+  try {
+    d = await api("GET", `/projects/${state.project}/transient`
+      + `?period=${numOf("tr-period")}&pulse=${numOf("tr-pulse")}&compliance=${numOf("tr-compliance")}`);
+  } catch (e) {
+    status(/409/.test(e.message) ? "run a simulation first" : e.message, "err");
+    return;
+  }
+  drawTransient($("tr-chart"), d);
+  const damp = d.inlet_pulsatility > 0 ? (1 - d.tissue_pulsatility / d.inlet_pulsatility) * 100 : 0;
+  $("tr-info").textContent =
+    `R=${ttdFmt(d.R)} · C=${ttdFmt(d.C)} · tissue-flow pulsatility ${(d.tissue_pulsatility * 100).toFixed(0)}%`
+    + ` vs inlet ${(d.inlet_pulsatility * 100).toFixed(0)}% (${damp.toFixed(0)}% damped)`;
+  status("pulsatile response ready", "ok");
+}
+
+function drawTransient(el, d) {
+  const ctx = el.getContext("2d"), W = el.width, H = el.height;
+  ctx.clearRect(0, 0, W, H);
+  const t = d.t || [];
+  if (t.length < 2) return;
+  const pad = { l: 6, r: 6, t: 8, b: 14 };
+  const rel = (a) => { const m = a.reduce((s, x) => s + x, 0) / a.length || 1; return a.map((x) => (x - m) / m); };
+  const pin = rel(d.p_in), q = rel(d.q_tissue);
+  let amp = 1e-9;
+  for (const s of [pin, q]) for (const v of s) amp = Math.max(amp, Math.abs(v));
+  const X = (i) => pad.l + (i / (t.length - 1)) * (W - pad.l - pad.r);
+  const Y = (v) => H / 2 - (v / amp) * ((H - pad.t - pad.b) / 2);
+  ctx.strokeStyle = getCss("--line");                        // mean line
+  ctx.beginPath(); ctx.moveTo(pad.l, H / 2); ctx.lineTo(W - pad.r, H / 2); ctx.stroke();
+  const line = (s, color) => {
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
+    s.forEach((v, i) => { const x = X(i), y = Y(v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke();
+  };
+  line(pin, getCss("--art"));                                // inlet pressure (relative to mean)
+  line(q, getCss("--accent"));                               // tissue flow (relative to mean)
+  ctx.fillStyle = getCss("--muted"); ctx.font = "9px -apple-system, sans-serif";
+  ctx.fillText("— inlet p   — tissue flow (rel. to mean)", pad.l, H - 4);
+}
+
 function drawTKM(el, d) {
   const ctx = el.getContext("2d"), W = el.width, H = el.height;
   ctx.clearRect(0, 0, W, H);
