@@ -99,6 +99,20 @@ def optimize_structure(kind: str = "tof_std", method: str = "local", maxiter: in
             "a_gamma": r.alpha[0], "v_gamma": r.alpha[1], "exponent": r.alpha[8]}
 
 
+def fit_kinetics(t, aif, concentration, model: str = "2CXM") -> dict:
+    """Fit a tracer-kinetic model to a tissue concentration curve (Paper C)."""
+    from .core import tkm
+
+    r = tkm.fit(np.asarray(t, float), np.asarray(aif, float),
+                np.asarray(concentration, float), model=model)
+
+    def num(x):
+        return float(x) if x is not None and np.isfinite(x) else None
+
+    return {"model": model.upper(), "Fp": num(r.Fp), "vp": num(r.vp),
+            "PS": num(r.PS), "ve": num(r.ve)}
+
+
 def model_info() -> dict:
     """Describe what the perfusion model computes and the fields it returns."""
     return {
@@ -158,6 +172,15 @@ def build_server():
         best objective and key tree parameters. Each step is a full solve — keep
         the grid coarse and `maxiter` modest."""
         return optimize_structure(kind=kind, method=method, maxiter=maxiter, nx=nx, ny=ny)
+
+    @server.tool()
+    def fit_tracer_kinetics(t: list[float], aif: list[float], concentration: list[float],
+                            model: str = "2CXM") -> dict:
+        """Fit a tracer-kinetic model (MS / 1CM / 2CUM / 2CXM) to a tissue
+        concentration curve, given uniform time samples `t`, the arterial input
+        function `aif`, and the tissue curve `concentration`. Returns plasma flow
+        Fp, plasma volume vp, and PS / ve for the two-compartment models."""
+        return fit_kinetics(t, aif, concentration, model=model)
 
     @server.tool()
     def describe_model() -> dict:

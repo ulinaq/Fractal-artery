@@ -156,6 +156,23 @@
         <p class="muted" id="ttd-info"></p>
       </details>
 
+      <details class="card" data-mode="result">
+        <summary>Tracer kinetics (TKM)</summary>
+        <p class="muted">Fit a tracer-kinetic model to the contrast bolus (run
+          ▶ Tracer first) to recover plasma flow Fp / volume vp / PS / ve.</p>
+        <label>model
+          <select id="tkm-model">
+            <option value="1CM">1-compartment (Fp, vp)</option>
+            <option value="2CXM">2-compartment exchange (Fp, vp, PS, ve)</option>
+            <option value="2CUM">2-compartment uptake (Fp, vp, PS)</option>
+            <option value="MS">maximum slope (Fp)</option>
+          </select>
+        </label>
+        <button id="btn-tkm">Fit kinetics</button>
+        <canvas id="tkm-chart" width="288" height="120"></canvas>
+        <p class="muted" id="tkm-info"></p>
+      </details>
+
       <section class="card run-card">
         <label>model
           <select id="run-model">
