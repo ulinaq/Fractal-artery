@@ -152,6 +152,29 @@ def tracer_kinetics(pid: str, model: str = "1CM",
     }
 
 
+@router.get("/projects/{pid}/kinetics/maps", response_model=FieldResponse)
+def kinetic_map(pid: str, field: str = "Fp", project: Project = Depends(get_project),
+                store: ProjectStore = Depends(get_store)) -> FieldResponse:
+    """Voxel-wise parametric map from the tracer: ``field='Fp'`` (max-slope plasma
+    flow) or ``'vp'`` (AUC blood volume) — model-free DCE-style perfusion maps."""
+    from ..core import tkm
+
+    if not project.has_tracer:
+        raise HTTPException(409, "no tracer yet; POST to /tracer first")
+    if field not in ("Fp", "vp"):
+        raise HTTPException(404, "field must be 'Fp' or 'vp'")
+    d = store.load_tracer(pid)
+    times, frames, mask = d["times"], d["frames"], d["mask"]
+    if "aif" in d:
+        ca = np.asarray(d["aif"], float)
+    else:
+        dur = float(times[-1]) if len(times) else 1.0
+        ca = tkm.gamma_variate_aif(times, t0=0.08 * dur, A=3.0, B=max(0.06 * dur, 1e-6))
+    m = tkm.kinetic_maps(frames, times, ca, mask=mask)[field]
+    data = np.where(np.isfinite(m), m, None)
+    return FieldResponse(name=field, shape=m.shape, data=data.tolist())
+
+
 @router.get("/projects/{pid}/transient")
 def transient_response(pid: str, period: float = 1.0, pulse: float = 0.5,
                        compliance: float = 0.02, cycles: int = 4, proximal: float = 0.1,

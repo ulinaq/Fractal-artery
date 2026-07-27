@@ -11,8 +11,8 @@ import {
   moveNode, onEditRadius, revertEdits, saveEdits, syncEditPanel, toggleAddMode,
 } from "./edit.js";
 import {
-  computeFlow, fitKinetics, grow, loadField, loadNetwork, loadResultView, pauseFlow, run,
-  runTransient, stopFlow, stopTimer, syncFlowUI, toggleFlowPlay,
+  computeFlow, fitKinetics, grow, loadField, loadKineticMap, loadNetwork, loadResultView,
+  pauseFlow, run, runTransient, stopFlow, stopTimer, syncFlowUI, toggleFlowPlay,
 } from "./run.js";
 
 // ── undo / redo (workspace geometry history) ───────────────────────────────────
@@ -485,6 +485,8 @@ document.querySelectorAll(".field").forEach((b) => b.addEventListener("click", (
 $("btn-flow").addEventListener("click", guarded(computeFlow));
 $("btn-tkm").addEventListener("click", guarded(fitKinetics));
 $("btn-transient").addEventListener("click", guarded(runTransient));
+$("btn-map-fp").addEventListener("click", guarded(() => loadKineticMap("Fp")));
+$("btn-map-vp").addEventListener("click", guarded(() => loadKineticMap("vp")));
 $("tkm-model").addEventListener("change", () => { if (state.tracer) fitKinetics().catch(() => {}); });
 $("flow-play").addEventListener("click", toggleFlowPlay);
 $("flow-scrub").addEventListener("input", (e) => {
