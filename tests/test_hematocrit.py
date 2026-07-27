@@ -64,6 +64,24 @@ def test_run_hybrid_phase_separation_conserves_and_alters_flow():
     assert not np.allclose(base.flux, ps.flux)
 
 
+def test_vessel_wall_elasticity_swells_radii_and_conserves():
+    from perfusion import Grid, Parameters, run_hybrid
+
+    grid = Grid(nx=40, ny=46, lx=140, ly=160)
+    dom = (-70, 70, 0, 160)
+    prm = Parameters(r_min_frac=0.4, p_in=10.0, p_out=0.0, compliance=0.02)
+    rigid = run_hybrid(prm, grid, dom)                        # compliance ignored (elasticity off)
+    elastic = run_hybrid(prm, grid, dom, elasticity=True)     # radii swell with pressure
+
+    n = elastic.art.terminal_nodes.size
+    inflow = elastic.solution.terminal_flux[:n].sum()
+    outflow = -elastic.solution.terminal_flux[n:].sum()
+    assert inflow == pytest.approx(outflow, rel=1e-6)        # mass balances
+    assert inflow > 0
+    # positive pressure + positive compliance -> arterial radii swell above the rigid baseline
+    assert elastic.art.seg_radius.mean() > rigid.art.seg_radius.mean()
+
+
 def test_single_vessel_hematocrit_unchanged():
     net = Network(
         node_x=np.array([0.0, 0.0]), node_y=np.array([0.0, 1.0]),

@@ -140,18 +140,21 @@ def validate_run(project, use_vessels):
 
 
 def solve(project, *, use_vessels, nonlinear=False, max_iter=100, tol=1e-10,
-          phase_separation=False):
+          phase_separation=False, elasticity=False, compliance=0.01):
     """Build the model (grid, trees, inlet/outlet nodes) and run the hybrid solve."""
     prm = project.params.to_core()
     if phase_separation:
         prm.fahraeus_lindqvist = True     # skimming only feeds back through F-L viscosity
+    if elasticity:
+        prm.compliance = compliance
     grid, art, ven = validate_run(project, use_vessels)
     domain_limit = project.grid.domain_limit
     return run_hybrid(prm, grid, domain_limit=domain_limit, nonlinear=nonlinear,
                       art=art, ven=ven,
                       art_inlets=snap_io(art, project.inlets),
                       ven_outlets=snap_io(ven, project.outlets),
-                      max_iter=max_iter, tol=tol, phase_separation=phase_separation)
+                      max_iter=max_iter, tol=tol,
+                      phase_separation=phase_separation, elasticity=elasticity)
 
 
 def solve_direct_model(project, use_vessels, rho_c=0.0):
@@ -183,7 +186,8 @@ def run_project(store, project, req: RunRequest) -> None:
         warnings.simplefilter("always")
         result = solve(project, use_vessels=req.use_vessels, nonlinear=req.nonlinear,
                        max_iter=req.max_iter, tol=req.tol,
-                       phase_separation=req.phase_separation)
+                       phase_separation=req.phase_separation,
+                       elasticity=req.elasticity, compliance=req.compliance)
     notes = [str(w.message) for w in caught if issubclass(w.category, RuntimeWarning)]
     store.save_result(project, result, notes=notes or None)
 

@@ -325,7 +325,7 @@ a research project. Each notes where it lands in the tree.
 | Idea | What it adds | Lands in | Effort |
 |---|---|---|---|
 | **Transit-time distribution & CTH** *(in progress — see 9.6)* | turn the TOF field into MTT, capillary transit-time heterogeneity (σ) and an oxygen-extraction estimate | `core/perfusion_metrics.py` | S |
-| Vessel-wall elasticity (thesis Eq. 4.9) | pressure-dependent radii; step toward pulsatile flow | `core/network.solve_nonlinear` (hook already there) | M |
+| ✅ Vessel-wall elasticity (thesis Eq. 4.9) | pressure-dependent radii, r = r0(1 + C(p − p_out)); fixed-point in `run_hybrid(elasticity=True)` + `Parameters.compliance` | `pipeline` | done |
 | Pulsatile / transient flow | cardiac-cycle dynamics via RLC / Windkessel + inertance | new `core/transient.py` | L |
 | ✅ Hematocrit phase-separation at bifurcations (Pries plasma-skimming) | unequal RBC split → per-segment hematocrit & viscosity vary (`core/hematocrit.py`, coupled in `run_hybrid(phase_separation=True)`) | `core/hematocrit.py` + `pipeline` | done |
 | Multi-compartment Darcy (arteriole/capillary/venule beds) | replace the single porous bed with coupled compartments (Hyde–Smith) | `core/darcy` + `pipeline` | L |
@@ -391,3 +391,7 @@ a research project. Each notes where it lands in the tree.
   propagated through the arterial tree; coupled to Fåhræus–Lindqvist viscosity via
   `run_hybrid(phase_separation=True)` (fixed-point), a `RunRequest.phase_separation`
   flag and a Run-card toggle.
+- ✅ **Vessel-wall elasticity** (`Parameters.compliance`, `run_hybrid(elasticity=True)`) —
+  radii swell with transmural pressure (r = r0(1 + C(p − p_out))), solved as a
+  fixed-point; `RunRequest.elasticity`/`compliance` + a Run-card toggle. Gateway to
+  pulsatile flow.
