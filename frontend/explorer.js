@@ -92,22 +92,26 @@ function updateColorbar(vmin, vmax, label) {
 }
 
 async function optimise() {
-  $("btn-opt").disabled = true;
+  const btn = $("btn-opt"), label = btn.textContent;
+  btn.disabled = true; btn.textContent = "Optimising…";     // visible even for a fast run
+  $("opt-info").textContent = "searching…";
   status("optimising… (this runs several solves)");
   try {
     const o = await post("/explore/optimize", {
-      kind: $("kind").value, method: $("method").value, maxiter: Number($("maxiter").value),
-      nx: 50, ny: 58,
+      kind: $("kind").value, method: $("method").value,
+      maxiter: Number($("maxiter").value) || 15, nx: 50, ny: 58,
     });
     for (const k of PARAMS) if (o[k] != null) $(k).value = o[k];   // load the best config
     syncLabels();
     $("opt-info").textContent =
       `${o.kind}: ${fmt(o.start)} → ${fmt(o.best)} (${(o.improvement * 100).toFixed(1)}% better, ${o.n_eval} evals)`;
     await evaluate();
+    status("optimised", "ok");
   } catch (e) {
-    status(e.message, "err");
+    $("opt-info").textContent = "optimise failed — " + e.message;
+    status("optimise failed", "err");
   } finally {
-    $("btn-opt").disabled = false;
+    btn.disabled = false; btn.textContent = label;
   }
 }
 

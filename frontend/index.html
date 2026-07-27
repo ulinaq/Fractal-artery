@@ -183,6 +183,9 @@
         </label>
         <label class="check" id="nonlinear-row"><input id="nonlinear" type="checkbox" /> nonlinear (junction losses)</label>
         <label class="check" id="phasesep-row"><input id="phase-sep" type="checkbox" /> hematocrit phase separation (Pries)</label>
+        <label class="check" id="elastic-row"><input id="elasticity" type="checkbox" /> vessel-wall elasticity</label>
+        <label id="compliance-row" style="display:none">compliance (Δr per unit pressure)
+          <input id="compliance" type="number" value="0.01" step="0.005" min="0" /></label>
         <label id="maxiter-row" style="display:none">max iterations (nonlinear fixed-point)
           <input id="max-iter" type="number" value="100" min="1" step="10" />
         </label>

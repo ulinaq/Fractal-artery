@@ -95,6 +95,8 @@ class RunRequest(BaseModel):
     tol: float = Field(1e-10, gt=0)               # convergence tolerance
     rho_c: float = Field(0.0, ge=0)               # direct model: terminal connection radius
     phase_separation: bool = False                 # RBC plasma-skimming (implies Fåhræus–Lindqvist)
+    elasticity: bool = False                       # pressure-dependent vessel radii
+    compliance: float = Field(0.01, ge=0)          # radius change per unit transmural pressure
 
 
 class ExploreRequest(BaseModel):

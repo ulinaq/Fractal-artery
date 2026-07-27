@@ -73,6 +73,10 @@ class Parameters:
     v_theta: float = np.pi / 2
     v_gamma: float = 1.2
 
+    # Vessel-wall elasticity: fractional radius change per unit transmural pressure,
+    # r = r0 (1 + compliance (p - p_out)). 0 => rigid walls (thesis Eq. 4.9).
+    compliance: float = 0.0
+
     # Reproducibility for the randomised deeper-generation asymmetries
     seed: int | None = 0
 

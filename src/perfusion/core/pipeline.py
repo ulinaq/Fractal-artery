@@ -128,7 +128,7 @@ def run_hybrid(prm: Parameters, grid: Grid,
                art: Network | None = None, ven: Network | None = None,
                art_inlets=None, ven_outlets=None,
                max_iter: int = 100, tol: float = 1e-10,
-               phase_separation: bool = False) -> HybridResult:
+               phase_separation: bool = False, elasticity: bool = False) -> HybridResult:
     """Build trees (or use the given ones), couple to Darcy, solve, post-process.
 
     Pass ``art``/``ven`` to use pre-built networks -- e.g. segmented from images
@@ -155,29 +155,47 @@ def run_hybrid(prm: Parameters, grid: Grid,
     response, field_response, sources = darcy.terminal_response(grid, terminal_cells, eps)
 
     # Per-segment viscosity (radius-dependent when Fahraeus-Lindqvist is enabled).
-    def _solve(visc):
+    def _solve(a, v, visc):
         if nonlinear:
-            return network.solve_nonlinear(art, ven, response, prm.p_in, prm.p_out, prm, visc,
+            return network.solve_nonlinear(a, v, response, prm.p_in, prm.p_out, prm, visc,
                                            max_iter=max_iter, tol=tol)
-        return network.solve_linear(art, ven, response, prm.p_in, prm.p_out, visc)
+        return network.solve_linear(a, v, response, prm.p_in, prm.p_out, visc)
 
-    mu_ven = _segment_viscosity(ven, prm)
-    if phase_separation and prm.fahraeus_lindqvist:
+    if elasticity and prm.compliance:
+        # Vessel-wall elasticity (Eq. 4.9): radii swell with transmural pressure,
+        # r = r0 (1 + C (p - p_out)); resistance ∝ 1/r^4, so iterate to a fixed point.
+        r0a, r0v = np.asarray(art.seg_radius, float), np.asarray(ven.seg_radius, float)
+        art_e, ven_e = art, ven
+        for _ in range(max(1, max_iter)):
+            visc_e = (_segment_viscosity(art_e, prm), _segment_viscosity(ven_e, prm))
+            sol = _solve(art_e, ven_e, visc_e)
+            spa = 0.5 * (sol.p_a[art.seg_start] + sol.p_a[art.seg_end])
+            spv = 0.5 * (sol.p_v[ven.seg_start] + sol.p_v[ven.seg_end])
+            ra = np.clip(r0a * (1.0 + prm.compliance * (spa - prm.p_out)), 0.3 * r0a, 3.0 * r0a)
+            rv = np.clip(r0v * (1.0 + prm.compliance * (spv - prm.p_out)), 0.3 * r0v, 3.0 * r0v)
+            done = (np.max(np.abs(ra - art_e.seg_radius)) <= 1e-4 * float(r0a.max())
+                    and np.max(np.abs(rv - ven_e.seg_radius)) <= 1e-4 * float(r0v.max()))
+            art_e, ven_e = replace(art_e, seg_radius=ra), replace(ven_e, seg_radius=rv)
+            if done:
+                break
+        art, ven = art_e, ven_e          # report the deformed geometry
+    elif phase_separation and prm.fahraeus_lindqvist:
         # Couple RBC phase separation to viscosity: iterate arterial hematocrit
         # (Pries skimming) <-> Fahraeus-Lindqvist viscosity until it converges.
         from .hematocrit import segment_hematocrit
 
         d_art = 2.0 * art.seg_radius * prm.radius_to_um
+        mu_ven = _segment_viscosity(ven, prm)
         hd = np.full(art.n_segments, prm.hematocrit)
         for _ in range(max(1, max_iter)):
-            sol = _solve((apparent_viscosity(d_art, hd, prm.mu), mu_ven))
+            sol = _solve(art, ven, (apparent_viscosity(d_art, hd, prm.mu), mu_ven))
             hd_new = segment_hematocrit(art, np.abs(sol.q_a), prm.hematocrit, prm.radius_to_um)
             if np.max(np.abs(hd_new - hd)) <= 1e-4:
                 hd = hd_new
                 break
             hd = hd_new
     else:
-        sol = _solve((_segment_viscosity(art, prm), mu_ven))
+        sol = _solve(art, ven, (_segment_viscosity(art, prm), _segment_viscosity(ven, prm)))
 
     pressure = darcy.reconstruct_field(field_response, sol.terminal_flux, balance=True)
     pressure = pressure.reshape(grid.nx, grid.ny, order="F")
