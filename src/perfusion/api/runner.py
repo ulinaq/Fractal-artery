@@ -207,7 +207,9 @@ def run_tracer(store, project, req: TracerRequest) -> None:
         result.solution.terminal_flux, aif, dt, theta=1.0)
     stride = max(1, n_steps // req.n_frames)
     frames, times = full[::stride][:req.n_frames], t[::stride][:req.n_frames]
+    aif_frames = aif[::stride][:req.n_frames]        # AIF at the frame times, for TKM fitting
     # Robust colour scale: injection cells spike far above the tissue.
     active = frames[:, result.grid.mask]
     vmax = float(np.nanpercentile(active, 99)) if active.size else 0.0
-    store.save_tracer(project, frames, times, vmax if vmax > 0 else 1.0, result.grid.mask)
+    store.save_tracer(project, frames, times, vmax if vmax > 0 else 1.0, result.grid.mask,
+                      aif=aif_frames)

@@ -96,6 +96,54 @@ async function loadTransit() {
     `MTT ${ttdFmt(d.mtt)} · CTH ${ttdFmt(d.cth)} · RD ${d.rd.toFixed(2)} · OEF ${(d.oef * 100).toFixed(0)}%`;
 }
 
+// ── tracer-kinetic model fit ────────────────────────────────────────────────
+export async function fitKinetics() {
+  requireProject();
+  if (state.resultModel !== "hybrid") { status("kinetics needs the hybrid tracer", "err"); return; }
+  let d;
+  try {
+    d = await api("GET", `/projects/${state.project}/kinetics?model=${$("tkm-model").value}`);
+  } catch (e) {
+    status(/409/.test(e.message) ? "compute the ▶ Tracer first" : e.message, "err");
+    return;
+  }
+  drawTKM($("tkm-chart"), d);
+  const parts = [`Fp=${ttdFmt(d.Fp)}`];
+  if (d.vp != null) parts.push(`vp=${ttdFmt(d.vp)}`);
+  if (d.PS != null) parts.push(`PS=${ttdFmt(d.PS)}`);
+  if (d.ve != null) parts.push(`ve=${ttdFmt(d.ve)}`);
+  $("tkm-info").textContent = `${d.model}: ${parts.join(" · ")}`;
+  status("kinetics fitted", "ok");
+}
+
+function drawTKM(el, d) {
+  const ctx = el.getContext("2d"), W = el.width, H = el.height;
+  ctx.clearRect(0, 0, W, H);
+  const t = d.times || [];
+  if (t.length < 2) return;
+  const pad = { l: 6, r: 6, t: 8, b: 14 };
+  const series = [d.aif, d.measured, d.fitted];
+  let vmax = 0;
+  for (const s of series) if (s) for (const v of s) if (v != null && v > vmax) vmax = v;
+  vmax = vmax || 1;
+  const X = (i) => pad.l + (i / (t.length - 1)) * (W - pad.l - pad.r);
+  const Y = (v) => H - pad.b - (v / vmax) * (H - pad.t - pad.b);
+  const line = (s, color, dash = []) => {
+    if (!s) return;
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.setLineDash(dash); ctx.beginPath();
+    let started = false;
+    s.forEach((v, i) => { if (v == null) return; const x = X(i), y = Y(v); started ? ctx.lineTo(x, y) : ctx.moveTo(x, y); started = true; });
+    ctx.stroke(); ctx.setLineDash([]);
+  };
+  line(d.aif, getCss("--muted"), [3, 2]);        // arterial input (faint dashed)
+  line(d.measured, getCss("--accent"));           // tissue curve
+  line(d.fitted, getCss("--art"));                // fitted TKM
+  ctx.strokeStyle = getCss("--line");
+  ctx.beginPath(); ctx.moveTo(pad.l, H - pad.b); ctx.lineTo(W - pad.r, H - pad.b); ctx.stroke();
+  ctx.fillStyle = getCss("--muted"); ctx.font = "9px -apple-system, sans-serif";
+  ctx.fillText("— tissue  — fit  ·· AIF", pad.l, H - 4);
+}
+
 function drawTTD(el, d) {
   const ctx = el.getContext("2d"), W = el.width, H = el.height;
   const { centres, density } = d.histogram;
@@ -183,6 +231,7 @@ export async function computeFlow() {
   state.flow.active = true;
   ["flow-play", "flow-scrub", "flow-time", "flow-gif"].forEach((id) => ($(id).hidden = false));
   playFlow();
+  fitKinetics().catch(() => {});    // also fit a TKM to the bolus (best-effort)
 }
 
 async function loadTracer() {

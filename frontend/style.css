@@ -37,7 +37,7 @@ body { background: var(--bg); color: var(--ink); font-size: 14px; }
 .topbar-right { display: flex; align-items: center; gap: 12px; }
 .history { display: inline-flex; gap: 4px; }
 .history button { padding: 5px 10px; font-size: 12px; }
-#ttd { width: 100%; height: auto; background: #fff; border: 1px solid var(--line); border-radius: 6px; cursor: default; margin-top: 4px; }
+#ttd, #tkm-chart { width: 100%; height: auto; background: #fff; border: 1px solid var(--line); border-radius: 6px; cursor: default; margin-top: 4px; }
 .build-badge {
   font-size: 11px; color: var(--muted); padding: 3px 9px; border-radius: 999px;
   background: var(--bg); border: 1px solid var(--line); font-variant-numeric: tabular-nums;

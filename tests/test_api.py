@@ -641,6 +641,19 @@ def test_transit_metrics_in_summary_and_endpoint(client):
     assert sum(d) * width == pytest.approx(1.0, rel=1e-6)     # normalised density
 
 
+def test_tracer_kinetics_fit(client):
+    pid = client.post("/projects", json={"name": "tkm", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    assert client.get(f"/projects/{pid}/kinetics").status_code == 409   # no tracer yet
+    jid = client.post(f"/projects/{pid}/tracer", json={"n_frames": 24}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    k = client.get(f"/projects/{pid}/kinetics", params={"model": "1CM"}).json()
+    assert k["model"] == "1CM"
+    assert k["Fp"] is not None
+    assert k["Fp"] > 0
+    assert len(k["times"]) == len(k["measured"]) == len(k["fitted"]) == len(k["aif"])
+
+
 def test_transit_409_without_field_result(client):
     pid = client.post("/projects", json={"name": "d", "params": {"p_in": 40, "p_out": 0},
                                          "grid": SMALL_GRID}).json()["id"]

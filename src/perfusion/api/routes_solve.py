@@ -110,6 +110,48 @@ def transit_distribution(pid: str, bins: int = 40, k: float = 0.0,
     }
 
 
+@router.get("/projects/{pid}/kinetics")
+def tracer_kinetics(pid: str, model: str = "1CM",
+                    project: Project = Depends(get_project),
+                    store: ProjectStore = Depends(get_store)) -> dict:
+    """Fit a tracer-kinetic model to the computed tracer's tissue curve.
+
+    Takes the spatial-mean tissue concentration C(t) over active cells and the
+    stored arterial input, and fits ``model`` (MS / 1CM / 2CUM / 2CXM) to recover
+    plasma flow Fp, plasma volume vp, and (2C models) PS / ve. Needs a tracer
+    (POST /tracer first)."""
+    from ..core import tkm
+
+    if not project.has_tracer:
+        raise HTTPException(409, "no tracer yet; POST to /tracer first")
+    d = store.load_tracer(pid)
+    frames, mask, times = d["frames"], d["mask"], d["times"]
+    conc = np.array([float(np.nanmean(f[mask])) if mask.any() else 0.0 for f in frames])
+    if "aif" in d:
+        ca = np.asarray(d["aif"], float)
+    else:                                             # old blob: reconstruct the bolus shape
+        dur = float(times[-1]) if len(times) else 1.0
+        ca = tkm.gamma_variate_aif(times, t0=0.08 * dur, A=3.0, B=max(0.06 * dur, 1e-6))
+        ca = ca / ca.max() if ca.max() > 0 else ca
+    try:
+        r = tkm.fit(times, ca, conc, model=model)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+
+    def num(x):
+        return float(x) if x is not None and np.isfinite(x) else None
+
+    def arr(a):
+        return [num(v) for v in np.asarray(a)] if a is not None else None
+
+    return {
+        "model": model.upper(), "Fp": num(r.Fp), "vp": num(r.vp),
+        "PS": num(r.PS), "ve": num(r.ve),
+        "times": times.tolist(), "aif": arr(ca),
+        "measured": arr(conc), "fitted": arr(r.curve),
+    }
+
+
 @router.get("/projects/{pid}/direct")
 def direct_result(pid: str, project: Project = Depends(get_project),
                   store: ProjectStore = Depends(get_store)) -> dict:

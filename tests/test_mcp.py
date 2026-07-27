@@ -34,6 +34,18 @@ def test_optimize_structure_returns_best_config():
     assert "v_gamma" in r
 
 
+def test_fit_tracer_kinetics_recovers_flow():
+    from perfusion.core import tkm
+
+    t = np.linspace(0, 10, 200)
+    ca = tkm.gamma_variate_aif(t, t0=0.5, A=3.0, B=1.0)
+    conc = tkm.one_compartment(t, ca, Fp=1.2, vp=0.15)   # synthesise a known-truth curve
+    r = mcp_server.fit_kinetics(t.tolist(), ca.tolist(), conc.tolist(), model="1CM")
+    assert r["model"] == "1CM"
+    assert r["Fp"] == pytest.approx(1.2, rel=0.1)         # recovers the ground truth
+    assert r["vp"] == pytest.approx(0.15, rel=0.2)
+
+
 def test_model_info_shape():
     info = mcp_server.model_info()
     assert info["name"] == "perfusion"

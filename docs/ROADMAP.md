@@ -353,9 +353,10 @@ a research project. Each notes where it lands in the tree.
 
 - **Network-transit kinetics for the direct model** — per-connection transit time → a bolus
   animation for the field-less direct model.
-- **DCE/DSC-MRI forward + inverse model** — convolve an AIF with the tissue residue function;
-  fit `Fp, vp, PS, ve` (extended Tofts, 2-compartment exchange). `core/tkm.py` already
-  round-trips `(Fp, vp)`; extend it to fitting/deconvolution.
+- ✅ **DCE/DSC-MRI tracer-kinetic fitting** — `core/tkm.py` fits MS/1CM/2CUM/2CXM
+  (`Fp, vp, PS, ve`); now wired to the app: the tracer stores its AIF, and
+  `GET /projects/{id}/kinetics` fits the model to the tissue curve (result-view card +
+  MCP `fit_tracer_kinetics` tool). *(Next: per-region / voxel-wise maps, deconvolution.)*
 - **Transit-time distributions & CTH** → MTT, CTH and oxygen-extraction limits
   (Jespersen–Østergaard). Reuses `core/timeofflight`. *(Started — see 9.6.)*
 
@@ -380,3 +381,6 @@ a research project. Each notes where it lands in the tree.
 - ✅ **Optimisation driver** (`optimize.optimize_tree`) — minimise flux-/TOF-homogeneity
   over the tree's branching asymmetries (Nelder-Mead or differential evolution); MCP
   `optimize_tree_config` tool.
+- ✅ **Tracer-kinetic fitting** wired to the tracer — AIF stored with the tracer,
+  `GET /projects/{id}/kinetics` fits a TKM to the tissue curve, result-view card
+  (measured vs fitted curve + Fp/vp/PS/ve), MCP `fit_tracer_kinetics` tool.

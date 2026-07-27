@@ -308,11 +308,15 @@ class ProjectStore:
         with np.load(self.result_path(pid)) as data:
             return data[name]
 
-    def save_tracer(self, project: Project, frames, times, vmax, mask) -> None:
-        """Persist the tracer animation frames as a blob."""
-        np.savez(self.tracer_path(project.id), frames=np.asarray(frames, dtype=np.float32),
-                 times=np.asarray(times, dtype=float), vmax=float(vmax),
-                 mask=np.asarray(mask, dtype=bool))
+    def save_tracer(self, project: Project, frames, times, vmax, mask, aif=None) -> None:
+        """Persist the tracer animation frames as a blob (with the driving AIF, so
+        tracer-kinetic fitting has the exact arterial input)."""
+        arrays = dict(frames=np.asarray(frames, dtype=np.float32),
+                      times=np.asarray(times, dtype=float), vmax=float(vmax),
+                      mask=np.asarray(mask, dtype=bool))
+        if aif is not None:
+            arrays["aif"] = np.asarray(aif, dtype=float)
+        np.savez(self.tracer_path(project.id), **arrays)
         project.has_tracer = True
 
     def load_tracer(self, pid: str) -> dict:
