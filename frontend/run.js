@@ -37,7 +37,7 @@ export async function run() {
   const job = await api("POST", `/projects/${state.project}/run`,
     { model: $("run-model").value, nonlinear: $("nonlinear").checked,
       use_vessels: $("use-vessels").checked, max_iter: numOf("max-iter"),
-      rho_c: numOf("rho-c") });
+      rho_c: numOf("rho-c"), phase_separation: $("phase-sep").checked });
   status("running…");
   $("run-info").classList.remove("run-error");
   $("run-info").textContent = "job " + job.id;

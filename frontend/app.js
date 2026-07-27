@@ -438,6 +438,7 @@ $("run-model").addEventListener("change", (e) => {   // show the settings each m
   const direct = e.target.value === "direct";
   $("rhoc-row").style.display = direct ? "" : "none";
   $("nonlinear-row").style.display = direct ? "none" : "";
+  $("phasesep-row").style.display = direct ? "none" : "";
   $("maxiter-row").style.display = (!direct && $("nonlinear").checked) ? "" : "none";
 });
 $("btn-export").addEventListener("click", () => {

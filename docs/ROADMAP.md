@@ -327,7 +327,7 @@ a research project. Each notes where it lands in the tree.
 | **Transit-time distribution & CTH** *(in progress — see 9.6)* | turn the TOF field into MTT, capillary transit-time heterogeneity (σ) and an oxygen-extraction estimate | `core/perfusion_metrics.py` | S |
 | Vessel-wall elasticity (thesis Eq. 4.9) | pressure-dependent radii; step toward pulsatile flow | `core/network.solve_nonlinear` (hook already there) | M |
 | Pulsatile / transient flow | cardiac-cycle dynamics via RLC / Windkessel + inertance | new `core/transient.py` | L |
-| Hematocrit phase-separation at bifurcations (Pries plasma-skimming) | unequal RBC split → local viscosity varies; beyond radius-only Fåhræus–Lindqvist | `core/network` + `geometry` | M–L |
+| ✅ Hematocrit phase-separation at bifurcations (Pries plasma-skimming) | unequal RBC split → per-segment hematocrit & viscosity vary (`core/hematocrit.py`, coupled in `run_hybrid(phase_separation=True)`) | `core/hematocrit.py` + `pipeline` | done |
 | Multi-compartment Darcy (arteriole/capillary/venule beds) | replace the single porous bed with coupled compartments (Hyde–Smith) | `core/darcy` + `pipeline` | L |
 | Oxygen / solute transport + extraction | advection–diffusion–reaction on the Darcy field coupled to vessels (Krogh) | extend `core/transport.py` | M–L |
 | Heterogeneous / anisotropic permeability | per-cell `K(x)` (or tensor) instead of a scalar | `Grid.permeability` → field; harmonic-mean transmissibilities | M |
@@ -387,3 +387,7 @@ a research project. Each notes where it lands in the tree.
 - ✅ **Tracer-kinetic fitting** wired to the tracer — AIF stored with the tracer,
   `GET /projects/{id}/kinetics` fits a TKM to the tissue curve, result-view card
   (measured vs fitted curve + Fp/vp/PS/ve), MCP `fit_tracer_kinetics` tool.
+- ✅ **Hematocrit phase separation** (`core/hematocrit.py`) — Pries plasma-skimming law
+  propagated through the arterial tree; coupled to Fåhræus–Lindqvist viscosity via
+  `run_hybrid(phase_separation=True)` (fixed-point), a `RunRequest.phase_separation`
+  flag and a Run-card toggle.
