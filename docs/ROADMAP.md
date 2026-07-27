@@ -330,7 +330,7 @@ a research project. Each notes where it lands in the tree.
 | ✅ Hematocrit phase-separation at bifurcations (Pries plasma-skimming) | unequal RBC split → per-segment hematocrit & viscosity vary (`core/hematocrit.py`, coupled in `run_hybrid(phase_separation=True)`) | `core/hematocrit.py` + `pipeline` | done |
 | Multi-compartment Darcy (arteriole/capillary/venule beds) | replace the single porous bed with coupled compartments (Hyde–Smith) | `core/darcy` + `pipeline` | L |
 | ✅ Oxygen / solute transport + extraction | steady advection–reaction(–diffusion) of a blood-borne solute (`core/oxygen.py`): delivery at feeds, first-order tissue uptake at Damköhler rate k, venous washout → saturation / uptake maps + global OEF | `core/oxygen.py` | done |
-| Heterogeneous / anisotropic permeability | per-cell `K(x)` (or tensor) instead of a scalar | `Grid.permeability` → field; harmonic-mean transmissibilities | M |
+| ◑ Heterogeneous permeability | ✅ per-cell `K(x)` field + harmonic-mean transmissibilities (`Grid.permeability` scalar-or-field, `rasterize_permeability`, MCP `heterogeneous_perfusion_lesion`); *todo:* anisotropic (tensor) K + an interactive K-painting web UI | `core/darcy` + `core/geometry` | ◑ |
 | Structural adaptation / autoregulation (Pries–Secomb) | radii evolve toward a wall-shear/metabolic set-point → emergent networks | iterate `growth` + solve | L |
 | Poroelasticity (Biot) | tissue deformation ↔ perfusion coupling | new module | XL |
 
@@ -427,6 +427,12 @@ a research project. Each notes where it lands in the tree.
   timed along the vasculature (τ = volume/flow, pressure-ordered loop-robust sweep);
   `POST /tracer` on a direct result → `GET /projects/{id}/network-tracer`, the ▶ Tracer
   button animates the bolus over the vessels, MCP `direct_transit_metrics`.
+- ◑ **Heterogeneous permeability** (`core/darcy.py`, `core/geometry.rasterize_permeability`) —
+  `Grid.permeability` accepts a scalar *or* a per-cell `(nx, ny)` field; `transmissibilities`
+  uses the **harmonic mean** of adjacent-cell K (Eq. 5.1), so a low-K lesion throttles its
+  boundary faces and starves local perfusion (ischemia). Scalar K now flows through the API
+  (`GridIn.permeability`); MCP `heterogeneous_perfusion_lesion` demonstrates the in-vs-outside
+  flux drop. *(Follow-up: an interactive K-painting web UI + anisotropic tensor K.)*
 - ✅ **Oxygen / solute transport + extraction** (`core/oxygen.py`) — steady
   advection–reaction(–diffusion) of a blood-borne solute: arterial delivery, first-order
   tissue uptake at dimensionless Damköhler rate k, venous washout; a non-singular

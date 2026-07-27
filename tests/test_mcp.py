@@ -72,7 +72,17 @@ def test_server_registers_expected_tools():
     server = mcp_server.build_server()
     tools = {t.name for t in asyncio.run(server.list_tools())}
     assert {"run_simulation", "run_sweep", "perfusion_parameter_maps",
-            "direct_transit_metrics", "oxygen_extraction_map", "describe_model"} <= tools
+            "direct_transit_metrics", "oxygen_extraction_map",
+            "heterogeneous_perfusion_lesion", "describe_model"} <= tools
+
+
+def test_heterogeneous_lesion_starves_local_flux():
+    import json
+
+    r = mcp_server.heterogeneous_perfusion(lesion_k=0.02, nx=50, ny=60, r_min_frac=0.5)
+    json.dumps(r)
+    assert r["flux_in_lesion"] < r["flux_outside"]     # low-K lesion is under-perfused
+    assert 0.0 <= r["starvation_ratio"] < 1.0
 
 
 def test_oxygen_extraction_increases_with_rate():

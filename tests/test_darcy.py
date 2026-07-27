@@ -137,3 +137,62 @@ def test_upwind_operator_conserves(small_grid):
     interior[1:-1, 1:-1] = True
     interior = interior.ravel(order="F")
     assert np.allclose(inflow[interior], outflow[interior], atol=1e-9)
+
+
+def test_permeability_field_reduces_to_scalar():
+    from perfusion.core.darcy import Grid, transmissibilities
+
+    g_scalar = Grid(nx=12, ny=9, lx=2.0, ly=1.5, permeability=3.0)
+    g_field = Grid(nx=12, ny=9, lx=2.0, ly=1.5, permeability=np.full((12, 9), 3.0))
+    txs, tys = transmissibilities(g_scalar)
+    txf, tyf = transmissibilities(g_field)
+    assert np.allclose(txs, txf)
+    assert np.allclose(tys, tyf)
+
+
+def test_transmissibility_is_harmonic_mean():
+    from perfusion.core.darcy import Grid, transmissibilities
+
+    k = np.ones((4, 3))
+    k[2:, :] = 4.0                     # K = 1 (ix<2) | 4 (ix>=2); hx = hy = 1
+    tx, _ = transmissibilities(Grid(nx=4, ny=3, lx=4.0, ly=3.0, permeability=k))
+    assert tx[2, 0] == pytest.approx(2 * 1 * 4 / (1 + 4))   # harmonic mean = 1.6
+    assert tx[1, 0] == pytest.approx(1.0)                   # K = 1 | 1 face
+
+
+def test_low_permeability_barrier_concentrates_pressure_drop():
+    # A low-K wall spanning the domain cannot reduce the (conserved) through-flux,
+    # but it throttles conductance, so almost the entire pressure drop localises
+    # across the wall — the signature of the harmonic-mean transmissibility.
+    import scipy.sparse.linalg as spla
+
+    from perfusion.core.darcy import Grid, tpfa_operator
+
+    n = 24
+    k = np.ones((n, n))
+    k[n // 2, :] = 1e-6                # a near-impermeable vertical wall
+    g = Grid(nx=n, ny=n, permeability=k)
+    src = np.zeros(n * n)
+    src[g.sub2ind(0, np.arange(n))] = 1.0
+    src[g.sub2ind(n - 1, np.arange(n))] = -1.0
+    a = tpfa_operator(g)[0].tolil()
+    a[0, :] = 0.0
+    a[0, 0] = 1.0
+    src[0] = 0.0
+    p = spla.spsolve(a.tocsr(), src).reshape(n, n, order="F")
+    col = p.mean(axis=1)                                    # mean pressure per x-column
+    drop_wall = abs(col[n // 2 - 1] - col[n // 2 + 1])      # across the wall
+    drop_healthy = abs(col[n // 4] - col[n // 4 + 2])       # a healthy interior span
+    assert drop_wall > 1e3 * drop_healthy                  # the barrier dominates the drop
+
+def test_rasterize_permeability_lesion():
+    from perfusion.core.geometry import rasterize_permeability
+
+    dom = (0.0, 10.0, 0.0, 10.0)
+    lesion = [([(3, 3), (7, 3), (7, 7), (3, 7)], 0.1)]   # square patch, K=0.1
+    field = rasterize_permeability(20, 20, dom, lesion, base=1.0)
+    assert field.shape == (20, 20)
+    assert field.max() == pytest.approx(1.0)             # healthy tissue
+    assert field.min() == pytest.approx(0.1)             # lesion
+    assert (field < 1.0).sum() > 0
+    assert rasterize_permeability(5, 5, dom, [], base=2.0).min() == pytest.approx(2.0)
