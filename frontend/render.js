@@ -120,6 +120,29 @@ function drawRegions() {
     if (showFill) { ctx.fillStyle = "rgba(16,185,129,.12)"; ctx.fill(); }
     ctx.strokeStyle = "rgba(5,150,105,.7)"; ctx.lineWidth = 1.5; ctx.stroke();
   }
+  drawLesions();
+}
+
+// low-K permeability lesions: amber outline, opacity growing as K falls; shown in
+// tissue mode (to edit) and over the result (to read alongside the field).
+function drawLesions() {
+  if (state.mode !== "tissue" && state.mode !== "result") return;
+  for (const les of state.lesions) {
+    const poly = les.polygon || les;
+    const k = les.permeability ?? 1;
+    ctx.beginPath(); tracePath(poly); ctx.closePath();
+    ctx.fillStyle = `rgba(217,119,6,${(0.15 + 0.4 * (1 - Math.min(1, k))).toFixed(3)})`;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(180,83,9,.9)"; ctx.lineWidth = 1.5; ctx.stroke();
+    if (poly.length) {
+      const cx = poly.reduce((s, p) => s + p[0], 0) / poly.length;
+      const cy = poly.reduce((s, p) => s + p[1], 0) / poly.length;
+      const [tx, ty] = toCanvas(cx, cy);
+      ctx.fillStyle = "#7c2d12"; ctx.font = "11px system-ui"; ctx.textAlign = "center";
+      ctx.fillText(`k=${(+k).toPrecision(2)}`, tx, ty);
+      ctx.textAlign = "start";
+    }
+  }
 }
 
 function paintHeatmap(data, nx, ny, vmin, vmax) {
@@ -216,6 +239,11 @@ function drawStroke() {
     ctx.lineWidth = 1.8;
     ctx.beginPath(); tracePath(state.regionStroke); ctx.stroke();
     markVertices(state.regionStroke);
+  } else if (state.mode === "tissue" && state.lesionStroke.length) {
+    ctx.strokeStyle = "rgba(180,83,9,.95)"; ctx.fillStyle = ctx.strokeStyle;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath(); tracePath(state.lesionStroke); ctx.stroke();
+    markVertices(state.lesionStroke);
   }
 }
 

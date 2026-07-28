@@ -82,6 +82,15 @@
         <summary>Tissue</summary>
         <p class="muted">Click to outline the organ; cells outside are inactive
           (organ-shaped bed). Multiple regions add together.</p>
+        <label>Draw target
+          <select id="tissue-target">
+            <option value="organ">Organ outline (mask)</option>
+            <option value="lesion">Low-K lesion (permeability)</option>
+          </select>
+        </label>
+        <label id="lesion-k-row" style="display:none">permeability k
+          <input id="lesion-k" type="number" value="0.1" step="0.05" min="0.001" max="1" />
+        </label>
         <div class="row">
           <button id="btn-endregion">End region</button>
           <button id="btn-undo-region">Undo</button>

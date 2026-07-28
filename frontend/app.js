@@ -23,7 +23,7 @@ const history = { stack: [], idx: -1 };
 
 function geomSnapshot() {
   return JSON.stringify({
-    vessels: state.vessels, regions: state.regions,
+    vessels: state.vessels, regions: state.regions, lesions: state.lesions,
     inlets: state.inlets, outlets: state.outlets,
     editable: state.editable, editSource: state.editSource,
   });
@@ -54,6 +54,7 @@ function applySnapshot(snap) {
   const s = JSON.parse(snap);
   state.vessels = s.vessels || { arteries: [], veins: [] };
   state.regions = s.regions || [];
+  state.lesions = s.lesions || [];
   state.inlets = s.inlets || []; state.outlets = s.outlets || [];
   state.editable = s.editable; state.editSource = s.editSource;
   state.editSel = null; state.editAdd = false; state.editDrag = false;
@@ -124,6 +125,7 @@ async function newProject() {
   state.project = p.id;
   state.vessels = { arteries: [], veins: [] };
   state.stroke = []; state.regions = []; state.regionStroke = [];
+  state.lesions = []; state.lesionStroke = [];
   state.inlets = []; state.outlets = [];
   state.network = null; state.fieldData = null;
   stopFlow(); state.tracer = null; state.hasResult = false;
@@ -197,7 +199,7 @@ canvas.addEventListener("pointerdown", (e) => {
   if (state.mode === "edit") { editPointerDown(px, py); return; }
   const pt = toDomain(px, py);
   if (state.mode === "vessels") state.stroke.push(pt);
-  else if (state.mode === "tissue") state.regionStroke.push(pt);
+  else if (state.mode === "tissue") (drawingLesion() ? state.lesionStroke : state.regionStroke).push(pt);
   else if (state.mode === "io") markIO(pt);
   redraw();
 });
@@ -254,33 +256,57 @@ export async function saveVessels() {
   status(`saved ${state.vessels.arteries.length} arteries, ${state.vessels.veins.length} veins`, "ok");
 }
 
-// ── tissue mask drawing ────────────────────────────────────────────────────────
+// ── tissue mask + permeability-lesion drawing ───────────────────────────────────
+function drawingLesion() { return $("tissue-target").value === "lesion"; }
+
 function endRegion() {
-  if (state.regionStroke.length >= 3) {
-    state.regions.push(state.regionStroke.map(([x, y]) => [x, y]));
-    recordHistory();
+  if (drawingLesion()) {
+    if (state.lesionStroke.length >= 3) {
+      state.lesions.push({ polygon: state.lesionStroke.map(([x, y]) => [x, y]),
+                           permeability: Math.max(1e-3, numOf("lesion-k")) });
+      recordHistory();
+    }
+    state.lesionStroke = [];
+  } else {
+    if (state.regionStroke.length >= 3) {
+      state.regions.push(state.regionStroke.map(([x, y]) => [x, y]));
+      recordHistory();
+    }
+    state.regionStroke = [];
   }
-  state.regionStroke = [];
   redraw();
 }
 function undoRegion() {
-  if (state.regionStroke.length) state.regionStroke.pop();
-  else { state.regions.pop(); recordHistory(); }
+  if (drawingLesion()) {
+    if (state.lesionStroke.length) state.lesionStroke.pop();
+    else { state.lesions.pop(); recordHistory(); }
+  } else if (state.regionStroke.length) {
+    state.regionStroke.pop();
+  } else { state.regions.pop(); recordHistory(); }
   redraw();
 }
-function clearTissue() { state.regions = []; state.regionStroke = []; recordHistory(); redraw(); }
+function clearTissue() {
+  if (drawingLesion()) { state.lesions = []; state.lesionStroke = []; }
+  else { state.regions = []; state.regionStroke = []; }
+  recordHistory(); redraw();
+}
 
 export async function saveMask() {
   requireProject();
-  if (state.regionStroke.length >= 3) endRegion();   // auto-close a pending outline
+  if (state.regionStroke.length >= 3 || state.lesionStroke.length >= 3) endRegion();
   await api("PUT", `/projects/${state.project}/mask`, { regions: state.regions });
-  status(state.regions.length ? `saved tissue (${state.regions.length} region(s))`
-                              : "tissue cleared — full domain active", "ok");
+  await api("PUT", `/projects/${state.project}/lesions`, { lesions: state.lesions });
+  const bits = [];
+  bits.push(state.regions.length ? `${state.regions.length} region(s)` : "full domain");
+  if (state.lesions.length) bits.push(`${state.lesions.length} lesion(s)`);
+  status(`saved tissue — ${bits.join(", ")}`, "ok");
 }
 
 async function loadMask() {
   try { state.regions = (await api("GET", `/projects/${state.project}/mask`)).regions || []; }
   catch { state.regions = []; }
+  try { state.lesions = (await api("GET", `/projects/${state.project}/lesions`)).lesions || []; }
+  catch { state.lesions = []; }
 }
 
 export async function loadVessels() {
@@ -395,7 +421,9 @@ document.addEventListener("keydown", (e) => {
   } else if (e.key === "Escape") {
     if (m === "edit") { if (state.editAdd) toggleAddMode(); else { state.editSel = null; syncEditPanel(); redraw(); } }
     else if (m === "vessels" && state.stroke.length) { state.stroke = []; redraw(); }
-    else if (m === "tissue" && state.regionStroke.length) { state.regionStroke = []; redraw(); }
+    else if (m === "tissue" && (state.regionStroke.length || state.lesionStroke.length)) {
+      state.regionStroke = []; state.lesionStroke = []; redraw();
+    }
     else handled = false;
   } else if (k === "a") {
     if (m === "edit") clickIfEnabled("btn-edit-add");            // toggle add-branch
@@ -429,6 +457,9 @@ $("img-file").addEventListener("change", (e) => {
 $("btn-endregion").addEventListener("click", endRegion);
 $("btn-undo-region").addEventListener("click", undoRegion);
 $("btn-clear-tissue").addEventListener("click", clearTissue);
+$("tissue-target").addEventListener("change", () => {
+  $("lesion-k-row").style.display = drawingLesion() ? "" : "none";
+});
 $("btn-save-mask").addEventListener("click", () => saveMask().catch((e) => status(e.message, "err")));
 $("btn-grow").addEventListener("click", guarded(grow));
 $("btn-run").addEventListener("click", guarded(run));

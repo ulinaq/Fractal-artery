@@ -31,6 +31,8 @@ export const state = {
   stroke: [],                // current in-progress vessel polyline (domain coords)
   regions: [],               // saved tissue outline polygons (domain coords)
   regionStroke: [],          // current in-progress tissue polygon
+  lesions: [],               // low-K patches: {polygon:[[x,y]...], permeability}
+  lesionStroke: [],          // current in-progress lesion polygon
   inlets: [],                // arterial inlet points (domain coords)
   outlets: [],               // venous outlet points (domain coords)
   network: null,             // {segments:[...]} overlaid in result mode

@@ -480,6 +480,36 @@ def test_demo3d_frog_relief(client):
     assert len(d["pressure"]["voxels"]) > 0
 
 
+def test_lesions_set_get_run_and_roundtrip(client):
+    pid = client.post("/projects", json={"name": "lesions", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    assert client.get(f"/projects/{pid}/lesions").json()["lesions"] == []
+    lesion = {"polygon": [[-20, 60], [20, 60], [20, 100], [-20, 100]], "permeability": 0.05}
+    client.put(f"/projects/{pid}/lesions", json={"lesions": [lesion]})
+    got = client.get(f"/projects/{pid}/lesions").json()["lesions"]
+    assert got[0]["permeability"] == 0.05
+    assert got[0]["polygon"][0] == [-20, 60]
+    # the heterogeneous K field feeds a normal solve
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    # document round-trip carries the lesions into a fresh project
+    doc = client.get(f"/projects/{pid}/document").json()
+    assert doc["lesions"][0]["permeability"] == 0.05
+    pid2 = client.post("/projects/import", json=doc).json()["id"]
+    assert client.get(f"/projects/{pid2}/lesions").json()["lesions"][0]["permeability"] == 0.05
+
+
+def test_setting_lesions_invalidates_result(client):
+    pid = client.post("/projects", json={"name": "inv", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    assert client.get(f"/projects/{pid}").json()["has_result"] is True
+    client.put(f"/projects/{pid}/lesions",
+               json={"lesions": [{"polygon": [[-10, 60], [10, 60], [0, 90]], "permeability": 0.1}]})
+    assert client.get(f"/projects/{pid}").json()["has_result"] is False   # stale result cleared
+
+
 def test_document_roundtrip_basic(client):
     # a plain project with params, a tissue region and I/O points
     pid = client.post("/projects", json={"name": "my work", "grid": SMALL_GRID,
