@@ -199,6 +199,20 @@ def run_project(store, project, req: RunRequest) -> None:
     store.save_result(project, result, notes=notes or None)
 
 
+def adapt_network(project, target_exponent: float = 3.0, rate: float = 0.05,
+                  n_iter: int = 60):
+    """Structurally adapt the project's vessel radii toward Murray's law and store the
+    remodelled arterial/venous trees. Returns ``(AdaptationResult, art, ven)``."""
+    from ..core.pipeline import run_adaptation
+
+    prm = project.params.to_core()
+    grid, art, ven = validate_run(project, use_vessels=True)
+    ad = run_adaptation(prm, grid, target_exponent=target_exponent, rate=rate,
+                        n_iter=n_iter, domain_limit=project.grid.domain_limit,
+                        art=art, ven=ven)
+    return ad
+
+
 def multicompartment_field(project, field: str = "perfusion", n: int = 3,
                            beta: float = 1.0):
     """Solve an ``n``-compartment Darcy bed (arteriole→…→venule, uniform exchange

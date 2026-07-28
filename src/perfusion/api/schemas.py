@@ -169,6 +169,22 @@ class GrowInfo(BaseModel):
     n_terminals: int
 
 
+class AdaptRequest(BaseModel):
+    """Structurally adapt vessel radii toward Murray's law (wall-shear remodelling)."""
+
+    target_exponent: float = Field(3.0, ge=1.0, le=5.0)   # |Q| ∝ r^k target (3 = Murray)
+    rate: float = Field(0.05, gt=0, le=0.5)               # per-iteration remodelling step
+    n_iter: int = Field(60, ge=1, le=300)                 # iteration cap (early-stops at target)
+
+
+class AdaptInfo(BaseModel):
+    id: str
+    murray_start: float
+    murray_final: float
+    n_iter: int
+    moved_toward_target: bool
+
+
 class TracerRequest(BaseModel):
     """Animate a contrast-agent bolus washing through the tissue."""
 

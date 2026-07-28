@@ -22,6 +22,7 @@ front-end layers.
 
 from . import growth
 from .core import (
+    adaptation,
     darcy,
     darcy3d,
     direct,
@@ -43,8 +44,10 @@ from .core.geometry import Network, arterial_tree, grow_tree_3d, venous_tree
 from .core.parameters import Parameters
 from .core.perfusion_metrics import transit_metrics
 from .core.pipeline import (
+    AdaptationResult,
     HybridResult,
     MultiCompartmentResult,
+    run_adaptation,
     run_hybrid,
     run_multicompartment,
 )
@@ -53,12 +56,14 @@ from .core.pipeline3d import HybridResult3D, run_hybrid_3d
 __version__ = "0.1.0"
 
 __all__ = [
+    "AdaptationResult",
     "Grid",
     "HybridResult",
     "HybridResult3D",
     "MultiCompartmentResult",
     "Network",
     "Parameters",
+    "adaptation",
     "arterial_tree",
     "darcy",
     "darcy3d",
@@ -72,6 +77,7 @@ __all__ = [
     "perfusion_metrics",
     "pipeline",
     "pipeline3d",
+    "run_adaptation",
     "run_hybrid",
     "run_hybrid_3d",
     "run_multicompartment",

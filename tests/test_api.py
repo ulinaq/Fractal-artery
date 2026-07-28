@@ -768,6 +768,21 @@ def test_kinetic_maps_endpoint(client):
                       params={"field": "Fp", "method": "bogus"}).status_code == 404
 
 
+def test_adapt_endpoint_moves_toward_murray(client):
+    pid = client.post("/projects", json={"name": "adapt", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    info = client.post(f"/projects/{pid}/adapt",
+                       json={"target_exponent": 3.0, "rate": 0.05, "n_iter": 60}).json()
+    assert info["moved_toward_target"] is True
+    assert abs(info["murray_final"] - 3.0) < abs(info["murray_start"] - 3.0)
+    assert info["n_iter"] >= 1
+    # the adapted tree is stored as the project's network and is solvable
+    net = client.get(f"/projects/{pid}/network").json()
+    assert any(s["kind"] == "artery" for s in net["segments"])
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+
+
 def test_multicompartment_endpoint(client):
     pid = client.post("/projects", json={"name": "mc", "grid": SMALL_GRID,
                                          "params": FAST_PARAMS}).json()["id"]

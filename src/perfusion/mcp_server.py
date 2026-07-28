@@ -214,6 +214,28 @@ def direct_transit(rho_c: float = 0.0, p_in: float = 10.0, p_out: float = 0.0,
             "mtt_to_outlet": float(mtt.mean()) if mtt.size else None}
 
 
+def adapt_network(target_exponent: float = 3.0, rate: float = 0.05, n_iter: int = 60,
+                  nx: int = 70, ny: int = 80, p_in: float = 10.0, p_out: float = 0.0,
+                  r_min_frac: float = 0.15) -> dict:
+    """Structural adaptation of vessel radii toward Murray's law (reduced Pries–Secomb).
+
+    Wall-shear-driven remodelling evolves segment radii until the ``|Q| ∝ r^k`` scaling
+    exponent reaches ``target_exponent`` (3 = Murray's law), early-stopping at the closest
+    approach. Returns the starting vs. final exponent and how far the tree moved toward
+    the target — the classic emergent optimum of a self-organising vasculature."""
+    from .core.pipeline import run_adaptation
+
+    nx, ny = int(np.clip(nx, 30, 160)), int(np.clip(ny, 30, 160))
+    prm = Parameters(p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+    grid = Grid(nx=nx, ny=ny, lx=_LX, ly=_LY)
+    ad = run_adaptation(prm, grid, target_exponent=target_exponent, rate=rate,
+                        n_iter=n_iter, domain_limit=_DOMAIN)
+    return {"target_exponent": target_exponent, "n_iter": ad.n_iter,
+            "murray_start": ad.murray_start, "murray_final": ad.murray_exponent,
+            "moved_toward_target": abs(ad.murray_exponent - target_exponent)
+            < abs(ad.murray_start - target_exponent)}
+
+
 def multicompartment(n: int = 3, beta: float = 1.0, nx: int = 90, ny: int = 110,
                      p_in: float = 10.0, p_out: float = 0.0, r_min_frac: float = 0.15) -> dict:
     """Multi-compartment Darcy perfusion (arteriole → … → venule, Michler/Hyde).
@@ -386,6 +408,17 @@ def build_server():
         Returns the mean bolus arrival time by element class and the overall mean
         transit time to the venous outlet. `rho_c` is the connection search radius."""
         return direct_transit(rho_c=rho_c, p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+
+    @server.tool()
+    def adapt_vessel_network(target_exponent: float = 3.0, rate: float = 0.05,
+                             n_iter: int = 60, nx: int = 70, ny: int = 80, p_in: float = 10.0,
+                             p_out: float = 0.0, r_min_frac: float = 0.15) -> dict:
+        """Structural adaptation (Pries–Secomb): evolve vessel radii under wall-shear
+        remodelling until the |Q| ∝ r^k scaling exponent reaches `target_exponent`
+        (3 = Murray's law), early-stopping at the closest approach. Returns the start
+        vs. final exponent — the emergent optimum of a self-organising vasculature."""
+        return adapt_network(target_exponent=target_exponent, rate=rate, n_iter=n_iter,
+                             nx=nx, ny=ny, p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
 
     @server.tool()
     def multicompartment_perfusion(n: int = 3, beta: float = 1.0, nx: int = 90, ny: int = 110,
