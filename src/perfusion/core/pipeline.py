@@ -11,7 +11,7 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
-from . import darcy, geometry, multicompartment, network, timeofflight
+from . import adaptation, darcy, geometry, multicompartment, network, timeofflight
 from .darcy import Grid
 from .geometry import Network
 from .parameters import Parameters
@@ -207,6 +207,70 @@ def run_hybrid(prm: Parameters, grid: Grid,
     return HybridResult(art=art, ven=ven, grid=grid, solution=sol,
                         pressure=pressure, flux=flux, tof=tof,
                         domain_limit=domain_limit, fx=fx, fy=fy, sources=sources)
+
+
+@dataclass
+class AdaptationResult:
+    art: Network                  # adapted arterial tree (radii evolved)
+    ven: Network                  # adapted venous tree
+    result: HybridResult          # final hybrid solve on the adapted network
+    murray_history: list          # fitted |Q| ∝ r^k exponent per iteration
+    murray_exponent: float        # exponent of the returned (best) network (→ target)
+    murray_start: float           # exponent before adaptation
+    n_iter: int
+
+
+def run_adaptation(prm: Parameters, grid: Grid, target_exponent: float = 3.0,
+                   domain_limit: tuple[float, float, float, float] = (-70, 70, 0, 160),
+                   rate: float = 0.05, n_iter: int = 60,
+                   art: Network | None = None, ven: Network | None = None,
+                   eps: float = 4.0) -> AdaptationResult:
+    """Structurally adapt vessel radii toward Murray's law (reduced Pries–Secomb).
+
+    Iterates: solve the hybrid flow → compute each segment's wall shear → nudge radii
+    toward a fixed set-point (:func:`adaptation.adapt_radii`, target = the initial mean
+    wall shear). Shear-driven remodelling monotonically drives the ``|Q| ∝ r^k`` scaling
+    exponent from its fractal starting value toward ``k = 3`` (Murray's law), the classic
+    emergent optimum; since the pure-shear stimulus keeps over-differentiating past it,
+    the loop **early-stops at the closest approach** to ``target_exponent`` and returns
+    that Murray-optimal network. Radii are bounded to ``[0.1, 10]×`` their initial value.
+    """
+    art = geometry.arterial_tree(prm) if art is None else art
+    ven = geometry.venous_tree(prm) if ven is None else ven
+    r0a, r0v = np.asarray(art.seg_radius, float), np.asarray(ven.seg_radius, float)
+
+    def exponent(a, v, sol):
+        return adaptation.murray_exponent(
+            np.concatenate([a.seg_radius, v.seg_radius]),
+            np.concatenate([sol.q_a, sol.q_v]))
+
+    # fixed shear set-point = the initial mean wall shear (on-scale, so radii don't drift uniformly)
+    first = run_hybrid(prm, grid, domain_limit=domain_limit, eps=eps, art=art, ven=ven)
+    tau0 = adaptation.wall_shear_stress(art.seg_radius, first.solution.q_a, prm.mu)
+    tau_ref = float(tau0[tau0 > 0].mean()) if np.any(tau0 > 0) else 1.0
+
+    history: list[float] = []
+    best = None
+    best_err = np.inf
+    result = first
+    for it in range(max(1, n_iter)):
+        result = run_hybrid(prm, grid, domain_limit=domain_limit, eps=eps, art=art, ven=ven)
+        k = exponent(art, ven, result.solution)
+        history.append(k)
+        err = abs(k - target_exponent)
+        if err < best_err:
+            best_err, best = err, (art, ven, result, k, it)
+        elif it - best[4] >= 3:                     # 3 iters past the closest approach → stop
+            break
+        ra, _ = adaptation.adapt_radii(art.seg_radius, result.solution.q_a, tau_ref, prm.mu,
+                                       rate=rate, r_min=0.1 * r0a, r_max=10 * r0a)
+        rv, _ = adaptation.adapt_radii(ven.seg_radius, result.solution.q_v, tau_ref, prm.mu,
+                                       rate=rate, r_min=0.1 * r0v, r_max=10 * r0v)
+        art, ven = replace(art, seg_radius=ra), replace(ven, seg_radius=rv)
+
+    b_art, b_ven, b_result, b_k, _ = best
+    return AdaptationResult(art=b_art, ven=b_ven, result=b_result, murray_history=history,
+                            murray_exponent=b_k, murray_start=history[0], n_iter=len(history))
 
 
 @dataclass

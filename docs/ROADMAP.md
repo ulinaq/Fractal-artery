@@ -331,7 +331,7 @@ a research project. Each notes where it lands in the tree.
 | ✅ Multi-compartment Darcy (arteriole/capillary/venule beds) | N stacked porous compartments coupled by inter-compartment exchange β (Michler/Hyde–Smith); a generalised terminal response plugs into the unchanged network solver, N=1 reduces to `run_hybrid` (`core/multicompartment.py`, `run_multicompartment`, web card + MCP `multicompartment_perfusion`) | `core/multicompartment` + `pipeline` | done |
 | ✅ Oxygen / solute transport + extraction | steady advection–reaction(–diffusion) of a blood-borne solute (`core/oxygen.py`): delivery at feeds, first-order tissue uptake at Damköhler rate k, venous washout → saturation / uptake maps + global OEF | `core/oxygen.py` | done |
 | ✅ Heterogeneous permeability | per-cell `K(x)` field + harmonic-mean transmissibilities (`Grid.permeability` scalar-or-field, `rasterize_permeability`, MCP `heterogeneous_perfusion_lesion`) + an interactive low-K-lesion painting UI in Tissue mode; *todo:* anisotropic (tensor) K | `core/darcy` + `core/geometry` + web | done |
-| Structural adaptation / autoregulation (Pries–Secomb) | radii evolve toward a wall-shear/metabolic set-point → emergent networks | iterate `growth` + solve | L |
+| ✅ Structural adaptation / autoregulation (Pries–Secomb) | wall-shear-driven radius remodelling drives the tree toward Murray's law (`|Q| ∝ r³`), early-stopping at the target exponent (`core/adaptation.py`, `run_adaptation`, `POST …/adapt`, web Adapt card, MCP `adapt_vessel_network`) | `core/adaptation` + `pipeline` | done |
 | Poroelasticity (Biot) | tissue deformation ↔ perfusion coupling | new module | XL |
 
 ## 9.2 Numerics & solvers
@@ -427,6 +427,15 @@ a research project. Each notes where it lands in the tree.
   timed along the vasculature (τ = volume/flow, pressure-ordered loop-robust sweep);
   `POST /tracer` on a direct result → `GET /projects/{id}/network-tracer`, the ▶ Tracer
   button animates the bolus over the vessels, MCP `direct_transit_metrics`.
+- ✅ **Structural adaptation / autoregulation** (`core/adaptation.py`, `pipeline.run_adaptation`) —
+  a reduced Pries–Secomb model: wall shear ``τ_w = 4μ|Q|/(πr³)`` drives radius remodelling
+  ``r ← r·exp(rate·S)`` toward a shear set-point. Iterated with a flow solve in the loop the
+  tree self-organises toward **Murray's law** (``|Q| ∝ r³``); since the pure-shear stimulus
+  over-differentiates past it, the loop early-stops at the closest approach to the target
+  exponent and returns that Murray-optimal network (deterministic, mass-conserving).
+  `POST /projects/{id}/adapt` remodels + stores the trees, a web Adapt card reports the
+  exponent shift, and MCP `adapt_vessel_network` exposes it. *(Follow-up: full Pries–Secomb
+  pressure/metabolic/conducted terms for a stable non-Murray equilibrium.)*
 - ✅ **Multi-compartment Darcy** (`core/multicompartment.py`, `pipeline.run_multicompartment`) —
   N stacked porous compartments (arteriole → capillary → venule) coupled by a linear
   pressure-exchange β; arterial terminals feed compartment 0, venous drain compartment N−1,

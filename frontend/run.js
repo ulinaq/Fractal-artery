@@ -29,6 +29,27 @@ export async function grow() {
   redraw();
 }
 
+export async function adapt() {
+  requireProject();
+  if (state.vessels.arteries.length || state.vessels.veins.length) await saveVessels();
+  if (state.regions.length || state.regionStroke.length >= 3) await saveMask();
+  status("adapting radii (wall-shear remodelling)…");
+  let info;
+  try {
+    info = await api("POST", `/projects/${state.project}/adapt`,
+      { target_exponent: numOf("adapt-target"), rate: numOf("adapt-rate") });
+  } catch (e) { status(e.message, "err"); $("adapt-info").textContent = e.message; return; }
+  $("adapt-info").textContent =
+    `Murray exponent ${info.murray_start.toFixed(2)} → ${info.murray_final.toFixed(2)}`
+    + ` in ${info.n_iter} iters${info.moved_toward_target ? "" : " (no improvement)"}`;
+  state.hasResult = false;
+  stopFlow(); state.tracer = null; state.fieldData = null;
+  await Promise.all([loadNetwork(), loadEditable()]);
+  recordHistory();
+  status("radii adapted → Murray's law", "ok");
+  redraw();
+}
+
 export async function run() {
   requireProject();
   if (state.vessels.arteries.length || state.vessels.veins.length) await saveVessels();

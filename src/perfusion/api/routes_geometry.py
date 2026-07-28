@@ -16,6 +16,8 @@ from ..core.geometry import arterial_tree, rasterize_mask
 from . import helpers, runner
 from .deps import get_project, get_store, project_info
 from .schemas import (
+    AdaptInfo,
+    AdaptRequest,
     GrowInfo,
     GrowRequest,
     IOIn,
@@ -270,6 +272,30 @@ def grow_vessels(body: GrowRequest | None = None, project: Project = Depends(get
     store.clear_result(project)   # persist the tree; invalidate stale result
     return GrowInfo(id=project.id, n_segments=network.n_segments,
                     n_terminals=int(network.terminal_nodes.size))
+
+
+@router.post("/projects/{pid}/adapt", response_model=AdaptInfo)
+def adapt_vessels(body: AdaptRequest | None = None, project: Project = Depends(get_project),
+                  store: ProjectStore = Depends(get_store)) -> AdaptInfo:
+    """Structurally adapt the vessel radii toward Murray's law (Pries–Secomb).
+
+    Wall-shear-driven remodelling evolves the arterial + venous radii until the
+    ``|Q| ∝ r^k`` exponent reaches ``target_exponent`` (early-stopping at the closest
+    approach). The remodelled trees replace the project's networks; any stale result
+    is invalidated."""
+    req = body or AdaptRequest()
+    try:
+        ad = runner.adapt_network(project, target_exponent=req.target_exponent,
+                                  rate=req.rate, n_iter=req.n_iter)
+    except runner.InputError as e:
+        raise HTTPException(400, str(e)) from None
+    project.artery_network, project.vein_network = ad.art, ad.ven
+    project.arteries, project.veins = [], []      # folded into the networks
+    store.clear_result(project)                   # geometry changed → stale result
+    return AdaptInfo(id=project.id, murray_start=ad.murray_start,
+                     murray_final=ad.murray_exponent, n_iter=ad.n_iter,
+                     moved_toward_target=abs(ad.murray_exponent - req.target_exponent)
+                     < abs(ad.murray_start - req.target_exponent))
 
 
 @router.get("/projects/{pid}/network")

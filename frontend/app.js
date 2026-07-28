@@ -11,7 +11,7 @@ import {
   moveNode, onEditRadius, revertEdits, saveEdits, syncEditPanel, toggleAddMode,
 } from "./edit.js";
 import {
-  computeFlow, fitKinetics, grow, loadField, loadKineticMap, loadMulticompartment,
+  adapt, computeFlow, fitKinetics, grow, loadField, loadKineticMap, loadMulticompartment,
   loadNetwork, loadOxygen, loadResultView, pauseFlow, run, runTransient, stopFlow,
   stopTimer, syncFlowUI, toggleFlowPlay,
 } from "./run.js";
@@ -83,7 +83,7 @@ const NEEDS_PROJECT = [
   "btn-endseg", "btn-undo", "btn-clear", "btn-save-vessels", "img-file",
   "btn-endregion", "btn-undo-region", "btn-clear-tissue", "btn-save-mask",
   "btn-clear-io", "btn-save-io", "btn-edit-save", "btn-edit-revert",
-  "btn-grow", "btn-run", "btn-flow",
+  "btn-grow", "btn-adapt", "btn-run", "btn-flow",
 ];
 
 export function refreshUI() {
@@ -462,6 +462,7 @@ $("tissue-target").addEventListener("change", () => {
 });
 $("btn-save-mask").addEventListener("click", () => saveMask().catch((e) => status(e.message, "err")));
 $("btn-grow").addEventListener("click", guarded(grow));
+$("btn-adapt").addEventListener("click", guarded(adapt));
 $("btn-run").addEventListener("click", guarded(run));
 $("nonlinear").addEventListener("change", (e) => {   // max-iter only matters for the nonlinear solve
   $("maxiter-row").style.display = e.target.checked ? "" : "none";

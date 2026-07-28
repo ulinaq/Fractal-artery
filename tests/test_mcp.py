@@ -74,7 +74,17 @@ def test_server_registers_expected_tools():
     assert {"run_simulation", "run_sweep", "perfusion_parameter_maps",
             "direct_transit_metrics", "oxygen_extraction_map",
             "heterogeneous_perfusion_lesion", "multicompartment_perfusion",
-            "describe_model"} <= tools
+            "adapt_vessel_network", "describe_model"} <= tools
+
+
+def test_adapt_network_moves_toward_murray():
+    import json
+
+    r = mcp_server.adapt_network(target_exponent=3.0, rate=0.05, n_iter=60,
+                                 nx=45, ny=52, r_min_frac=0.5)
+    json.dumps(r)
+    assert r["moved_toward_target"] is True
+    assert abs(r["murray_final"] - 3.0) < abs(r["murray_start"] - 3.0)
 
 
 def test_multicompartment_percolates_and_conserves():
