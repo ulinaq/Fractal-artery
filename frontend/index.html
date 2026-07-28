@@ -206,6 +206,23 @@
       </details>
 
       <details class="card" data-mode="result">
+        <summary>Multi-compartment bed</summary>
+        <p class="muted">Stack N Darcy compartments (arteriole → capillary → venule)
+          coupled by exchange β. Blood percolates down the stack; the exchange field
+          is the capillary perfusion. Shown on the main canvas.</p>
+        <div class="grid2">
+          <label>compartments N <input id="mc-n" type="number" value="3" step="1" min="2" max="5" /></label>
+          <label>exchange β <input id="mc-beta" type="number" value="1.0" step="0.25" min="0.01" /></label>
+        </div>
+        <div class="row">
+          <button id="btn-mc-perf" title="arteriole→next exchange = capillary perfusion">Perfusion</button>
+          <button id="btn-mc-comp0" title="arteriole compartment pressure">Arteriole p</button>
+          <button id="btn-mc-compN" title="venule compartment pressure">Venule p</button>
+        </div>
+        <p class="muted" id="mc-info"></p>
+      </details>
+
+      <details class="card" data-mode="result">
         <summary>Oxygen / solute extraction</summary>
         <p class="muted">Steady advection–reaction transport of a blood-borne solute
           (Krogh/Kety). Blood delivers it at the feeds; tissue consumes it at

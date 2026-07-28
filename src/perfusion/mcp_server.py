@@ -214,6 +214,29 @@ def direct_transit(rho_c: float = 0.0, p_in: float = 10.0, p_out: float = 0.0,
             "mtt_to_outlet": float(mtt.mean()) if mtt.size else None}
 
 
+def multicompartment(n: int = 3, beta: float = 1.0, nx: int = 90, ny: int = 110,
+                     p_in: float = 10.0, p_out: float = 0.0, r_min_frac: float = 0.15) -> dict:
+    """Multi-compartment Darcy perfusion (arteriole → … → venule, Michler/Hyde).
+
+    Couples the fractal trees to ``n`` stacked porous compartments exchanging at rate
+    ``beta``; blood enters compartment 0 and drains compartment n−1. Returns the
+    throughflow (total inter-compartment exchange = capillary perfusion) and the mean
+    pressure of each compartment, confirming the arteriole→venule pressure cascade."""
+    from .core.pipeline import run_multicompartment
+
+    n = int(np.clip(n, 2, 5))
+    nx, ny = int(np.clip(nx, 30, 200)), int(np.clip(ny, 30, 200))
+    prm = Parameters(p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+    grid = Grid(nx=nx, ny=ny, lx=_LX, ly=_LY)
+    res = run_multicompartment(prm, grid, permeabilities=tuple([1.0] * n),
+                               betas=tuple([float(beta)] * (n - 1)), domain_limit=_DOMAIN)
+    tf = res.solution.terminal_flux
+    return {"n_compartments": n, "beta": beta,
+            "arterial_inflow": float(tf[tf > 0].sum()),
+            "capillary_perfusion": float(np.nansum(res.perfusion[0])),
+            "compartment_mean_pressure": [float(np.nanmean(res.compartments[c])) for c in range(n)]}
+
+
 def heterogeneous_perfusion(lesion_k: float = 0.02, radius_frac: float = 0.2,
                             nx: int = 90, ny: int = 110, p_in: float = 10.0,
                             p_out: float = 0.0, r_min_frac: float = 0.15) -> dict:
@@ -363,6 +386,18 @@ def build_server():
         Returns the mean bolus arrival time by element class and the overall mean
         transit time to the venous outlet. `rho_c` is the connection search radius."""
         return direct_transit(rho_c=rho_c, p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+
+    @server.tool()
+    def multicompartment_perfusion(n: int = 3, beta: float = 1.0, nx: int = 90, ny: int = 110,
+                                   p_in: float = 10.0, p_out: float = 0.0,
+                                   r_min_frac: float = 0.15) -> dict:
+        """Multi-compartment Darcy perfusion (arteriole → … → venule): couple the
+        fractal trees to `n` stacked porous compartments exchanging at rate `beta`.
+        Blood enters compartment 0 (arterial terminals) and drains compartment n−1
+        (venous terminals), percolating through the exchange. Returns the capillary
+        perfusion (total exchange) + each compartment's mean pressure. Keep grid coarse."""
+        return multicompartment(n=n, beta=beta, nx=nx, ny=ny, p_in=p_in, p_out=p_out,
+                                r_min_frac=r_min_frac)
 
     @server.tool()
     def heterogeneous_perfusion_lesion(lesion_k: float = 0.02, radius_frac: float = 0.2,

@@ -768,6 +768,25 @@ def test_kinetic_maps_endpoint(client):
                       params={"field": "Fp", "method": "bogus"}).status_code == 404
 
 
+def test_multicompartment_endpoint(client):
+    pid = client.post("/projects", json={"name": "mc", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    perf = client.get(f"/projects/{pid}/multicompartment",
+                      params={"field": "perfusion", "n": 3, "beta": 1.0}).json()
+    assert perf["name"] == "perfusion"
+    assert perf["n"] == 3
+    assert tuple(perf["shape"]) == (SMALL_GRID["nx"], SMALL_GRID["ny"])
+    vals = [v for row in perf["data"] for v in row if v is not None]
+    assert vals
+    assert sum(vals) > 0                   # net arteriole→capillary perfusion
+    # a compartment pressure field
+    p0 = client.get(f"/projects/{pid}/multicompartment", params={"field": "comp0", "n": 3})
+    assert p0.status_code == 200
+    # an out-of-range compartment / bad field is a clear 400
+    assert client.get(f"/projects/{pid}/multicompartment",
+                      params={"field": "comp9", "n": 3}).status_code == 400
+
+
 def test_oxygen_endpoint(client):
     pid = client.post("/projects", json={"name": "o2", "grid": SMALL_GRID,
                                          "params": FAST_PARAMS}).json()["id"]

@@ -55,7 +55,7 @@ target-version = "py310"
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "PERF", "NPY", "PT"]
 ignore = ["E741"]  # ambiguous variable names (l, I) are common in the math here
 # maths/physics notation used in docstrings & comments (α/β daughters, en-dash, µm)
-allowed-confusables = ["α", "β", "–", "−", "µ"]
+allowed-confusables = ["α", "β", "–", "−", "µ", "×"]
 
 [tool.ruff.lint.per-file-ignores]
 # FastAPI's `Depends()`-in-argument-defaults is the intended injection idiom.

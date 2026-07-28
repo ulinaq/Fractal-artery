@@ -11,7 +11,7 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
-from . import darcy, geometry, network, timeofflight
+from . import darcy, geometry, multicompartment, network, timeofflight
 from .darcy import Grid
 from .geometry import Network
 from .parameters import Parameters
@@ -207,3 +207,58 @@ def run_hybrid(prm: Parameters, grid: Grid,
     return HybridResult(art=art, ven=ven, grid=grid, solution=sol,
                         pressure=pressure, flux=flux, tof=tof,
                         domain_limit=domain_limit, fx=fx, fy=fy, sources=sources)
+
+
+@dataclass
+class MultiCompartmentResult:
+    art: Network
+    ven: Network
+    grid: Grid
+    solution: network.HybridSolution
+    permeabilities: tuple
+    betas: tuple
+    compartments: np.ndarray      # (N, nx, ny) per-compartment pressure fields
+    perfusion: np.ndarray         # (N-1, nx, ny) inter-compartment exchange (capillary perfusion)
+    domain_limit: tuple[float, float, float, float] = (-70, 70, 0, 160)
+
+
+def run_multicompartment(prm: Parameters, grid: Grid,
+                         permeabilities=(1.0, 1.0), betas=(1.0,),
+                         domain_limit: tuple[float, float, float, float] = (-70, 70, 0, 160),
+                         eps: float = 4.0, art: Network | None = None,
+                         ven: Network | None = None, art_inlets=None,
+                         ven_outlets=None) -> MultiCompartmentResult:
+    """Couple the network to an ``N``-compartment Darcy bed (arteriole→…→venule).
+
+    ``permeabilities`` is the per-compartment ``K_c`` (length ``N ≥ 1``) and ``betas``
+    the exchange coefficients between adjacent compartments (length ``N−1``). Arterial
+    terminals feed compartment 0; venous terminals drain compartment ``N−1``; the flow
+    percolates down the stack through the exchange, whose per-cell field is the
+    capillary perfusion. ``N = 1`` reduces exactly to :func:`run_hybrid`.
+    """
+    if len(betas) != len(permeabilities) - 1:
+        raise ValueError("betas must have length len(permeabilities) - 1")
+    if art is None:
+        art = geometry.arterial_tree(prm)
+    if ven is None:
+        ven = geometry.venous_tree(prm)
+    if art_inlets is not None:
+        art = replace(art, inlet_nodes=np.asarray(art_inlets, dtype=int))
+    if ven_outlets is not None:
+        ven = replace(ven, inlet_nodes=np.asarray(ven_outlets, dtype=int))
+
+    terminal_cells = _terminal_cells(grid, art, ven, domain_limit)
+    n_a = len(art.terminal_nodes)
+    mcr = multicompartment.terminal_response_multi(
+        grid, terminal_cells[:n_a], terminal_cells[n_a:], permeabilities, betas, eps)
+    visc = (_segment_viscosity(art, prm), _segment_viscosity(ven, prm))
+    sol = network.solve_linear(art, ven, mcr.response, prm.p_in, prm.p_out, visc)
+
+    comp_flat = multicompartment.compartment_fields(mcr, sol.terminal_flux, balance=True)
+    compartments = np.stack([comp_flat[c].reshape(grid.nx, grid.ny, order="F")
+                             for c in range(mcr.n_compartments)])
+    perfusion = multicompartment.exchange_field(grid, comp_flat, betas)
+    return MultiCompartmentResult(
+        art=art, ven=ven, grid=grid, solution=sol,
+        permeabilities=tuple(permeabilities), betas=tuple(betas),
+        compartments=compartments, perfusion=perfusion, domain_limit=domain_limit)

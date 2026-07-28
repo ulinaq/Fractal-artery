@@ -217,6 +217,22 @@ def oxygen_map(pid: str, field: str = "saturation", k: float = 1.0, c_art: float
             "oef": oef, "k": k}
 
 
+@router.get("/projects/{pid}/multicompartment")
+def multicompartment_map(pid: str, field: str = "perfusion", n: int = 3, beta: float = 1.0,
+                         project: Project = Depends(get_project)) -> dict:
+    """Multi-compartment Darcy bed (arteriole→…→venule) with inter-compartment
+    exchange ``beta``. ``field='perfusion'`` returns the arteriole→next exchange (the
+    capillary perfusion map); ``field='comp0'..'comp{n-1}'`` a compartment pressure.
+    Re-solves the coupled system — needs a solvable model (vessels or fractal trees)."""
+    try:
+        array, _ = runner.multicompartment_field(project, field=field, n=n, beta=beta)
+    except runner.InputError as e:
+        raise HTTPException(400, str(e)) from None
+    data = np.where(np.isfinite(array), array, None)
+    return {"name": field, "shape": list(array.shape), "data": data.tolist(),
+            "n": int(np.clip(n, 2, 5)), "beta": beta}
+
+
 @router.get("/projects/{pid}/transient")
 def transient_response(pid: str, period: float = 1.0, pulse: float = 0.5,
                        compliance: float = 0.02, cycles: int = 4, proximal: float = 0.1,

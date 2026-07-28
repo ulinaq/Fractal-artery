@@ -185,6 +185,27 @@ export async function loadKineticMap(which, method = "semi") {
   status(`${which} map${method === "deconv" ? " (deconv)" : ""}`, "ok");
 }
 
+// multi-compartment Darcy field (capillary perfusion or a compartment pressure)
+export async function loadMulticompartment(which) {
+  requireProject();
+  if (state.resultModel !== "hybrid") { status("multi-compartment needs a hybrid result", "err"); return; }
+  const n = Math.round(numOf("mc-n")), beta = numOf("mc-beta");
+  const field = which === "venule" ? `comp${n - 1}` : which === "arteriole" ? "comp0" : "perfusion";
+  $("mc-info").textContent = "solving compartments…";
+  let f;
+  try { f = await api("GET", `/projects/${state.project}/multicompartment?field=${field}&n=${n}&beta=${beta}`); }
+  catch (e) { status(e.message, "err"); $("mc-info").textContent = e.message; return; }
+  let vmin = Infinity, vmax = -Infinity;
+  for (const row of f.data) for (const v of row) if (v !== null) { if (v < vmin) vmin = v; if (v > vmax) vmax = v; }
+  stopFlow();
+  state.fieldData = { ...f, vmin, vmax };
+  state.field = which === "perfusion" ? `capillary perfusion (N=${f.n})`
+    : which === "arteriole" ? "arteriole pressure" : "venule pressure";
+  redraw();
+  $("mc-info").textContent = `N=${f.n}, β=${f.beta} — ${state.field}`;
+  status(`multi-compartment ${which}`, "ok");
+}
+
 // steady oxygen/solute map (saturation or uptake) rendered on the main heatmap
 export async function loadOxygen(which) {
   requireProject();

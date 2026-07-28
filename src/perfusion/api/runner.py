@@ -199,6 +199,29 @@ def run_project(store, project, req: RunRequest) -> None:
     store.save_result(project, result, notes=notes or None)
 
 
+def multicompartment_field(project, field: str = "perfusion", n: int = 3,
+                           beta: float = 1.0):
+    """Solve an ``n``-compartment Darcy bed (arteriole→…→venule, uniform exchange
+    ``beta``) and return one field: ``perfusion`` (the arteriole→next exchange, i.e.
+    the capillary perfusion) or ``comp{c}`` (compartment ``c`` pressure)."""
+    from ..core.pipeline import run_multicompartment
+
+    n = int(np.clip(n, 2, 5))
+    grid, art, ven = validate_run(project, use_vessels=True)
+    prm = project.params.to_core()
+    res = run_multicompartment(prm, grid, permeabilities=tuple([1.0] * n),
+                               betas=tuple([float(beta)] * (n - 1)),
+                               domain_limit=project.grid.domain_limit, art=art, ven=ven)
+    if field == "perfusion":
+        return res.perfusion[0], n
+    if field.startswith("comp"):
+        c = int(field[4:])
+        if not 0 <= c < n:
+            raise InputError(f"compartment {c} out of range for n={n}")
+        return res.compartments[c], n
+    raise InputError(f"field must be 'perfusion' or 'comp0'..'comp{n - 1}'")
+
+
 def oxygen_field(project, field: str, k: float = 1.0, c_art: float = 1.0,
                  diffusivity: float = 0.0):
     """Re-solve the hybrid model and derive an oxygen/solute map (steady
