@@ -328,7 +328,7 @@ a research project. Each notes where it lands in the tree.
 | ✅ Vessel-wall elasticity (thesis Eq. 4.9) | pressure-dependent radii, r = r0(1 + C(p − p_out)); fixed-point in `run_hybrid(elasticity=True)` + `Parameters.compliance` | `pipeline` | done |
 | Pulsatile / transient flow | cardiac-cycle dynamics via RLC / Windkessel + inertance | new `core/transient.py` | L |
 | ✅ Hematocrit phase-separation at bifurcations (Pries plasma-skimming) | unequal RBC split → per-segment hematocrit & viscosity vary (`core/hematocrit.py`, coupled in `run_hybrid(phase_separation=True)`) | `core/hematocrit.py` + `pipeline` | done |
-| Multi-compartment Darcy (arteriole/capillary/venule beds) | replace the single porous bed with coupled compartments (Hyde–Smith) | `core/darcy` + `pipeline` | L |
+| ✅ Multi-compartment Darcy (arteriole/capillary/venule beds) | N stacked porous compartments coupled by inter-compartment exchange β (Michler/Hyde–Smith); a generalised terminal response plugs into the unchanged network solver, N=1 reduces to `run_hybrid` (`core/multicompartment.py`, `run_multicompartment`, web card + MCP `multicompartment_perfusion`) | `core/multicompartment` + `pipeline` | done |
 | ✅ Oxygen / solute transport + extraction | steady advection–reaction(–diffusion) of a blood-borne solute (`core/oxygen.py`): delivery at feeds, first-order tissue uptake at Damköhler rate k, venous washout → saturation / uptake maps + global OEF | `core/oxygen.py` | done |
 | ✅ Heterogeneous permeability | per-cell `K(x)` field + harmonic-mean transmissibilities (`Grid.permeability` scalar-or-field, `rasterize_permeability`, MCP `heterogeneous_perfusion_lesion`) + an interactive low-K-lesion painting UI in Tissue mode; *todo:* anisotropic (tensor) K | `core/darcy` + `core/geometry` + web | done |
 | Structural adaptation / autoregulation (Pries–Secomb) | radii evolve toward a wall-shear/metabolic set-point → emergent networks | iterate `growth` + solve | L |
@@ -427,6 +427,17 @@ a research project. Each notes where it lands in the tree.
   timed along the vasculature (τ = volume/flow, pressure-ordered loop-robust sweep);
   `POST /tracer` on a direct result → `GET /projects/{id}/network-tracer`, the ▶ Tracer
   button animates the bolus over the vessels, MCP `direct_transit_metrics`.
+- ✅ **Multi-compartment Darcy** (`core/multicompartment.py`, `pipeline.run_multicompartment`) —
+  N stacked porous compartments (arteriole → capillary → venule) coupled by a linear
+  pressure-exchange β; arterial terminals feed compartment 0, venous drain compartment N−1,
+  and the flow percolates down the stack — the inter-compartment exchange field is the
+  capillary perfusion. A generalised `terminal_response_multi` places arterial/venous sources
+  in the end compartments and returns the same terminal response matrix the **unchanged**
+  network solver consumes, so N=1 reduces exactly to `run_hybrid`. Mass is conserved
+  (arterial in = venous out = throughflow across every interface). `GET …/multicompartment`
+  (perfusion + compartment-pressure fields), a Multi-compartment result card, MCP
+  `multicompartment_perfusion`. *(Follow-up: per-compartment heterogeneous K + spatially
+  varying β; nonlinear/elastic composition.)*
 - ✅ **Heterogeneous permeability** (`core/darcy.py`, `core/geometry.rasterize_permeability`) —
   `Grid.permeability` accepts a scalar *or* a per-cell `(nx, ny)` field; `transmissibilities`
   uses the **harmonic mean** of adjacent-cell K (Eq. 5.1), so a low-K lesion throttles its

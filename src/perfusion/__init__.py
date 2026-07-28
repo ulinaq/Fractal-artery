@@ -26,6 +26,7 @@ from .core import (
     darcy3d,
     direct,
     geometry,
+    multicompartment,
     network,
     parameters,
     perfusion_metrics,
@@ -41,7 +42,12 @@ from .core.darcy import Grid
 from .core.geometry import Network, arterial_tree, grow_tree_3d, venous_tree
 from .core.parameters import Parameters
 from .core.perfusion_metrics import transit_metrics
-from .core.pipeline import HybridResult, run_hybrid
+from .core.pipeline import (
+    HybridResult,
+    MultiCompartmentResult,
+    run_hybrid,
+    run_multicompartment,
+)
 from .core.pipeline3d import HybridResult3D, run_hybrid_3d
 
 __version__ = "0.1.0"
@@ -50,6 +56,7 @@ __all__ = [
     "Grid",
     "HybridResult",
     "HybridResult3D",
+    "MultiCompartmentResult",
     "Network",
     "Parameters",
     "arterial_tree",
@@ -59,6 +66,7 @@ __all__ = [
     "geometry",
     "grow_tree_3d",
     "growth",
+    "multicompartment",
     "network",
     "parameters",
     "perfusion_metrics",
@@ -66,6 +74,7 @@ __all__ = [
     "pipeline3d",
     "run_hybrid",
     "run_hybrid_3d",
+    "run_multicompartment",
     "timeofflight",
     "tkm",
     "transient",

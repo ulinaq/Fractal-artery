@@ -73,7 +73,21 @@ def test_server_registers_expected_tools():
     tools = {t.name for t in asyncio.run(server.list_tools())}
     assert {"run_simulation", "run_sweep", "perfusion_parameter_maps",
             "direct_transit_metrics", "oxygen_extraction_map",
-            "heterogeneous_perfusion_lesion", "describe_model"} <= tools
+            "heterogeneous_perfusion_lesion", "multicompartment_perfusion",
+            "describe_model"} <= tools
+
+
+def test_multicompartment_percolates_and_conserves():
+    import json
+
+    r = mcp_server.multicompartment(n=3, beta=1.0, nx=45, ny=52, r_min_frac=0.5)
+    json.dumps(r)
+    assert r["n_compartments"] == 3
+    # capillary perfusion equals the arterial delivery (steady conservation)
+    assert r["capillary_perfusion"] == pytest.approx(r["arterial_inflow"], rel=1e-2)
+    # pressure cascades arteriole (0) → venule (n−1)
+    p = r["compartment_mean_pressure"]
+    assert p[0] > p[-1]
 
 
 def test_heterogeneous_lesion_starves_local_flux():

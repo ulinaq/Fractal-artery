@@ -11,9 +11,9 @@ import {
   moveNode, onEditRadius, revertEdits, saveEdits, syncEditPanel, toggleAddMode,
 } from "./edit.js";
 import {
-  computeFlow, fitKinetics, grow, loadField, loadKineticMap, loadNetwork, loadOxygen,
-  loadResultView, pauseFlow, run, runTransient, stopFlow, stopTimer, syncFlowUI,
-  toggleFlowPlay,
+  computeFlow, fitKinetics, grow, loadField, loadKineticMap, loadMulticompartment,
+  loadNetwork, loadOxygen, loadResultView, pauseFlow, run, runTransient, stopFlow,
+  stopTimer, syncFlowUI, toggleFlowPlay,
 } from "./run.js";
 
 // ── undo / redo (workspace geometry history) ───────────────────────────────────
@@ -524,6 +524,9 @@ $("btn-map-vp").addEventListener("click",
 $("btn-map-mtt").addEventListener("click", guarded(() => loadKineticMap("MTT", "deconv")));
 $("btn-o2-sat").addEventListener("click", guarded(() => loadOxygen("saturation")));
 $("btn-o2-cons").addEventListener("click", guarded(() => loadOxygen("consumption")));
+$("btn-mc-perf").addEventListener("click", guarded(() => loadMulticompartment("perfusion")));
+$("btn-mc-comp0").addEventListener("click", guarded(() => loadMulticompartment("arteriole")));
+$("btn-mc-compN").addEventListener("click", guarded(() => loadMulticompartment("venule")));
 $("tkm-model").addEventListener("change", () => { if (state.tracer) fitKinetics().catch(() => {}); });
 $("flow-play").addEventListener("click", toggleFlowPlay);
 $("flow-scrub").addEventListener("input", (e) => {
