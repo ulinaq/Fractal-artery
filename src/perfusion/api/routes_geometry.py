@@ -19,6 +19,7 @@ from .schemas import (
     GrowInfo,
     GrowRequest,
     IOIn,
+    LesionsIn,
     MaskIn,
     NetworkModel,
     NetworksEditIn,
@@ -52,6 +53,23 @@ def get_mask(project: Project = Depends(get_project)) -> dict:
 def set_mask(body: MaskIn, project: Project = Depends(get_project),
              store: ProjectStore = Depends(get_store)) -> ProjectInfo:
     project.regions = [[list(pt) for pt in poly] for poly in body.regions]
+    store.save(project)
+    return project_info(project)
+
+
+@router.get("/projects/{pid}/lesions")
+def get_lesions(project: Project = Depends(get_project)) -> dict:
+    return {"lesions": project.lesions}
+
+
+@router.put("/projects/{pid}/lesions", response_model=ProjectInfo)
+def set_lesions(body: LesionsIn, project: Project = Depends(get_project),
+                store: ProjectStore = Depends(get_store)) -> ProjectInfo:
+    """Set the low-permeability tissue patches (heterogeneous ``K``). Invalidates any
+    stale result so the next solve uses the new permeability field."""
+    project.lesions = [le.model_dump() for le in body.lesions]
+    if project.has_result:
+        store.clear_result(project)
     store.save(project)
     return project_info(project)
 

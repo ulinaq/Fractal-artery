@@ -15,6 +15,7 @@ from ..core.geometry import (
     arterial_tree,
     network_from_polylines,
     rasterize_mask,
+    rasterize_permeability,
     venous_tree,
 )
 from ..core.pipeline import run_hybrid
@@ -59,6 +60,12 @@ def build_grid(project):
         mask = rasterize_mask(nx, ny, domain_limit, project.regions)
     else:
         mask = None
+    lesions = getattr(project, "lesions", None)
+    if lesions:
+        les = [(le["polygon"], le["permeability"]) for le in lesions]
+        kfield = rasterize_permeability(nx, ny, domain_limit, les,
+                                        base=project.grid.permeability)
+        return project.grid.to_core(mask=mask, permeability=kfield), domain_limit
     return project.grid.to_core(mask=mask), domain_limit
 
 

@@ -61,6 +61,19 @@ class MaskIn(BaseModel):
     regions: list[list[tuple[float, float]]] = Field(default_factory=list)
 
 
+class Lesion(BaseModel):
+    """A low-permeability tissue patch: an outline polygon + its permeability."""
+
+    polygon: list[tuple[float, float]]
+    permeability: float = Field(0.1, gt=0)   # relative to healthy K = 1
+
+
+class LesionsIn(BaseModel):
+    """Heterogeneous permeability as a set of drawn low-K lesions (domain coords)."""
+
+    lesions: list[Lesion] = Field(default_factory=list)
+
+
 class IOIn(BaseModel):
     """Inlet (arterial, p_in) and outlet (venous, p_out) points, in domain coords.
 
@@ -261,6 +274,7 @@ class ProjectDocument(BaseModel):
     arteries: list[Polyline] = Field(default_factory=list)
     veins: list[Polyline] = Field(default_factory=list)
     regions: list[list[tuple[float, float]]] = Field(default_factory=list)
+    lesions: list[Lesion] = Field(default_factory=list)
     inlets: list[tuple[float, float]] = Field(default_factory=list)
     outlets: list[tuple[float, float]] = Field(default_factory=list)
     artery_network: NetworkModel | None = None
