@@ -214,6 +214,28 @@ def direct_transit(rho_c: float = 0.0, p_in: float = 10.0, p_out: float = 0.0,
             "mtt_to_outlet": float(mtt.mean()) if mtt.size else None}
 
 
+def uncertainty(n_samples: int = 24, p_in_range=(5.0, 20.0), mu_range=(0.8, 1.5),
+                rmin_range=(0.35, 0.6), nx: int = 60, ny: int = 70,
+                seed: int = 0) -> dict:
+    """Monte-Carlo uncertainty quantification of the hybrid model.
+
+    Latin-hypercube-samples the inlet pressure, viscosity and branch-depth over the
+    given ranges, re-solves ``n_samples`` times, and returns each quantity of interest's
+    mean/std and the first-order sensitivity (Pearson r) of arterial inflow to each
+    input — a cheap ranking of what drives perfusion. Keep the grid coarse."""
+    from . import uq
+
+    nx, ny = int(np.clip(nx, 30, 160)), int(np.clip(ny, 30, 160))
+    grid = Grid(nx=nx, ny=ny, lx=_LX, ly=_LY)
+    res = uq.monte_carlo(
+        {"p_in": tuple(p_in_range), "mu": tuple(mu_range), "r_min_frac": tuple(rmin_range)},
+        grid, n_samples=int(n_samples), base={"p_out": 0.0}, seed=int(seed),
+        domain_limit=_DOMAIN)
+    return {"n_samples": int(n_samples), "qoi_names": res.qoi_names,
+            "mean": res.mean, "std": res.std,
+            "inflow_sensitivity": res.sensitivity["arterial_inflow"]}
+
+
 def adapt_network(target_exponent: float = 3.0, rate: float = 0.05, n_iter: int = 60,
                   nx: int = 70, ny: int = 80, p_in: float = 10.0, p_out: float = 0.0,
                   r_min_frac: float = 0.15) -> dict:
@@ -408,6 +430,21 @@ def build_server():
         Returns the mean bolus arrival time by element class and the overall mean
         transit time to the venous outlet. `rho_c` is the connection search radius."""
         return direct_transit(rho_c=rho_c, p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+
+    @server.tool()
+    def uncertainty_quantification(n_samples: int = 24, p_in_low: float = 5.0,
+                                   p_in_high: float = 20.0, mu_low: float = 0.8,
+                                   mu_high: float = 1.5, rmin_low: float = 0.35,
+                                   rmin_high: float = 0.6, nx: int = 60, ny: int = 70,
+                                   seed: int = 0) -> dict:
+        """Monte-Carlo uncertainty quantification: Latin-hypercube-sample the inlet
+        pressure, viscosity and branch depth over the given ranges, re-solve n_samples
+        times, and return each quantity of interest's mean/std plus the sensitivity
+        (Pearson r) of arterial inflow to each input. A batch of full solves — keep the
+        grid coarse and n_samples modest."""
+        return uncertainty(n_samples=n_samples, p_in_range=(p_in_low, p_in_high),
+                           mu_range=(mu_low, mu_high), rmin_range=(rmin_low, rmin_high),
+                           nx=nx, ny=ny, seed=seed)
 
     @server.tool()
     def adapt_vessel_network(target_exponent: float = 3.0, rate: float = 0.05,

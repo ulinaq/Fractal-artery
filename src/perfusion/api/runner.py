@@ -199,6 +199,21 @@ def run_project(store, project, req: RunRequest) -> None:
     store.save_result(project, result, notes=notes or None)
 
 
+def uncertainty(project, param_ranges: dict, n_samples: int = 32, seed: int = 0) -> dict:
+    """Monte-Carlo UQ over ``param_ranges`` on the project's grid/vasculature. Returns
+    per-QoI mean/std/percentiles + first-order sensitivities as a JSON-ready dict."""
+    from ..uq import monte_carlo
+
+    grid, art, ven = validate_run(project, use_vessels=True)
+    base = project.params.model_dump()          # fixed Parameters fields
+    res = monte_carlo({k: tuple(v) for k, v in param_ranges.items()}, grid,
+                      n_samples=n_samples, base=base, seed=seed,
+                      domain_limit=project.grid.domain_limit, art=art, ven=ven)
+    return {"names": res.names, "qoi_names": res.qoi_names, "n_samples": int(n_samples),
+            "mean": res.mean, "std": res.std, "p05": res.p05, "p95": res.p95,
+            "sensitivity": res.sensitivity}
+
+
 def adapt_network(project, target_exponent: float = 3.0, rate: float = 0.05,
                   n_iter: int = 60):
     """Structurally adapt the project's vessel radii toward Murray's law and store the

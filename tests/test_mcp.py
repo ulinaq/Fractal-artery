@@ -74,7 +74,17 @@ def test_server_registers_expected_tools():
     assert {"run_simulation", "run_sweep", "perfusion_parameter_maps",
             "direct_transit_metrics", "oxygen_extraction_map",
             "heterogeneous_perfusion_lesion", "multicompartment_perfusion",
-            "adapt_vessel_network", "describe_model"} <= tools
+            "adapt_vessel_network", "uncertainty_quantification", "describe_model"} <= tools
+
+
+def test_uncertainty_ranks_inlet_pressure():
+    import json
+
+    r = mcp_server.uncertainty(n_samples=16, nx=45, ny=52)
+    json.dumps(r)
+    assert "arterial_inflow" in r["qoi_names"]
+    assert r["std"]["arterial_inflow"] > 0
+    assert r["inflow_sensitivity"]["p_in"] > 0.5     # inflow driven by inlet pressure
 
 
 def test_adapt_network_moves_toward_murray():

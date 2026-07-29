@@ -340,7 +340,10 @@ a research project. Each notes where it lands in the tree.
 - **AMG preconditioning** (pyamg) for the Darcy TPFA system; scales the 3-D solve — M.
 - **MPFA-O flux** for anisotropic / non-K-orthogonal media (TPFA is inconsistent there) — M.
 - **GPU / matrix-free** (cupy) for `darcy3d` on large grids — L.
-- **Uncertainty quantification** (Monte-Carlo / polynomial chaos over parameters) — M.
+- ✅ **Uncertainty quantification** — Latin-hypercube Monte-Carlo over uncertain inputs
+  (`uq.monte_carlo`) with QoI mean/std/percentiles + first-order Pearson sensitivity;
+  `POST …/uq`, a web UQ card (sensitivity bars) and MCP `uncertainty_quantification`.
+  *(Follow-up: polynomial chaos / Sobol indices for variance decomposition.)*
 
 ## 9.3 Growth & geometry
 
@@ -427,6 +430,12 @@ a research project. Each notes where it lands in the tree.
   timed along the vasculature (τ = volume/flow, pressure-ordered loop-robust sweep);
   `POST /tracer` on a direct result → `GET /projects/{id}/network-tracer`, the ▶ Tracer
   button animates the bolus over the vessels, MCP `direct_transit_metrics`.
+- ✅ **Uncertainty quantification** (`uq.py`) — a service layer over the engine:
+  Latin-hypercube Monte-Carlo samples uncertain inputs (`p_in`/`p_out`/`mu`/`r_min_frac`/
+  `hematocrit`/`permeability`) over given ranges, re-solves, and reports each quantity of
+  interest's mean/std/5–95 percentiles + a first-order sensitivity (Pearson r of each input
+  vs. output). `POST /projects/{id}/uq`, a web UQ card with per-QoI mean±std and signed
+  sensitivity bars, and MCP `uncertainty_quantification`.
 - ✅ **Structural adaptation / autoregulation** (`core/adaptation.py`, `pipeline.run_adaptation`) —
   a reduced Pries–Secomb model: wall shear ``τ_w = 4μ|Q|/(πr³)`` drives radius remodelling
   ``r ← r·exp(rate·S)`` toward a shear set-point. Iterated with a flow solve in the loop the

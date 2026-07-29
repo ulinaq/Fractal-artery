@@ -12,7 +12,7 @@ import {
 } from "./edit.js";
 import {
   adapt, computeFlow, fitKinetics, grow, loadField, loadKineticMap, loadMulticompartment,
-  loadNetwork, loadOxygen, loadResultView, pauseFlow, run, runTransient, stopFlow,
+  loadNetwork, loadOxygen, loadResultView, pauseFlow, run, runTransient, runUQ, stopFlow,
   stopTimer, syncFlowUI, toggleFlowPlay,
 } from "./run.js";
 
@@ -525,6 +525,7 @@ $("btn-map-vp").addEventListener("click",
 $("btn-map-mtt").addEventListener("click", guarded(() => loadKineticMap("MTT", "deconv")));
 $("btn-o2-sat").addEventListener("click", guarded(() => loadOxygen("saturation")));
 $("btn-o2-cons").addEventListener("click", guarded(() => loadOxygen("consumption")));
+$("btn-uq").addEventListener("click", guarded(runUQ));
 $("btn-mc-perf").addEventListener("click", guarded(() => loadMulticompartment("perfusion")));
 $("btn-mc-comp0").addEventListener("click", guarded(() => loadMulticompartment("arteriole")));
 $("btn-mc-compN").addEventListener("click", guarded(() => loadMulticompartment("venule")));
