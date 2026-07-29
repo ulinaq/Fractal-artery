@@ -158,3 +158,8 @@ canvas { background: #fff; border: 1px solid var(--line); border-radius: 6px; ma
 #proj-id a { color: var(--accent); text-decoration: none; }
 #proj-id a:hover { text-decoration: underline; }
 button:disabled { opacity: .45; }
+
+input.mini { width: 3.6em; }
+#uq-out .bar { height: 9px; background: var(--accent); border-radius: 2px; display: inline-block; vertical-align: middle; }
+#uq-out table { border-collapse: collapse; margin-top: 6px; }
+#uq-out td { padding: 1px 6px 1px 0; white-space: nowrap; }

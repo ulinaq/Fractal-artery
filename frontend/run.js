@@ -29,6 +29,42 @@ export async function grow() {
   redraw();
 }
 
+// Monte-Carlo uncertainty quantification: run N re-solves over the checked input
+// ranges, then show each output's mean±std and a sensitivity bar per input.
+export async function runUQ() {
+  requireProject();
+  const params = {};
+  if ($("uq-pin").checked) params.p_in = [numOf("uq-pin-lo"), numOf("uq-pin-hi")];
+  if ($("uq-mu").checked) params.mu = [numOf("uq-mu-lo"), numOf("uq-mu-hi")];
+  if ($("uq-rmin").checked) params.r_min_frac = [numOf("uq-rmin-lo"), numOf("uq-rmin-hi")];
+  if (!Object.keys(params).length) { status("tick at least one uncertain input", "err"); return; }
+  const n = Math.round(numOf("uq-n"));
+  $("uq-out").textContent = `running ${n} solves…`;
+  status(`uncertainty: ${n} solves…`);
+  let d;
+  try { d = await api("POST", `/projects/${state.project}/uq`, { n_samples: n, params }); }
+  catch (e) { status(e.message, "err"); $("uq-out").textContent = e.message; return; }
+  drawUQ(d);
+  status("uncertainty done", "ok");
+}
+
+function drawUQ(d) {
+  const fmt = (v) => (Math.abs(v) < 1e-3 || Math.abs(v) > 1e4) ? v.toExponential(2) : v.toFixed(3);
+  const rows = d.qoi_names.map((q) => {
+    const sens = d.sensitivity[q];
+    const bars = d.names.map((p) => {
+      const r = sens[p], w = Math.round(Math.abs(r) * 60);
+      const col = r < 0 ? "#ef4444" : "var(--accent)";
+      return `<tr><td>${p}</td><td><span class="bar" style="width:${w}px;background:${col}"></span></td>`
+        + `<td>${r >= 0 ? "+" : ""}${r.toFixed(2)}</td></tr>`;
+    }).join("");
+    return `<div><b>${q}</b>: ${fmt(d.mean[q])} ± ${fmt(d.std[q])} `
+      + `<span class="muted">[${fmt(d.p05[q])}, ${fmt(d.p95[q])}]</span>`
+      + `<table>${bars}</table></div>`;
+  }).join("");
+  $("uq-out").innerHTML = `<p class="muted">${d.n_samples} samples · sensitivity (Pearson r)</p>${rows}`;
+}
+
 export async function adapt() {
   requireProject();
   if (state.vessels.arteries.length || state.vessels.veins.length) await saveVessels();

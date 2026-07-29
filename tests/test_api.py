@@ -768,6 +768,20 @@ def test_kinetic_maps_endpoint(client):
                       params={"field": "Fp", "method": "bogus"}).status_code == 404
 
 
+def test_uq_endpoint(client):
+    pid = client.post("/projects", json={"name": "uq", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    d = client.post(f"/projects/{pid}/uq",
+                    json={"n_samples": 12, "params": {"p_in": [5, 20], "mu": [0.8, 1.5]}}).json()
+    assert d["n_samples"] == 12
+    assert "arterial_inflow" in d["qoi_names"]
+    assert d["std"]["arterial_inflow"] > 0
+    assert d["sensitivity"]["arterial_inflow"]["p_in"] > 0.5     # inflow tracks inlet pressure
+    # an unknown uncertain parameter is a clear 422
+    assert client.post(f"/projects/{pid}/uq",
+                       json={"n_samples": 4, "params": {"bogus": [0, 1]}}).status_code == 422
+
+
 def test_adapt_endpoint_moves_toward_murray(client):
     pid = client.post("/projects", json={"name": "adapt", "grid": SMALL_GRID,
                                          "params": FAST_PARAMS}).json()["id"]

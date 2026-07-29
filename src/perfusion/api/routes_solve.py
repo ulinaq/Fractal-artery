@@ -18,6 +18,7 @@ from .schemas import (
     RunRequest,
     TracerInfo,
     TracerRequest,
+    UQRequest,
 )
 from .store import Project, ProjectStore
 
@@ -215,6 +216,21 @@ def oxygen_map(pid: str, field: str = "saturation", k: float = 1.0, c_art: float
     data = np.where(np.isfinite(array), array, None)
     return {"name": field, "shape": list(array.shape), "data": data.tolist(),
             "oef": oef, "k": k}
+
+
+@router.post("/projects/{pid}/uq")
+def uncertainty_quantification(body: UQRequest, project: Project = Depends(get_project)) -> dict:
+    """Monte-Carlo uncertainty quantification: sample the given input ranges
+    (Latin-hypercube), re-solve, and return each quantity of interest's
+    mean/std/5-95 percentiles plus first-order sensitivities (Pearson r). Runs
+    ``n_samples`` full solves — keep the grid coarse and the sample count modest."""
+    try:
+        return runner.uncertainty(project, body.params, n_samples=body.n_samples,
+                                  seed=body.seed)
+    except runner.InputError as e:
+        raise HTTPException(400, str(e)) from None
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
 
 
 @router.get("/projects/{pid}/multicompartment")
