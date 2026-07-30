@@ -121,6 +121,8 @@ async function newProject() {
     grid: { nx: numOf("nx"), ny: numOf("ny"), ...GRID_L,
             domain_limit: [DOMAIN.xmin, DOMAIN.xmax, DOMAIN.ymin, DOMAIN.ymax] },
   };
+  const ky = numOf("perm_y");
+  if (ky && ky !== 1) body.grid.permeability_y = ky;   // anisotropic capillary bed (Kx = 1)
   const p = await api("POST", "/projects", body);
   state.project = p.id;
   state.vessels = { arteries: [], veins: [] };
@@ -547,6 +549,7 @@ function syncParamInputs(info) {
   if (g) {
     if (g.nx != null) $("nx").value = g.nx;
     if (g.ny != null) $("ny").value = g.ny;
+    $("perm_y").value = g.permeability_y != null ? g.permeability_y / (g.permeability || 1) : 1;
   }
 }
 

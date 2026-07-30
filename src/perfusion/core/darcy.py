@@ -27,7 +27,8 @@ class Grid:
     ny: int
     lx: float = 1.0
     ly: float = 1.0
-    permeability: float | np.ndarray = 1.0   # isotropic K: scalar or a per-cell (nx, ny) field
+    permeability: float | np.ndarray = 1.0   # K (x-direction): scalar or a per-cell (nx, ny) field
+    permeability_y: float | np.ndarray | None = None  # K in y; None => isotropic (= permeability)
     viscosity: float = 1.0
     porosity: float = 1.0
     thickness: float = 1.0          # out-of-plane thickness (2.5D)
@@ -41,18 +42,29 @@ class Grid:
         self.hy = self.ly / self.ny
         if self.mask is None:
             self.mask = np.ones((self.nx, self.ny), dtype=bool)
-        if np.ndim(self.permeability) != 0:
-            k = np.asarray(self.permeability, dtype=float)
-            if k.shape != (self.nx, self.ny):
-                raise ValueError(
-                    f"permeability field {k.shape} must be (nx, ny) = {(self.nx, self.ny)}")
-            self.permeability = k
+        for attr in ("permeability", "permeability_y"):
+            val = getattr(self, attr)
+            if val is not None and np.ndim(val) != 0:
+                k = np.asarray(val, dtype=float)
+                if k.shape != (self.nx, self.ny):
+                    raise ValueError(
+                        f"{attr} field {k.shape} must be (nx, ny) = {(self.nx, self.ny)}")
+                setattr(self, attr, k)
 
     def permeability_field(self) -> np.ndarray:
-        """Per-cell permeability as an ``(nx, ny)`` array (broadcasts a scalar K)."""
+        """Per-cell x-permeability as an ``(nx, ny)`` array (broadcasts a scalar K)."""
         if np.ndim(self.permeability) == 0:
             return np.full((self.nx, self.ny), float(self.permeability))
         return self.permeability
+
+    def permeability_field_y(self) -> np.ndarray:
+        """Per-cell y-permeability ``(nx, ny)`` — falls back to the x-field if isotropic."""
+        ky = self.permeability_y
+        if ky is None:
+            return self.permeability_field()
+        if np.ndim(ky) == 0:
+            return np.full((self.nx, self.ny), float(ky))
+        return ky
 
     @property
     def n_cells(self) -> int:
@@ -97,15 +109,18 @@ def transmissibilities(grid: Grid) -> tuple[np.ndarray, np.ndarray]:
     Shapes ``(nx+1, ny)`` and ``(nx, ny+1)``; only interior faces are non-zero.
     The interface permeability is the **harmonic mean** of the two adjacent cells'
     permeabilities (Eq. 5.1) — exact for a uniform grid and the correct averaging
-    for a heterogeneous ``K`` field (a low-K cell throttles both its faces). Faces
-    touching an inactive (masked-out) cell carry no flow, so the active domain is
-    hydraulically isolated from the surroundings.
+    for a heterogeneous ``K`` field (a low-K cell throttles both its faces). For an
+    **anisotropic** (diagonal-tensor) grid the x-faces use ``permeability`` and the
+    y-faces ``permeability_y`` — axis-aligned, so TPFA stays consistent (no cross
+    terms). Faces touching an inactive (masked-out) cell carry no flow, so the active
+    domain is hydraulically isolated from the surroundings.
     """
-    kf = grid.permeability_field() / grid.viscosity
+    kfx = grid.permeability_field() / grid.viscosity
+    kfy = grid.permeability_field_y() / grid.viscosity
     tx = np.zeros((grid.nx + 1, grid.ny))
     ty = np.zeros((grid.nx, grid.ny + 1))
-    tx[1:grid.nx, :] = _harmonic(kf[:-1, :], kf[1:, :]) * grid.hy * grid.thickness / grid.hx
-    ty[:, 1:grid.ny] = _harmonic(kf[:, :-1], kf[:, 1:]) * grid.hx * grid.thickness / grid.hy
+    tx[1:grid.nx, :] = _harmonic(kfx[:-1, :], kfx[1:, :]) * grid.hy * grid.thickness / grid.hx
+    ty[:, 1:grid.ny] = _harmonic(kfy[:, :-1], kfy[:, 1:]) * grid.hx * grid.thickness / grid.hy
     # a face conducts only when both adjacent cells are active
     active = grid.mask
     tx[1:grid.nx, :] *= active[:-1, :] & active[1:, :]

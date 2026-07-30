@@ -806,6 +806,22 @@ def test_adapt_endpoint_moves_toward_murray(client):
     assert _wait_for_job(client, jid)["state"] == "done"
 
 
+def test_anisotropic_permeability_roundtrips_and_solves(client):
+    grid = {**SMALL_GRID, "permeability": 1.0, "permeability_y": 5.0}
+    pid = client.post("/projects", json={"name": "aniso", "grid": grid,
+                                         "params": FAST_PARAMS}).json()["id"]
+    got = client.get(f"/projects/{pid}").json()
+    assert got["grid"]["permeability_y"] == 5.0
+    # the anisotropic bed still solves
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    # and survives a document round-trip into a fresh project
+    doc = client.get(f"/projects/{pid}/document").json()
+    assert doc["grid"]["permeability_y"] == 5.0
+    pid2 = client.post("/projects/import", json=doc).json()["id"]
+    assert client.get(f"/projects/{pid2}").json()["grid"]["permeability_y"] == 5.0
+
+
 def test_multicompartment_endpoint(client):
     pid = client.post("/projects", json={"name": "mc", "grid": SMALL_GRID,
                                          "params": FAST_PARAMS}).json()["id"]

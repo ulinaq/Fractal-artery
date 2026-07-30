@@ -330,7 +330,7 @@ a research project. Each notes where it lands in the tree.
 | ✅ Hematocrit phase-separation at bifurcations (Pries plasma-skimming) | unequal RBC split → per-segment hematocrit & viscosity vary (`core/hematocrit.py`, coupled in `run_hybrid(phase_separation=True)`) | `core/hematocrit.py` + `pipeline` | done |
 | ✅ Multi-compartment Darcy (arteriole/capillary/venule beds) | N stacked porous compartments coupled by inter-compartment exchange β (Michler/Hyde–Smith); a generalised terminal response plugs into the unchanged network solver, N=1 reduces to `run_hybrid` (`core/multicompartment.py`, `run_multicompartment`, web card + MCP `multicompartment_perfusion`) | `core/multicompartment` + `pipeline` | done |
 | ✅ Oxygen / solute transport + extraction | steady advection–reaction(–diffusion) of a blood-borne solute (`core/oxygen.py`): delivery at feeds, first-order tissue uptake at Damköhler rate k, venous washout → saturation / uptake maps + global OEF | `core/oxygen.py` | done |
-| ✅ Heterogeneous permeability | per-cell `K(x)` field + harmonic-mean transmissibilities (`Grid.permeability` scalar-or-field, `rasterize_permeability`, MCP `heterogeneous_perfusion_lesion`) + an interactive low-K-lesion painting UI in Tissue mode; *todo:* anisotropic (tensor) K | `core/darcy` + `core/geometry` + web | done |
+| ✅ Heterogeneous permeability | per-cell `K(x)` field + harmonic-mean transmissibilities (`Grid.permeability` scalar-or-field, `rasterize_permeability`, MCP `heterogeneous_perfusion_lesion`) + an interactive low-K-lesion painting UI in Tissue mode + **diagonal-tensor anisotropy** (`Kx ≠ Ky`, axis-split harmonic transmissibilities, `GridIn.permeability_y` + a web K-anisotropy input, MCP `anisotropic_perfusion_bed`); *todo:* full (off-diagonal) tensor K via MPFA | `core/darcy` + `core/geometry` + web | done |
 | ✅ Structural adaptation / autoregulation (Pries–Secomb) | wall-shear-driven radius remodelling drives the tree toward Murray's law (`|Q| ∝ r³`), early-stopping at the target exponent (`core/adaptation.py`, `run_adaptation`, `POST …/adapt`, web Adapt card, MCP `adapt_vessel_network`) | `core/adaptation` + `pipeline` | done |
 | Poroelasticity (Biot) | tissue deformation ↔ perfusion coupling | new module | XL |
 
@@ -472,8 +472,14 @@ a research project. Each notes where it lands in the tree.
   (`GridIn.permeability`); low-K **lesions** are drawn in the web Tissue tab (draw-target
   toggle + per-lesion k, amber overlay), stored per project (`GET/PUT …/lesions`, document
   round-trip) and rasterised into the grid's K field by `build_grid`; MCP
-  `heterogeneous_perfusion_lesion` reports the in-vs-outside flux drop. *(Follow-up:
-  anisotropic tensor K.)*
+  `heterogeneous_perfusion_lesion` reports the in-vs-outside flux drop.
+- ✅ **Anisotropic (diagonal-tensor) permeability** (`core/darcy.py`) — `Grid.permeability_y`
+  gives the capillary bed a distinct y-permeability; `transmissibilities` splits by axis
+  (x-faces use `Kx`, y-faces `Ky`, both harmonic-averaged) so TPFA stays consistent for the
+  axis-aligned tensor. Throughflow scales exactly with the aligned-axis K (validated), the
+  high-K axis channels the flow. `GridIn.permeability_y` (document round-trip), a web
+  "K aniso Ky/Kx" input, and MCP `anisotropic_perfusion_bed`. *(Follow-up: full off-diagonal
+  tensor K via MPFA-O.)*
 - ✅ **Oxygen / solute transport + extraction** (`core/oxygen.py`) — steady
   advection–reaction(–diffusion) of a blood-borne solute: arterial delivery, first-order
   tissue uptake at dimensionless Damköhler rate k, venous washout; a non-singular

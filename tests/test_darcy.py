@@ -196,3 +196,45 @@ def test_rasterize_permeability_lesion():
     assert field.min() == pytest.approx(0.1)             # lesion
     assert (field < 1.0).sum() > 0
     assert rasterize_permeability(5, 5, dom, [], base=2.0).min() == pytest.approx(2.0)
+
+
+def test_anisotropic_permeability_axis_split():
+    from perfusion.core.darcy import Grid, transmissibilities
+
+    # isotropic: permeability_y=None reduces to the scalar case
+    iso = transmissibilities(Grid(nx=10, ny=8, permeability=2.0))
+    same = transmissibilities(Grid(nx=10, ny=8, permeability=2.0, permeability_y=2.0))
+    assert np.allclose(iso[0], same[0])
+    assert np.allclose(iso[1], same[1])
+
+    # Kx = 10, Ky = 1 on a square unit grid → interior tx is 10× ty
+    g = Grid(nx=12, ny=12, permeability=10.0, permeability_y=1.0)
+    tx, ty = transmissibilities(g)
+    assert tx[6, 6] == pytest.approx(10.0 * ty[6, 6])
+
+
+def test_anisotropic_throughflow_scales_with_aligned_axis():
+    import scipy.sparse.linalg as spla
+
+    from perfusion.core.darcy import Grid, face_fluxes, tpfa_operator
+
+    def x_throughflow(kx):
+        n = 20
+        g = Grid(nx=n, ny=n, permeability=kx, permeability_y=1.0)
+        a, tx, ty = tpfa_operator(g)
+        a = a.tolil()
+        b = np.zeros(n * n)
+        for j in range(n):
+            lo, hi = g.sub2ind(0, j), g.sub2ind(n - 1, j)
+            a[lo, :] = 0
+            a[lo, lo] = 1
+            b[lo] = 1.0
+            a[hi, :] = 0
+            a[hi, hi] = 1
+            b[hi] = 0.0
+        p = spla.spsolve(a.tocsr(), b).reshape(n, n, order="F")
+        fx, _ = face_fluxes(g, p, tx, ty)
+        return np.abs(fx).sum()
+
+    # a pure x-pressure ramp: throughflow is proportional to Kx
+    assert x_throughflow(10.0) == pytest.approx(10.0 * x_throughflow(1.0), rel=1e-6)
