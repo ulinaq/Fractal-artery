@@ -48,6 +48,113 @@ def _qois(result) -> dict:
 
 
 @dataclass
+class SobolResult:
+    names: list                  # input names
+    qoi_names: list              # output names
+    n_samples: int               # LHS samples used to fit the surrogate
+    first_order: dict            # qoi -> {input: S1}  (variance fraction from that input alone)
+    total_effect: dict           # qoi -> {input: ST}  (incl. all interactions with it)
+    fit_r2: dict                 # qoi -> surrogate R² (how well the PCE explains the variance)
+
+
+# Orthonormal Legendre polynomials on [-1, 1] (unit variance under the uniform measure).
+def _legendre(x: np.ndarray, degree: int) -> np.ndarray:
+    if degree == 0:
+        return np.ones_like(x)
+    if degree == 1:
+        return np.sqrt(3.0) * x
+    return np.sqrt(5.0) * (3.0 * x**2 - 1.0) / 2.0
+
+
+def _pce_basis(names):
+    """Degree-2 polynomial-chaos basis: constant, univariate P1/P2, pairwise P1·P1.
+
+    Returns ``(terms, supports)`` where each term is ``[(input_index, degree), ...]``
+    and ``supports`` the set of inputs it depends on (for grouping Sobol indices).
+    """
+    d = len(names)
+    terms, supports = [[]], [frozenset()]                 # constant term
+    for i in range(d):
+        for p in (1, 2):
+            terms.append([(i, p)])
+            supports.append(frozenset({i}))
+    for i in range(d):                                    # pairwise degree-1 interactions
+        for j in range(i + 1, d):
+            terms.append([(i, 1), (j, 1)])
+            supports.append(frozenset({i, j}))
+    return terms, supports
+
+
+def sobol_indices(param_ranges: dict, grid: Grid, n_samples: int = 48,
+                  base: dict | None = None, seed: int = 0,
+                  domain_limit: tuple[float, float, float, float] = (-70, 70, 0, 160),
+                  art: Network | None = None, ven: Network | None = None) -> SobolResult:
+    """Variance-based (Sobol) sensitivity via a polynomial-chaos surrogate.
+
+    Fits an orthonormal-Legendre degree-2 expansion to ``n_samples`` Latin-hypercube
+    evaluations (the model is smooth and low-dimensional, so this needs far fewer solves
+    than raw Saltelli Monte-Carlo and yields stable indices). Sobol indices are then read
+    off analytically from the coefficients: ``S1`` is the variance fraction from an
+    input's own terms, ``ST`` adds its interaction terms, so ``ST ≥ S1``. ``fit_r2``
+    reports how much output variance the surrogate captures (trust the indices when it's
+    near 1).
+    """
+    names = list(param_ranges)
+    if not names:
+        raise ValueError("param_ranges is empty")
+    if n_samples < 6:
+        raise ValueError("n_samples must be >= 6 to fit the surrogate")
+    rng = np.random.default_rng(seed)
+    unit = latin_hypercube(n_samples, len(names), rng)        # (N, d) in [0,1)
+    lo = np.array([param_ranges[k][0] for k in names], dtype=float)
+    hi = np.array([param_ranges[k][1] for k in names], dtype=float)
+    samples = lo + unit * (hi - lo)
+
+    rows = []
+    for row in samples:
+        kw, perm = dict(base or {}), None
+        for name, value in zip(names, row, strict=True):
+            if name == "permeability":
+                perm = float(value)
+            elif name in _PARAM_FIELDS:
+                kw[name] = float(value)
+            else:
+                raise ValueError(f"unknown uncertain parameter {name!r}")
+        prm = Parameters(**kw)
+        g = grid if perm is None else replace(grid, permeability=perm)
+        rows.append(_qois(run_hybrid(prm, g, domain_limit=domain_limit, art=art, ven=ven)))
+
+    qoi_names = list(rows[0])
+    outputs = np.array([[r[q] for q in qoi_names] for r in rows])   # (N, q)
+    x = 2.0 * unit - 1.0                                            # map to [-1, 1]
+    terms, supports = _pce_basis(names)
+    design = np.empty((n_samples, len(terms)))
+    for k, term in enumerate(terms):
+        col = np.ones(n_samples)
+        for i, p in term:
+            col = col * _legendre(x[:, i], p)
+        design[:, k] = col
+
+    first, total, fit_r2 = {}, {}, {}
+    for j, q in enumerate(qoi_names):
+        y = outputs[:, j]
+        coef, *_ = np.linalg.lstsq(design, y, rcond=None)
+        resid = y - design @ coef
+        y_var = float(y.var()) or np.nan
+        fit_r2[q] = float(np.clip(1.0 - resid.var() / y_var, 0.0, 1.0)) if y_var == y_var else 0.0
+        power = coef[1:] ** 2                                       # drop the constant term
+        supp = supports[1:]
+        var_total = float(power.sum()) or np.nan
+        s1, st = {}, {}
+        for i, name in enumerate(names):
+            s1[name] = float(sum(power[k] for k, s in enumerate(supp) if s == {i}) / var_total)
+            st[name] = float(sum(power[k] for k, s in enumerate(supp) if i in s) / var_total)
+        first[q], total[q] = s1, st
+    return SobolResult(names=names, qoi_names=qoi_names, n_samples=n_samples,
+                       first_order=first, total_effect=total, fit_r2=fit_r2)
+
+
+@dataclass
 class UQResult:
     names: list                  # uncertain input names (columns of ``samples``)
     qoi_names: list              # output names (columns of ``outputs``)

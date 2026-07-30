@@ -341,9 +341,11 @@ a research project. Each notes where it lands in the tree.
 - **MPFA-O flux** for anisotropic / non-K-orthogonal media (TPFA is inconsistent there) — M.
 - **GPU / matrix-free** (cupy) for `darcy3d` on large grids — L.
 - ✅ **Uncertainty quantification** — Latin-hypercube Monte-Carlo over uncertain inputs
-  (`uq.monte_carlo`) with QoI mean/std/percentiles + first-order Pearson sensitivity;
-  `POST …/uq`, a web UQ card (sensitivity bars) and MCP `uncertainty_quantification`.
-  *(Follow-up: polynomial chaos / Sobol indices for variance decomposition.)*
+  (`uq.monte_carlo`) with QoI mean/std/percentiles + first-order Pearson sensitivity, *and*
+  variance-based **Sobol indices** (`uq.sobol_indices`) via a polynomial-chaos surrogate
+  (first-order S₁ + total-effect Sₜ, with the fit R²). `POST …/uq?method=correlation|sobol`,
+  a web UQ card (Pearson bars or S₁/Sₜ bars) and MCP `uncertainty_quantification` /
+  `sobol_sensitivity_indices`.
 
 ## 9.3 Growth & geometry
 
@@ -436,6 +438,13 @@ a research project. Each notes where it lands in the tree.
   interest's mean/std/5–95 percentiles + a first-order sensitivity (Pearson r of each input
   vs. output). `POST /projects/{id}/uq`, a web UQ card with per-QoI mean±std and signed
   sensitivity bars, and MCP `uncertainty_quantification`.
+- ✅ **Variance-based Sobol sensitivity / polynomial chaos** (`uq.sobol_indices`) — fits an
+  orthonormal-Legendre degree-2 PCE surrogate to a modest LHS sample and reads Sobol indices
+  off the coefficients analytically: first-order ``S1`` (an input's own variance share) and
+  total-effect ``ST`` (incl. interactions, ``ST ≥ S1``), plus the surrogate fit ``R²``. Far
+  fewer solves than raw Saltelli MC and constraint-satisfying on this smooth model.
+  `POST …/uq` with ``method="sobol"``, the UQ card's Sobol toggle (nested S₁/Sₜ bars), MCP
+  `sobol_sensitivity_indices`.
 - ✅ **Structural adaptation / autoregulation** (`core/adaptation.py`, `pipeline.run_adaptation`) —
   a reduced Pries–Secomb model: wall shear ``τ_w = 4μ|Q|/(πr³)`` drives radius remodelling
   ``r ← r·exp(rate·S)`` toward a shear set-point. Iterated with a flow solve in the loop the

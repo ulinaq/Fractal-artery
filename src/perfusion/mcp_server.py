@@ -236,6 +236,27 @@ def uncertainty(n_samples: int = 24, p_in_range=(5.0, 20.0), mu_range=(0.8, 1.5)
             "inflow_sensitivity": res.sensitivity["arterial_inflow"]}
 
 
+def sobol_sensitivity(n_samples: int = 48, p_in_range=(5.0, 20.0), mu_range=(0.8, 1.5),
+                      rmin_range=(0.35, 0.6), nx: int = 60, ny: int = 70,
+                      seed: int = 0) -> dict:
+    """Variance-based (Sobol) sensitivity of the hybrid model via a polynomial-chaos
+    surrogate. Fits a degree-2 expansion to ``n_samples`` Latin-hypercube solves and
+    returns, for arterial inflow, the first-order (``S1``) and total-effect (``ST``)
+    Sobol indices of each input — the rigorous variance decomposition — plus the
+    surrogate fit R²."""
+    from . import uq
+
+    nx, ny = int(np.clip(nx, 30, 160)), int(np.clip(ny, 30, 160))
+    grid = Grid(nx=nx, ny=ny, lx=_LX, ly=_LY)
+    res = uq.sobol_indices(
+        {"p_in": tuple(p_in_range), "mu": tuple(mu_range), "r_min_frac": tuple(rmin_range)},
+        grid, n_samples=int(n_samples), base={"p_out": 0.0}, seed=int(seed),
+        domain_limit=_DOMAIN)
+    return {"n_samples": res.n_samples, "fit_r2": res.fit_r2["arterial_inflow"],
+            "first_order": res.first_order["arterial_inflow"],
+            "total_effect": res.total_effect["arterial_inflow"]}
+
+
 def adapt_network(target_exponent: float = 3.0, rate: float = 0.05, n_iter: int = 60,
                   nx: int = 70, ny: int = 80, p_in: float = 10.0, p_out: float = 0.0,
                   r_min_frac: float = 0.15) -> dict:
@@ -445,6 +466,20 @@ def build_server():
         return uncertainty(n_samples=n_samples, p_in_range=(p_in_low, p_in_high),
                            mu_range=(mu_low, mu_high), rmin_range=(rmin_low, rmin_high),
                            nx=nx, ny=ny, seed=seed)
+
+    @server.tool()
+    def sobol_sensitivity_indices(n_samples: int = 48, p_in_low: float = 5.0,
+                                  p_in_high: float = 20.0, mu_low: float = 0.8,
+                                  mu_high: float = 1.5, rmin_low: float = 0.35,
+                                  rmin_high: float = 0.6, nx: int = 60, ny: int = 70,
+                                  seed: int = 0) -> dict:
+        """Variance-based Sobol sensitivity (polynomial-chaos surrogate): first-order
+        (S1) and total-effect (ST) indices of arterial inflow to inlet pressure,
+        viscosity and branch depth — the rigorous variance decomposition (ST ≥ S1;
+        ST − S1 = interaction). Returns the surrogate fit R² too. Keep the grid coarse."""
+        return sobol_sensitivity(n_samples=n_samples, p_in_range=(p_in_low, p_in_high),
+                                 mu_range=(mu_low, mu_high), rmin_range=(rmin_low, rmin_high),
+                                 nx=nx, ny=ny, seed=seed)
 
     @server.tool()
     def adapt_vessel_network(target_exponent: float = 3.0, rate: float = 0.05,

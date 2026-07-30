@@ -199,19 +199,29 @@ def run_project(store, project, req: RunRequest) -> None:
     store.save_result(project, result, notes=notes or None)
 
 
-def uncertainty(project, param_ranges: dict, n_samples: int = 32, seed: int = 0) -> dict:
-    """Monte-Carlo UQ over ``param_ranges`` on the project's grid/vasculature. Returns
-    per-QoI mean/std/percentiles + first-order sensitivities as a JSON-ready dict."""
-    from ..uq import monte_carlo
+def uncertainty(project, param_ranges: dict, n_samples: int = 32, seed: int = 0,
+                method: str = "correlation") -> dict:
+    """Uncertainty quantification over ``param_ranges`` on the project's grid/vasculature.
+
+    ``method='correlation'`` returns QoI mean/std/percentiles + first-order Pearson
+    sensitivities; ``method='sobol'`` returns variance-based Sobol first-order/total-effect
+    indices (with the surrogate fit R²). JSON-ready dict either way."""
+    from .. import uq
 
     grid, art, ven = validate_run(project, use_vessels=True)
     base = project.params.model_dump()          # fixed Parameters fields
-    res = monte_carlo({k: tuple(v) for k, v in param_ranges.items()}, grid,
-                      n_samples=n_samples, base=base, seed=seed,
-                      domain_limit=project.grid.domain_limit, art=art, ven=ven)
-    return {"names": res.names, "qoi_names": res.qoi_names, "n_samples": int(n_samples),
-            "mean": res.mean, "std": res.std, "p05": res.p05, "p95": res.p95,
-            "sensitivity": res.sensitivity}
+    ranges = {k: tuple(v) for k, v in param_ranges.items()}
+    if method == "sobol":
+        res = uq.sobol_indices(ranges, grid, n_samples=n_samples, base=base, seed=seed,
+                               domain_limit=project.grid.domain_limit, art=art, ven=ven)
+        return {"method": "sobol", "names": res.names, "qoi_names": res.qoi_names,
+                "n_samples": res.n_samples, "first_order": res.first_order,
+                "total_effect": res.total_effect, "fit_r2": res.fit_r2}
+    res = uq.monte_carlo(ranges, grid, n_samples=n_samples, base=base, seed=seed,
+                         domain_limit=project.grid.domain_limit, art=art, ven=ven)
+    return {"method": "correlation", "names": res.names, "qoi_names": res.qoi_names,
+            "n_samples": int(n_samples), "mean": res.mean, "std": res.std,
+            "p05": res.p05, "p95": res.p95, "sensitivity": res.sensitivity}
 
 
 def adapt_network(project, target_exponent: float = 3.0, rate: float = 0.05,
