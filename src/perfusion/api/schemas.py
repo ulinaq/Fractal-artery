@@ -35,12 +35,14 @@ class GridIn(BaseModel):
     ny: int = 160
     lx: float = 140.0
     ly: float = 160.0
-    permeability: float = Field(1.0, gt=0)   # homogeneous capillary-bed permeability
+    permeability: float = Field(1.0, gt=0)   # homogeneous capillary-bed permeability (x)
+    permeability_y: float | None = Field(None, gt=0)   # y-permeability; None => isotropic
     domain_limit: tuple[float, float, float, float] = (-70.0, 70.0, 0.0, 160.0)
 
     def to_core(self, mask=None, permeability=None) -> Grid:
         return Grid(nx=self.nx, ny=self.ny, lx=self.lx, ly=self.ly, mask=mask,
-                    permeability=self.permeability if permeability is None else permeability)
+                    permeability=self.permeability if permeability is None else permeability,
+                    permeability_y=self.permeability_y)
 
 
 class Polyline(BaseModel):

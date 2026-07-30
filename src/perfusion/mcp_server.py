@@ -302,6 +302,26 @@ def multicompartment(n: int = 3, beta: float = 1.0, nx: int = 90, ny: int = 110,
             "compartment_mean_pressure": [float(np.nanmean(res.compartments[c])) for c in range(n)]}
 
 
+def anisotropic_perfusion(anisotropy: float = 5.0, nx: int = 90, ny: int = 110,
+                          p_in: float = 10.0, p_out: float = 0.0,
+                          r_min_frac: float = 0.15) -> dict:
+    """Perfusion on an anisotropic capillary bed (diagonal-tensor permeability).
+
+    Sets ``Ky = anisotropy · Kx`` (``Kx = 1``) and runs the hybrid model, reporting the
+    mean Darcy flux resolved along x vs. y — showing how the high-permeability axis
+    channels the flow. ``anisotropy = 1`` is isotropic."""
+    nx, ny = int(np.clip(nx, 30, 200)), int(np.clip(ny, 30, 200))
+    prm = Parameters(p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+    grid = Grid(nx=nx, ny=ny, lx=_LX, ly=_LY, permeability=1.0,
+                permeability_y=float(anisotropy))
+    result = run_hybrid(prm, grid, domain_limit=_DOMAIN)
+    fx, fy = result.fx, result.fy
+    return {"anisotropy": anisotropy,
+            "mean_abs_flux_x": float(np.abs(fx).mean()),
+            "mean_abs_flux_y": float(np.abs(fy).mean()),
+            "flux_mean": float(result.flux.mean())}
+
+
 def heterogeneous_perfusion(lesion_k: float = 0.02, radius_frac: float = 0.2,
                             nx: int = 90, ny: int = 110, p_in: float = 10.0,
                             p_out: float = 0.0, r_min_frac: float = 0.15) -> dict:
@@ -503,6 +523,16 @@ def build_server():
         perfusion (total exchange) + each compartment's mean pressure. Keep grid coarse."""
         return multicompartment(n=n, beta=beta, nx=nx, ny=ny, p_in=p_in, p_out=p_out,
                                 r_min_frac=r_min_frac)
+
+    @server.tool()
+    def anisotropic_perfusion_bed(anisotropy: float = 5.0, nx: int = 90, ny: int = 110,
+                                  p_in: float = 10.0, p_out: float = 0.0,
+                                  r_min_frac: float = 0.15) -> dict:
+        """Perfusion on an anisotropic (diagonal-tensor) capillary bed: set Ky =
+        anisotropy·Kx (Kx=1) and report the mean Darcy flux along x vs. y — the
+        high-permeability axis channels the flow. anisotropy=1 is isotropic."""
+        return anisotropic_perfusion(anisotropy=anisotropy, nx=nx, ny=ny, p_in=p_in,
+                                     p_out=p_out, r_min_frac=r_min_frac)
 
     @server.tool()
     def heterogeneous_perfusion_lesion(lesion_k: float = 0.02, radius_frac: float = 0.2,
