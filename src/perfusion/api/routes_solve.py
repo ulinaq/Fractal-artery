@@ -226,7 +226,7 @@ def uncertainty_quantification(body: UQRequest, project: Project = Depends(get_p
     ``n_samples`` full solves — keep the grid coarse and the sample count modest."""
     try:
         return runner.uncertainty(project, body.params, n_samples=body.n_samples,
-                                  seed=body.seed)
+                                  seed=body.seed, method=body.method)
     except runner.InputError as e:
         raise HTTPException(400, str(e)) from None
     except ValueError as e:

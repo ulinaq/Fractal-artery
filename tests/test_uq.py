@@ -45,6 +45,30 @@ def test_permeability_as_an_uncertain_input(grid):
     assert np.all(np.isfinite(res.outputs))
 
 
+def test_sobol_indices_are_well_behaved(grid):
+    res = uq.sobol_indices(
+        {"p_in": (5.0, 20.0), "mu": (0.8, 1.5), "r_min_frac": (0.35, 0.6)},
+        grid, n_samples=48, base={"p_out": 0.0}, seed=1)
+    s1 = res.first_order["arterial_inflow"]
+    st = res.total_effect["arterial_inflow"]
+    # the degree-2 surrogate should explain almost all of a smooth model's variance
+    assert res.fit_r2["arterial_inflow"] > 0.9
+    assert s1["p_in"] == max(s1.values())          # inlet pressure dominates
+    for p in res.names:                            # total effect ≥ first order; both in [0,1]
+        assert st[p] >= s1[p] - 1e-9
+        assert 0.0 <= s1[p] <= 1.0001
+        assert 0.0 <= st[p] <= 1.0001
+    assert sum(s1.values()) <= 1.0001              # first-order shares can't exceed the whole
+
+
+def test_sobol_is_deterministic_and_validates(grid):
+    a = uq.sobol_indices({"p_in": (5.0, 20.0), "mu": (0.8, 1.5)}, grid, n_samples=24, seed=5)
+    b = uq.sobol_indices({"p_in": (5.0, 20.0), "mu": (0.8, 1.5)}, grid, n_samples=24, seed=5)
+    assert a.first_order == b.first_order
+    with pytest.raises(ValueError, match="n_samples must be"):
+        uq.sobol_indices({"p_in": (5.0, 20.0)}, grid, n_samples=4)
+
+
 def test_determinism_and_validation(grid):
     a = uq.monte_carlo({"p_in": (5.0, 20.0)}, grid, n_samples=10, seed=3)
     b = uq.monte_carlo({"p_in": (5.0, 20.0)}, grid, n_samples=10, seed=3)

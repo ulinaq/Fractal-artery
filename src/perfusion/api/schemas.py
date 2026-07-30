@@ -190,6 +190,7 @@ class UQRequest(BaseModel):
 
     n_samples: int = Field(32, ge=2, le=128)
     seed: int = 0
+    method: str = "correlation"          # "correlation" (Pearson) | "sobol" (variance-based)
     # {name: [low, high]} for name in p_in/p_out/mu/r_min_frac/hematocrit/permeability
     params: dict[str, tuple[float, float]] = Field(
         default_factory=lambda: {"p_in": (5.0, 20.0)})

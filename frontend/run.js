@@ -38,14 +38,34 @@ export async function runUQ() {
   if ($("uq-mu").checked) params.mu = [numOf("uq-mu-lo"), numOf("uq-mu-hi")];
   if ($("uq-rmin").checked) params.r_min_frac = [numOf("uq-rmin-lo"), numOf("uq-rmin-hi")];
   if (!Object.keys(params).length) { status("tick at least one uncertain input", "err"); return; }
-  const n = Math.round(numOf("uq-n"));
+  const sobol = $("uq-sobol").checked;
+  const n = sobol ? Math.max(24, Math.round(numOf("uq-n"))) : Math.round(numOf("uq-n"));
   $("uq-out").textContent = `running ${n} solves…`;
   status(`uncertainty: ${n} solves…`);
   let d;
-  try { d = await api("POST", `/projects/${state.project}/uq`, { n_samples: n, params }); }
-  catch (e) { status(e.message, "err"); $("uq-out").textContent = e.message; return; }
-  drawUQ(d);
+  try {
+    d = await api("POST", `/projects/${state.project}/uq`,
+      { n_samples: n, params, method: sobol ? "sobol" : "correlation" });
+  } catch (e) { status(e.message, "err"); $("uq-out").textContent = e.message; return; }
+  (d.method === "sobol" ? drawSobol : drawUQ)(d);
   status("uncertainty done", "ok");
+}
+
+function drawSobol(d) {
+  const rows = d.qoi_names.map((q) => {
+    const s1 = d.first_order[q], st = d.total_effect[q];
+    const bars = d.names.map((p) => {
+      const w1 = Math.round(s1[p] * 60), wt = Math.round(st[p] * 60);
+      return `<tr><td>${p}</td>`
+        + `<td><span class="bar" style="width:${wt}px;background:#94a3b8"></span>`
+        + `<span class="bar" style="width:${w1}px;background:var(--accent);margin-left:-${wt}px"></span></td>`
+        + `<td>S₁ ${s1[p].toFixed(2)} · Sₜ ${st[p].toFixed(2)}</td></tr>`;
+    }).join("");
+    return `<div><b>${q}</b> <span class="muted">(fit R²=${d.fit_r2[q].toFixed(2)})</span>`
+      + `<table>${bars}</table></div>`;
+  }).join("");
+  $("uq-out").innerHTML =
+    `<p class="muted">${d.n_samples} samples · Sobol variance share (S₁ inner, Sₜ outer bar)</p>${rows}`;
 }
 
 function drawUQ(d) {

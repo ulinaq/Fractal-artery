@@ -780,6 +780,15 @@ def test_uq_endpoint(client):
     # an unknown uncertain parameter is a clear 422
     assert client.post(f"/projects/{pid}/uq",
                        json={"n_samples": 4, "params": {"bogus": [0, 1]}}).status_code == 422
+    # variance-based Sobol mode returns first-order + total-effect indices
+    sob = client.post(f"/projects/{pid}/uq",
+                      json={"n_samples": 24, "method": "sobol",
+                            "params": {"p_in": [5, 20], "mu": [0.8, 1.5]}}).json()
+    assert sob["method"] == "sobol"
+    s1 = sob["first_order"]["arterial_inflow"]
+    st = sob["total_effect"]["arterial_inflow"]
+    assert st["p_in"] >= s1["p_in"] - 1e-9
+    assert s1["p_in"] == max(s1.values())
 
 
 def test_adapt_endpoint_moves_toward_murray(client):

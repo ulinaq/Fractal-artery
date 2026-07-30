@@ -74,7 +74,18 @@ def test_server_registers_expected_tools():
     assert {"run_simulation", "run_sweep", "perfusion_parameter_maps",
             "direct_transit_metrics", "oxygen_extraction_map",
             "heterogeneous_perfusion_lesion", "multicompartment_perfusion",
-            "adapt_vessel_network", "uncertainty_quantification", "describe_model"} <= tools
+            "adapt_vessel_network", "uncertainty_quantification",
+            "sobol_sensitivity_indices", "describe_model"} <= tools
+
+
+def test_sobol_sensitivity_indices():
+    import json
+
+    r = mcp_server.sobol_sensitivity(n_samples=32, nx=45, ny=52)
+    json.dumps(r)
+    assert r["fit_r2"] > 0.8
+    assert r["first_order"]["p_in"] == max(r["first_order"].values())
+    assert r["total_effect"]["p_in"] >= r["first_order"]["p_in"] - 1e-9
 
 
 def test_uncertainty_ranks_inlet_pressure():
