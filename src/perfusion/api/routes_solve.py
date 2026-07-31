@@ -381,14 +381,21 @@ def export(pid: str, fmt: str = "npz", project: Project = Depends(get_project),
            store: ProjectStore = Depends(get_store)):
     from fastapi.responses import FileResponse
 
+    name = project.name or project.id
+    if fmt == "vtp":       # vessel-network PolyData (tubes) — no solved field needed
+        from ..core.geometry import arterial_tree
+        art, _ = runner.build_networks(project, use_vessels=True)
+        net = art if art is not None else arterial_tree(project.params.to_core())
+        out = Path(tempfile.gettempdir()) / f"perfusion_{pid}.vtp"
+        perfio.network_to_vtp(net, out)
+        return FileResponse(out, media_type="application/xml", filename=f"{name}.vtp")
     if not project.has_result:
         raise HTTPException(409, "no result yet; run the simulation first")
-    name = project.name or project.id
     if fmt == "npz":       # the stored blob is already the npz export
         return FileResponse(store.result_path(pid), media_type="application/octet-stream",
                             filename=f"{name}.npz")
     if fmt not in ("csv", "vtk"):
-        raise HTTPException(422, "fmt must be 'npz', 'csv' or 'vtk'")
+        raise HTTPException(422, "fmt must be 'npz', 'csv', 'vtk' or 'vtp'")
     with np.load(store.result_path(pid)) as d:
         dl, mask = tuple(d["domain_limit"]), d["mask"]
         fields = {"pressure": d["pressure"], "flux": d["flux"], "tof": d["tof"]}

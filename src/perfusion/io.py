@@ -188,6 +188,61 @@ def save_results_vtk(result: HybridResult, path: str | Path) -> Path:
                          flux=result.flux, tof=result.tof, mask=result.grid.mask)
 
 
+def network_to_vtp(net, path: str | Path, *, flow=None) -> Path:
+    """Write a vascular network as VTK PolyData (``.vtp``) — points + line cells.
+
+    Each node becomes a point (``z = node_z`` if present, else 0); each segment a
+    2-point line cell carrying ``radius`` (and ``flow`` if given) as cell data, plus
+    the Strahler ``order`` for colouring. Opens directly in ParaView as a set of
+    tubes (use the *Tube* filter with the ``radius`` array).
+    """
+    node_x = np.asarray(net.node_x, dtype=float)
+    node_y = np.asarray(net.node_y, dtype=float)
+    node_z = np.asarray(getattr(net, "node_z", None)
+                        if getattr(net, "node_z", None) is not None
+                        else np.zeros_like(node_x), dtype=float)
+    from .core.morphometry import strahler_orders
+    order = strahler_orders(net)
+
+    pts = " ".join(f"{x:.6g} {y:.6g} {z:.6g}"
+                   for x, y, z in zip(node_x, node_y, node_z, strict=True))
+    conn = " ".join(f"{int(a)} {int(b)}"
+                    for a, b in zip(net.seg_start, net.seg_end, strict=True))
+    offsets = " ".join(str(2 * (i + 1)) for i in range(net.n_segments))
+
+    def _cell(name, a, dtype="Float64"):
+        text = " ".join(f"{v:.6g}" for v in np.asarray(a, dtype=float))
+        return (f'        <DataArray type="{dtype}" Name="{name}" format="ascii">'
+                f"{text}</DataArray>")
+
+    cell_arrays = [_cell("radius", net.seg_radius), _cell("order", order, "Int32")]
+    if flow is not None:
+        cell_arrays.append(_cell("flow", np.abs(np.asarray(flow, dtype=float))))
+    xml = (
+        '<?xml version="1.0"?>\n'
+        '<VTKFile type="PolyData" version="1.0" byte_order="LittleEndian">\n'
+        "  <PolyData>\n"
+        f'    <Piece NumberOfPoints="{net.n_nodes}" NumberOfLines="{net.n_segments}">\n'
+        "      <Points>\n"
+        '        <DataArray type="Float64" NumberOfComponents="3" format="ascii">'
+        f"{pts}</DataArray>\n"
+        "      </Points>\n"
+        "      <Lines>\n"
+        f'        <DataArray type="Int64" Name="connectivity" format="ascii">{conn}</DataArray>\n'
+        f'        <DataArray type="Int64" Name="offsets" format="ascii">{offsets}</DataArray>\n'
+        "      </Lines>\n"
+        '      <CellData Scalars="radius">\n'
+        f"{chr(10).join(cell_arrays)}\n"
+        "      </CellData>\n"
+        "    </Piece>\n"
+        "  </PolyData>\n"
+        "</VTKFile>\n"
+    )
+    path = Path(path)
+    path.write_text(xml)
+    return path if path.suffix else path.with_suffix(".vtp")
+
+
 def save_network(net, path: str | Path) -> Path:
     """Serialise a :class:`~perfusion.core.geometry.Network` to a ``.npz`` file."""
     path = Path(path)

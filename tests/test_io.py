@@ -82,3 +82,20 @@ def test_save_results_npz(tmp_path, hybrid_result):
         assert {"pressure", "flux", "tof", "q_a", "q_v", "terminal_flux",
                 "domain_limit"} <= set(data.files)
         assert data["pressure"].shape == hybrid_result.pressure.shape
+
+
+def test_network_to_vtp_roundtrips(tmp_path):
+    import xml.etree.ElementTree as ET
+
+    from perfusion import Parameters, arterial_tree
+    from perfusion.io import network_to_vtp
+
+    net = arterial_tree(Parameters(r_min_frac=0.5, seed=0))
+    out = network_to_vtp(net, tmp_path / "tree.vtp", flow=None)
+    assert out.exists()
+    tree = ET.parse(out)                       # valid XML
+    piece = tree.find(".//Piece")
+    assert int(piece.attrib["NumberOfPoints"]) == net.n_nodes
+    assert int(piece.attrib["NumberOfLines"]) == net.n_segments
+    names = {d.attrib.get("Name") for d in tree.iter("DataArray")}
+    assert {"connectivity", "offsets", "radius", "order"} <= names
