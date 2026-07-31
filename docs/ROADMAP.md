@@ -336,10 +336,22 @@ a research project. Each notes where it lands in the tree.
 
 ## 9.2 Numerics & solvers
 
-- **Newton with analytic Jacobian** for the nonlinear solve (vs. the current fixed-point) — M.
-- **AMG preconditioning** (pyamg) for the Darcy TPFA system; scales the 3-D solve — M.
-- **MPFA-O flux** for anisotropic / non-K-orthogonal media (TPFA is inconsistent there) — M.
-- **GPU / matrix-free** (cupy) for `darcy3d` on large grids — L.
+- ◑ **Newton with analytic Jacobian** for the nonlinear solve — *deliberately not added.*
+  The fixed-point (`solve_nonlinear`) reuses one LU factorisation, reduces exactly to
+  `solve_linear` when junction losses are off, and is ~12× faster than the old dense-Jacobian
+  Newton that was removed; for the mild junction-loss nonlinearity a re-added Newton would
+  regress speed for marginal robustness gain. Revisit only if a stiffer nonlinearity (e.g.
+  strong elasticity) makes the fixed point diverge.
+- ✅ **AMG preconditioning** (`core/linsolve.py`, optional `pyamg` extra) — `solve_spd(method=
+  "amg")` builds a smoothed-aggregation hierarchy + CG (near-linear scaling for large/3-D
+  grids); `solve_pressure_3d(solver="amg")`. Matches the direct solve to ~1e-9; the benchmark
+  harness compares the two.
+- ◑ **MPFA-O flux** for full (off-diagonal) tensor / non-K-orthogonal media — *deferred
+  (genuine numerics research).* Diagonal-tensor anisotropy (`Kx ≠ Ky`) is done and TPFA-exact
+  for it (see 9.1); a correct O-method (vertex interaction regions, local flux/pressure
+  continuity) is a substantial, separately-validated addition — not worth shipping unverified.
+- ◑ **GPU / matrix-free** (cupy) for `darcy3d` — *deferred (needs GPU hardware to implement and
+  verify honestly).* `solve_spd` isolates the linear solve, so a cupy backend can slot in later.
 - ✅ **Uncertainty quantification** — Latin-hypercube Monte-Carlo over uncertain inputs
   (`uq.monte_carlo`) with QoI mean/std/percentiles + first-order Pearson sensitivity, *and*
   variance-based **Sobol indices** (`uq.sobol_indices`) via a polynomial-chaos surrogate
@@ -349,8 +361,12 @@ a research project. Each notes where it lands in the tree.
 
 ## 9.3 Growth & geometry
 
-- 3-D CCO and staged/optimised CCO (bifurcation-angle & Murray-exponent optimisation).
-- Loopy venous networks / anastomoses (growth is tree-only today; veins are cyclic).
+- ◑ 3-D CCO and staged/optimised CCO — *deferred.* 2-D CCO (`cco_grow`) is done; a 3-D
+  version is a substantial rewrite (3-D nearest-segment projection + `node_z` network) worth
+  its own validation pass. Structural adaptation already optimises the Murray exponent (9.1).
+- ◑ Loopy venous networks / anastomoses — *partially covered.* The **solver** already handles
+  cyclic venous graphs (segmented veins contain loops); only the *growth* algorithms are
+  tree-only. Growing anastomoses is a research effort (loop-closure heuristics) — deferred.
 - ✅ **Data-constrained growth** — attraction points sampled ∝ a target perfusion-density
   map (`growth.sample_points_in_mask(density=)`, threaded through `grow_in_mask`/
   `cco_grow_in_mask`), so the tree grows denser where demand is high. Painted as **growth
@@ -365,7 +381,9 @@ a research project. Each notes where it lands in the tree.
   `GET …/morphometry`, a web Morphometry card (ratios + per-order table) and MCP
   `strahler_morphometry`. Gives grown / data-constrained trees a morphometric fingerprint to
   match measured vasculature.
-- Domain-aware growth (respect organ sub-regions / obstacles).
+- ✅ **Domain-aware growth** (`growth.mask_without_obstacles`, `grow_in_mask(obstacles=)`) —
+  tissue-mask holes already give organ-shaped, hole-avoiding growth; an explicit ``obstacles``
+  list of no-grow polygons steers both attraction points and terminals around sub-structures.
 
 ## 9.4 Tracer kinetics & perfusion analysis
 
@@ -393,21 +411,40 @@ a research project. Each notes where it lands in the tree.
   **SVD deconvolution** toggle / **MTT map** button in the TKM card, and the MCP
   `perfusion_parameter_maps(method="deconv")` tool. Validated to ~15 % on a well-sampled
   synthetic 1CM curve; absolute accuracy needs the transit time well-resolved (more
-  `n_frames`), while relative rCBF/rCBV/rMTT are robust — the clinical norm. *(Next:
-  block-circulant oSVD for delay-insensitivity; per-voxel model fitting.)*
-- **Transit-time distributions & CTH** → MTT, CTH and oxygen-extraction limits
-  (Jespersen–Østergaard). Reuses `core/timeofflight`. *(Started — see 9.6.)*
+  `n_frames`), while relative rCBF/rCBV/rMTT are robust — the clinical norm.
+- ✅ **Block-circulant oSVD** (`tkm.deconvolve(circulant=True)`, `…/kinetics/maps?osvd=true`) —
+  the delay-insensitive deconvolution variant: a bolus arrival lag between AIF and tissue no
+  longer biases the recovered flow (validated: oSVD Fp shift ≈0 vs sSVD's under a lag).
+  *(Per-voxel model fitting remains a follow-up.)*
+- ✅ **Transit-time distributions & CTH** → MTT, CTH and oxygen-extraction limits
+  (Jespersen–Østergaard), in `core/perfusion_metrics.py` — see 9.6.
 
 ## 9.5 Optimisation, inverse problems, platform
 
 - ✅ **Optimisation driver** over `optimize.objective` (Paper D flux-vs-TOF) —
   `optimize.optimize_tree` (Nelder-Mead / differential-evolution over the tree's
   branching asymmetries), exposed as the MCP `optimize_tree_config` tool.
-- Calibration / parameter estimation to data; inverse recovery of boundary pressures or
-  permeability from a perfusion map; adjoint gradients.
-- **Frontend automated tests** (Playwright) — codify the CDP smoke flow for CI.
-- Property-based conservation tests (hypothesis); run-comparison view; parameter-sweep UI;
-  units safety (pint); network VTK `.vtp` export; benchmark harness (asv).
+- ✅ **Calibration / inverse recovery** (`inverse.calibrate`) — bounded 1-D search over
+  forward solves recovers permeability / inlet pressure / viscosity from a measured QoI
+  (arterial inflow, mean flux, TOF); `POST …/calibrate`, MCP `calibrate_parameter_to_flow`.
+  *(Adjoint gradients for high-dimensional inversion remain a research follow-up.)*
+- ✅ **Property-based conservation tests** (`tests/test_properties.py`, hypothesis) — mass
+  conservation asserted across the random parameter space for the hybrid + multi-compartment
+  solvers.
+- ✅ **Network VTK `.vtp` export** (`io.network_to_vtp`, `GET …/export?fmt=vtp`) — vessels as
+  ParaView PolyData tubes (radius / Strahler order / flow cell data).
+- ✅ **Benchmark harness** (`scripts/benchmark.py`) — times `run_hybrid` across grid sizes and
+  compares the direct vs. AMG Darcy backends. *(A full asv cross-commit harness is optional.)*
+- ◑ **Frontend automated tests** — every web feature this cycle was smoke-verified with a
+  headless-Chrome CDP driver; codifying it as a Playwright/CI job (needs a JS toolchain + a
+  server+Chrome in CI) is the remaining step. Deferred.
+- ◑ **Run-comparison view / parameter-sweep UI** — *partially covered.* The **Tree Explorer**
+  page gives interactive parameter exploration with a live render, and MCP `run_sweep` sweeps a
+  parameter; a dedicated in-app A/B result-comparison needs a multi-result-per-project data
+  model. Deferred.
+- ◑ **Units safety (pint)** — *deferred by design.* The engine is deliberately non-dimensional
+  (thesis convention); wrapping every quantity in pint units is a pervasive change with little
+  benefit for the research use-case.
 
 ## 9.6 Delivered from this backlog
 
