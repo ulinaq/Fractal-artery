@@ -806,6 +806,18 @@ def test_adapt_endpoint_moves_toward_murray(client):
     assert _wait_for_job(client, jid)["state"] == "done"
 
 
+def test_export_network_vtp(client):
+    pid = client.post("/projects", json={"name": "vtp", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    # vtp exports the vessel network and needs no solved result
+    r = client.get(f"/projects/{pid}/export", params={"fmt": "vtp"})
+    assert r.status_code == 200
+    body = r.text
+    assert 'type="PolyData"' in body
+    assert 'Name="radius"' in body
+    assert "<Lines>" in body
+
+
 def test_morphometry_endpoint(client):
     pid = client.post("/projects", json={"name": "morph", "grid": SMALL_GRID,
                                          "params": FAST_PARAMS}).json()["id"]
