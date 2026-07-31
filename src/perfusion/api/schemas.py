@@ -200,6 +200,15 @@ class AdaptInfo(BaseModel):
     moved_toward_target: bool
 
 
+class CalibrateRequest(BaseModel):
+    """Recover a model input so a perfusion quantity matches a measured target."""
+
+    target: float
+    param: str = "permeability"          # p_in/p_out/mu/r_min_frac/permeability
+    bounds: tuple[float, float] = (0.1, 10.0)
+    qoi: str = "arterial_inflow"         # arterial_inflow | flux_mean | tof_mean
+
+
 class UQRequest(BaseModel):
     """Monte-Carlo uncertainty quantification over uncertain input ranges."""
 

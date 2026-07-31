@@ -768,6 +768,21 @@ def test_kinetic_maps_endpoint(client):
                       params={"field": "Fp", "method": "bogus"}).status_code == 404
 
 
+def test_calibrate_endpoint_recovers_permeability(client):
+    pid = client.post("/projects", json={"name": "cal",
+                                         "grid": {**SMALL_GRID, "permeability": 2.0},
+                                         "params": FAST_PARAMS}).json()["id"]
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    target = client.get(f"/projects/{pid}/results").json()["arterial_inflow"]
+    # recover the permeability that reproduces that inflow
+    r = client.post(f"/projects/{pid}/calibrate",
+                    json={"target": target, "param": "permeability", "bounds": [0.5, 6.0]}).json()
+    assert r["param"] == "permeability"
+    assert r["value"] == pytest.approx(2.0, rel=0.15)
+    assert r["achieved"] == pytest.approx(target, rel=1e-2)
+
+
 def test_uq_endpoint(client):
     pid = client.post("/projects", json={"name": "uq", "grid": SMALL_GRID,
                                          "params": FAST_PARAMS}).json()["id"]

@@ -214,6 +214,24 @@ def direct_transit(rho_c: float = 0.0, p_in: float = 10.0, p_out: float = 0.0,
             "mtt_to_outlet": float(mtt.mean()) if mtt.size else None}
 
 
+def calibrate_to_flow(target_inflow: float, param: str = "permeability",
+                      lo: float = 0.1, hi: float = 10.0, nx: int = 70, ny: int = 80,
+                      p_in: float = 10.0, p_out: float = 0.0, r_min_frac: float = 0.15) -> dict:
+    """Inverse calibration: recover a model input (``permeability`` / ``p_in`` / ``mu``)
+    so the fractal-tree model's arterial inflow matches ``target_inflow``. Returns the
+    recovered value, the achieved inflow and the number of forward solves."""
+    from . import inverse
+
+    nx, ny = int(np.clip(nx, 30, 160)), int(np.clip(ny, 30, 160))
+    grid = Grid(nx=nx, ny=ny, lx=_LX, ly=_LY)
+    res = inverse.calibrate(float(target_inflow), param, grid, (lo, hi),
+                            qoi="arterial_inflow",
+                            base={"p_in": p_in, "p_out": p_out, "r_min_frac": r_min_frac},
+                            domain_limit=_DOMAIN)
+    return {"param": res.param, "recovered_value": res.value, "target": res.target,
+            "achieved": res.achieved, "n_eval": res.n_eval}
+
+
 def uncertainty(n_samples: int = 24, p_in_range=(5.0, 20.0), mu_range=(0.8, 1.5),
                 rmin_range=(0.35, 0.6), nx: int = 60, ny: int = 70,
                 seed: int = 0) -> dict:
@@ -519,6 +537,17 @@ def build_server():
         Returns the mean bolus arrival time by element class and the overall mean
         transit time to the venous outlet. `rho_c` is the connection search radius."""
         return direct_transit(rho_c=rho_c, p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+
+    @server.tool()
+    def calibrate_parameter_to_flow(target_inflow: float, param: str = "permeability",
+                                    lo: float = 0.1, hi: float = 10.0, nx: int = 70,
+                                    ny: int = 80, p_in: float = 10.0, p_out: float = 0.0,
+                                    r_min_frac: float = 0.15) -> dict:
+        """Inverse calibration: recover a model input (permeability / p_in / mu) so the
+        model's arterial inflow matches `target_inflow` (bounded 1-D search over forward
+        solves). Returns the recovered value + achieved inflow — fit the model to data."""
+        return calibrate_to_flow(target_inflow=target_inflow, param=param, lo=lo, hi=hi,
+                                 nx=nx, ny=ny, p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
 
     @server.tool()
     def uncertainty_quantification(n_samples: int = 24, p_in_low: float = 5.0,
