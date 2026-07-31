@@ -20,6 +20,7 @@ from .schemas import (
     AdaptRequest,
     GrowInfo,
     GrowRequest,
+    HotspotsIn,
     IOIn,
     LesionsIn,
     MaskIn,
@@ -72,6 +73,22 @@ def set_lesions(body: LesionsIn, project: Project = Depends(get_project),
     project.lesions = [le.model_dump() for le in body.lesions]
     if project.has_result:
         store.clear_result(project)
+    store.save(project)
+    return project_info(project)
+
+
+@router.get("/projects/{pid}/hotspots")
+def get_hotspots(project: Project = Depends(get_project)) -> dict:
+    return {"hotspots": project.hotspots}
+
+
+@router.put("/projects/{pid}/hotspots", response_model=ProjectInfo)
+def set_hotspots(body: HotspotsIn, project: Project = Depends(get_project),
+                 store: ProjectStore = Depends(get_store)) -> ProjectInfo:
+    """Set the data-constrained growth targets: subsequent grows sample attraction
+    points with probability weighted by these hotspots (denser tree where demand is
+    higher)."""
+    project.hotspots = [h.model_dump() for h in body.hotspots]
     store.save(project)
     return project_info(project)
 
@@ -239,8 +256,16 @@ def grow_vessels(body: GrowRequest | None = None, project: Project = Depends(get
     if req.target not in ("artery", "vein"):
         raise HTTPException(422, "target must be 'artery' or 'vein'")
     domain_limit = project.grid.domain_limit
-    mask = (rasterize_mask(project.grid.nx, project.grid.ny, domain_limit, project.regions)
-            if project.regions else np.ones((project.grid.nx, project.grid.ny), bool))
+    nx, ny = project.grid.nx, project.grid.ny
+    mask = (rasterize_mask(nx, ny, domain_limit, project.regions)
+            if project.regions else np.ones((nx, ny), bool))
+    # data-constrained growth: a demand map from the drawn hotspots (baseline 1)
+    density = None
+    if project.hotspots:
+        from ..core.geometry import rasterize_permeability
+        density = rasterize_permeability(
+            nx, ny, domain_limit,
+            [(h["polygon"], h["weight"]) for h in project.hotspots], base=1.0)
 
     prm = project.params.to_core()
     if req.target == "artery":
@@ -254,7 +279,7 @@ def grow_vessels(body: GrowRequest | None = None, project: Project = Depends(get
     if req.method == "cco":
         network = growth.cco_grow_in_mask(
             base, mask, domain_limit, n_terminals=req.n_points, seed=req.seed,
-            d_min=req.d_min, leaf_radius=req.leaf_radius)
+            d_min=req.d_min, leaf_radius=req.leaf_radius, density=density)
     else:
         seed_nodes = None
         if req.from_segments:
@@ -262,7 +287,7 @@ def grow_vessels(body: GrowRequest | None = None, project: Project = Depends(get
                           if 0 <= s < base.n_segments]
         network = growth.grow_in_mask(
             base, mask, domain_limit,
-            n_points=req.n_points, seed=req.seed, seed_nodes=seed_nodes,
+            n_points=req.n_points, seed=req.seed, seed_nodes=seed_nodes, density=density,
             step=req.step, influence_radius=req.influence_radius,
             kill_radius=req.kill_radius, leaf_radius=req.leaf_radius)
     if req.target == "artery":

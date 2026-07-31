@@ -24,7 +24,7 @@ const history = { stack: [], idx: -1 };
 function geomSnapshot() {
   return JSON.stringify({
     vessels: state.vessels, regions: state.regions, lesions: state.lesions,
-    inlets: state.inlets, outlets: state.outlets,
+    hotspots: state.hotspots, inlets: state.inlets, outlets: state.outlets,
     editable: state.editable, editSource: state.editSource,
   });
 }
@@ -55,6 +55,7 @@ function applySnapshot(snap) {
   state.vessels = s.vessels || { arteries: [], veins: [] };
   state.regions = s.regions || [];
   state.lesions = s.lesions || [];
+  state.hotspots = s.hotspots || [];
   state.inlets = s.inlets || []; state.outlets = s.outlets || [];
   state.editable = s.editable; state.editSource = s.editSource;
   state.editSel = null; state.editAdd = false; state.editDrag = false;
@@ -128,6 +129,7 @@ async function newProject() {
   state.vessels = { arteries: [], veins: [] };
   state.stroke = []; state.regions = []; state.regionStroke = [];
   state.lesions = []; state.lesionStroke = [];
+  state.hotspots = []; state.hotspotStroke = [];
   state.inlets = []; state.outlets = [];
   state.network = null; state.fieldData = null;
   stopFlow(); state.tracer = null; state.hasResult = false;
@@ -201,7 +203,7 @@ canvas.addEventListener("pointerdown", (e) => {
   if (state.mode === "edit") { editPointerDown(px, py); return; }
   const pt = toDomain(px, py);
   if (state.mode === "vessels") state.stroke.push(pt);
-  else if (state.mode === "tissue") (drawingLesion() ? state.lesionStroke : state.regionStroke).push(pt);
+  else if (state.mode === "tissue") activeStroke().push(pt);
   else if (state.mode === "io") markIO(pt);
   redraw();
 });
@@ -258,17 +260,30 @@ export async function saveVessels() {
   status(`saved ${state.vessels.arteries.length} arteries, ${state.vessels.veins.length} veins`, "ok");
 }
 
-// ── tissue mask + permeability-lesion drawing ───────────────────────────────────
-function drawingLesion() { return $("tissue-target").value === "lesion"; }
+// ── tissue mask + permeability-lesion + growth-hotspot drawing ──────────────────
+function drawTarget() { return $("tissue-target").value; }        // "organ" | "lesion" | "hotspot"
+function activeStroke() {
+  const t = drawTarget();
+  return t === "lesion" ? state.lesionStroke : t === "hotspot" ? state.hotspotStroke
+    : state.regionStroke;
+}
 
 function endRegion() {
-  if (drawingLesion()) {
+  const t = drawTarget();
+  if (t === "lesion") {
     if (state.lesionStroke.length >= 3) {
       state.lesions.push({ polygon: state.lesionStroke.map(([x, y]) => [x, y]),
                            permeability: Math.max(1e-3, numOf("lesion-k")) });
       recordHistory();
     }
     state.lesionStroke = [];
+  } else if (t === "hotspot") {
+    if (state.hotspotStroke.length >= 3) {
+      state.hotspots.push({ polygon: state.hotspotStroke.map(([x, y]) => [x, y]),
+                            weight: Math.max(1, numOf("hotspot-w")) });
+      recordHistory();
+    }
+    state.hotspotStroke = [];
   } else {
     if (state.regionStroke.length >= 3) {
       state.regions.push(state.regionStroke.map(([x, y]) => [x, y]));
@@ -279,28 +294,32 @@ function endRegion() {
   redraw();
 }
 function undoRegion() {
-  if (drawingLesion()) {
-    if (state.lesionStroke.length) state.lesionStroke.pop();
-    else { state.lesions.pop(); recordHistory(); }
-  } else if (state.regionStroke.length) {
-    state.regionStroke.pop();
-  } else { state.regions.pop(); recordHistory(); }
+  const t = drawTarget();
+  const [stroke, saved] = t === "lesion" ? [state.lesionStroke, state.lesions]
+    : t === "hotspot" ? [state.hotspotStroke, state.hotspots]
+      : [state.regionStroke, state.regions];
+  if (stroke.length) stroke.pop();
+  else { saved.pop(); recordHistory(); }
   redraw();
 }
 function clearTissue() {
-  if (drawingLesion()) { state.lesions = []; state.lesionStroke = []; }
+  const t = drawTarget();
+  if (t === "lesion") { state.lesions = []; state.lesionStroke = []; }
+  else if (t === "hotspot") { state.hotspots = []; state.hotspotStroke = []; }
   else { state.regions = []; state.regionStroke = []; }
   recordHistory(); redraw();
 }
 
 export async function saveMask() {
   requireProject();
-  if (state.regionStroke.length >= 3 || state.lesionStroke.length >= 3) endRegion();
+  if (state.regionStroke.length >= 3 || state.lesionStroke.length >= 3
+      || state.hotspotStroke.length >= 3) endRegion();
   await api("PUT", `/projects/${state.project}/mask`, { regions: state.regions });
   await api("PUT", `/projects/${state.project}/lesions`, { lesions: state.lesions });
-  const bits = [];
-  bits.push(state.regions.length ? `${state.regions.length} region(s)` : "full domain");
+  await api("PUT", `/projects/${state.project}/hotspots`, { hotspots: state.hotspots });
+  const bits = [state.regions.length ? `${state.regions.length} region(s)` : "full domain"];
   if (state.lesions.length) bits.push(`${state.lesions.length} lesion(s)`);
+  if (state.hotspots.length) bits.push(`${state.hotspots.length} hotspot(s)`);
   status(`saved tissue — ${bits.join(", ")}`, "ok");
 }
 
@@ -309,6 +328,8 @@ async function loadMask() {
   catch { state.regions = []; }
   try { state.lesions = (await api("GET", `/projects/${state.project}/lesions`)).lesions || []; }
   catch { state.lesions = []; }
+  try { state.hotspots = (await api("GET", `/projects/${state.project}/hotspots`)).hotspots || []; }
+  catch { state.hotspots = []; }
 }
 
 export async function loadVessels() {
@@ -423,8 +444,9 @@ document.addEventListener("keydown", (e) => {
   } else if (e.key === "Escape") {
     if (m === "edit") { if (state.editAdd) toggleAddMode(); else { state.editSel = null; syncEditPanel(); redraw(); } }
     else if (m === "vessels" && state.stroke.length) { state.stroke = []; redraw(); }
-    else if (m === "tissue" && (state.regionStroke.length || state.lesionStroke.length)) {
-      state.regionStroke = []; state.lesionStroke = []; redraw();
+    else if (m === "tissue" && (state.regionStroke.length || state.lesionStroke.length
+             || state.hotspotStroke.length)) {
+      state.regionStroke = []; state.lesionStroke = []; state.hotspotStroke = []; redraw();
     }
     else handled = false;
   } else if (k === "a") {
@@ -460,7 +482,8 @@ $("btn-endregion").addEventListener("click", endRegion);
 $("btn-undo-region").addEventListener("click", undoRegion);
 $("btn-clear-tissue").addEventListener("click", clearTissue);
 $("tissue-target").addEventListener("change", () => {
-  $("lesion-k-row").style.display = drawingLesion() ? "" : "none";
+  $("lesion-k-row").style.display = drawTarget() === "lesion" ? "" : "none";
+  $("hotspot-w-row").style.display = drawTarget() === "hotspot" ? "" : "none";
 });
 $("btn-save-mask").addEventListener("click", () => saveMask().catch((e) => status(e.message, "err")));
 $("btn-grow").addEventListener("click", guarded(grow));

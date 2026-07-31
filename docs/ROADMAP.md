@@ -351,7 +351,14 @@ a research project. Each notes where it lands in the tree.
 
 - 3-D CCO and staged/optimised CCO (bifurcation-angle & Murray-exponent optimisation).
 - Loopy venous networks / anastomoses (growth is tree-only today; veins are cyclic).
-- Data-constrained growth (match a measured perfusion-density map or Strahler-order stats).
+- ✅ **Data-constrained growth** — attraction points sampled ∝ a target perfusion-density
+  map (`growth.sample_points_in_mask(density=)`, threaded through `grow_in_mask`/
+  `cco_grow_in_mask`), so the tree grows denser where demand is high. Painted as **growth
+  hotspots** in the web Tissue tab (draw-target toggle + demand weight, teal overlay, stored
+  per project + document round-trip, `GET/PUT …/hotspots`, rasterised to a density map by the
+  grow endpoint) and MCP `data_constrained_tree_growth`. *(Follow-up: match Strahler-order
+  statistics; the demand bias is strongest from a sparse base — a full pre-grown tree dilutes
+  it.)*
 - Domain-aware growth (respect organ sub-regions / obstacles).
 
 ## 9.4 Tracer kinetics & perfusion analysis

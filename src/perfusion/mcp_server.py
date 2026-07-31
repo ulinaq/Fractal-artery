@@ -302,6 +302,39 @@ def multicompartment(n: int = 3, beta: float = 1.0, nx: int = 90, ny: int = 110,
             "compartment_mean_pressure": [float(np.nanmean(res.compartments[c])) for c in range(n)]}
 
 
+def data_constrained_growth(hotspot_weight: float = 8.0, radius_frac: float = 0.22,
+                            n_points: int = 500, seed: int = 0) -> dict:
+    """Data-constrained vascular growth toward a target perfusion-density map.
+
+    Grows a tree by space colonisation with the attraction points biased toward a
+    central demand hotspot (weight ``hotspot_weight`` vs. 1 elsewhere), then reports the
+    fraction of grown terminals that landed inside the hotspot vs. the hotspot's area
+    fraction — a ratio > 1 means the tree concentrated where demand is high."""
+    from . import growth
+    from .core.geometry import arterial_tree
+
+    nx, ny = 80, 90
+    xc, yc = np.meshgrid(np.arange(nx), np.arange(ny), indexing="ij")
+    rx, ry = radius_frac * nx, radius_frac * ny
+    hot = ((xc - nx / 2) / rx) ** 2 + ((yc - ny / 2) / ry) ** 2 <= 1.0
+    density = np.where(hot, float(hotspot_weight), 1.0)
+    mask = np.ones((nx, ny), bool)
+
+    base = arterial_tree(Parameters(r_min_frac=0.5, seed=seed))
+    net = growth.grow_in_mask(base, mask, _DOMAIN, n_points=int(n_points), seed=seed,
+                              density=density, step=4.0)
+    # map terminal coords back to grid cells to test concentration
+    tn = net.terminal_nodes
+    x0, x1, y0, y1 = _DOMAIN
+    ix = np.clip(((net.node_x[tn] - x0) / (x1 - x0) * nx).astype(int), 0, nx - 1)
+    iy = np.clip(((net.node_y[tn] - y0) / (y1 - y0) * ny).astype(int), 0, ny - 1)
+    in_hot = float(np.mean(hot[ix, iy])) if tn.size else 0.0
+    area = float(hot.mean())
+    return {"hotspot_weight": hotspot_weight, "n_terminals": int(tn.size),
+            "terminal_fraction_in_hotspot": in_hot, "hotspot_area_fraction": area,
+            "concentration_ratio": in_hot / area if area > 0 else None}
+
+
 def anisotropic_perfusion(anisotropy: float = 5.0, nx: int = 90, ny: int = 110,
                           p_in: float = 10.0, p_out: float = 0.0,
                           r_min_frac: float = 0.15) -> dict:
@@ -523,6 +556,16 @@ def build_server():
         perfusion (total exchange) + each compartment's mean pressure. Keep grid coarse."""
         return multicompartment(n=n, beta=beta, nx=nx, ny=ny, p_in=p_in, p_out=p_out,
                                 r_min_frac=r_min_frac)
+
+    @server.tool()
+    def data_constrained_tree_growth(hotspot_weight: float = 8.0, radius_frac: float = 0.22,
+                                     n_points: int = 500, seed: int = 0) -> dict:
+        """Data-constrained vascular growth: grow a tree with attraction points biased
+        toward a central demand hotspot (weight vs 1 elsewhere) and report the fraction
+        of terminals inside the hotspot vs its area — concentration_ratio > 1 means the
+        tree grew denser where demand is high (matching a target perfusion map)."""
+        return data_constrained_growth(hotspot_weight=hotspot_weight, radius_frac=radius_frac,
+                                       n_points=n_points, seed=seed)
 
     @server.tool()
     def anisotropic_perfusion_bed(anisotropy: float = 5.0, nx: int = 90, ny: int = 110,

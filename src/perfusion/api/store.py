@@ -50,6 +50,7 @@ class Project:
     veins: list[Polyline] = field(default_factory=list)
     regions: list = field(default_factory=list)  # tissue outline polygons
     lesions: list = field(default_factory=list)  # low-K patches: {polygon, permeability}
+    hotspots: list = field(default_factory=list)  # growth-demand targets: {polygon, weight}
     inlets: list = field(default_factory=list)    # arterial inlet points (p_in)
     outlets: list = field(default_factory=list)   # venous outlet points (p_out)
     artery_network: object | None = None  # grown/segmented perfusion.core.geometry.Network
@@ -69,7 +70,7 @@ def document_from_project(project: Project) -> ProjectDocument:
     return ProjectDocument(
         name=project.name, params=project.params, grid=project.grid,
         arteries=list(project.arteries), veins=list(project.veins),
-        regions=project.regions, lesions=project.lesions,
+        regions=project.regions, lesions=project.lesions, hotspots=project.hotspots,
         inlets=project.inlets, outlets=project.outlets,
         artery_network=(NetworkModel.from_core(project.artery_network)
                         if project.artery_network is not None else None),
@@ -87,6 +88,7 @@ def project_from_document(doc: ProjectDocument, pid: str) -> Project:
         arteries=list(doc.arteries), veins=list(doc.veins),
         regions=[[list(pt) for pt in poly] for poly in doc.regions],
         lesions=[le.model_dump() for le in doc.lesions],
+        hotspots=[h.model_dump() for h in doc.hotspots],
         inlets=[list(pt) for pt in doc.inlets], outlets=[list(pt) for pt in doc.outlets],
         artery_network=doc.artery_network.to_core() if doc.artery_network else None,
         vein_network=doc.vein_network.to_core() if doc.vein_network else None,
@@ -118,6 +120,7 @@ class ProjectStore:
                        arteries TEXT NOT NULL, veins TEXT NOT NULL,
                        regions TEXT NOT NULL DEFAULT '[]',
                        lesions TEXT NOT NULL DEFAULT '[]',
+                       hotspots TEXT NOT NULL DEFAULT '[]',
                        inlets TEXT NOT NULL DEFAULT '[]',
                        outlets TEXT NOT NULL DEFAULT '[]', summary TEXT )"""
             )
@@ -129,7 +132,7 @@ class ProjectStore:
             )
             # migrate DBs created before these columns existed
             cols = {r["name"] for r in con.execute("PRAGMA table_info(projects)")}
-            for col in ("regions", "lesions", "inlets", "outlets"):
+            for col in ("regions", "lesions", "hotspots", "inlets", "outlets"):
                 if col not in cols:
                     con.execute(f"ALTER TABLE projects ADD COLUMN {col} TEXT NOT NULL DEFAULT '[]'")
             # a restart killed any in-flight jobs -> mark them interrupted
@@ -180,6 +183,7 @@ class ProjectStore:
             veins=[Polyline(**d) for d in json.loads(row["veins"])],
             regions=json.loads(row["regions"]) if row["regions"] else [],
             lesions=json.loads(row["lesions"]) if row["lesions"] else [],
+            hotspots=json.loads(row["hotspots"]) if row["hotspots"] else [],
             inlets=json.loads(row["inlets"]) if row["inlets"] else [],
             outlets=json.loads(row["outlets"]) if row["outlets"] else [],
             summary=json.loads(row["summary"]) if row["summary"] else None,
@@ -222,13 +226,13 @@ class ProjectStore:
             con.execute(
                 """INSERT INTO projects
                        (id, name, params, grid, arteries, veins, regions, lesions,
-                        inlets, outlets, summary)
+                        hotspots, inlets, outlets, summary)
                        VALUES (:id, :name, :params, :grid, :arteries, :veins,
-                               :regions, :lesions, :inlets, :outlets, :summary)
+                               :regions, :lesions, :hotspots, :inlets, :outlets, :summary)
                    ON CONFLICT(id) DO UPDATE SET
                        name=:name, params=:params, grid=:grid, arteries=:arteries,
-                       veins=:veins, regions=:regions, lesions=:lesions, inlets=:inlets,
-                       outlets=:outlets, summary=:summary""",
+                       veins=:veins, regions=:regions, lesions=:lesions, hotspots=:hotspots,
+                       inlets=:inlets, outlets=:outlets, summary=:summary""",
                 {
                     "id": project.id, "name": project.name,
                     "params": project.params.model_dump_json(),
@@ -237,6 +241,7 @@ class ProjectStore:
                     "veins": json.dumps([p.model_dump() for p in project.veins]),
                     "regions": json.dumps(project.regions),
                     "lesions": json.dumps(project.lesions),
+                    "hotspots": json.dumps(project.hotspots),
                     "inlets": json.dumps(project.inlets),
                     "outlets": json.dumps(project.outlets),
                     "summary": json.dumps(project.summary) if project.summary else None,

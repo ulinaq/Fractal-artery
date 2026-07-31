@@ -76,6 +76,19 @@ class LesionsIn(BaseModel):
     lesions: list[Lesion] = Field(default_factory=list)
 
 
+class Hotspot(BaseModel):
+    """A growth-demand target: an outline polygon + its relative demand weight."""
+
+    polygon: list[tuple[float, float]]
+    weight: float = Field(4.0, gt=0)   # demand relative to a baseline of 1 outside
+
+
+class HotspotsIn(BaseModel):
+    """Data-constrained growth targets: draw where the tree should grow denser."""
+
+    hotspots: list[Hotspot] = Field(default_factory=list)
+
+
 class IOIn(BaseModel):
     """Inlet (arterial, p_in) and outlet (venous, p_out) points, in domain coords.
 
@@ -304,6 +317,7 @@ class ProjectDocument(BaseModel):
     veins: list[Polyline] = Field(default_factory=list)
     regions: list[list[tuple[float, float]]] = Field(default_factory=list)
     lesions: list[Lesion] = Field(default_factory=list)
+    hotspots: list[Hotspot] = Field(default_factory=list)
     inlets: list[tuple[float, float]] = Field(default_factory=list)
     outlets: list[tuple[float, float]] = Field(default_factory=list)
     artery_network: NetworkModel | None = None

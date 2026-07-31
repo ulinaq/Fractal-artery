@@ -806,6 +806,27 @@ def test_adapt_endpoint_moves_toward_murray(client):
     assert _wait_for_job(client, jid)["state"] == "done"
 
 
+def test_growth_hotspots_persist_and_feed_growth(client):
+    pid = client.post("/projects", json={"name": "grow-hot", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    assert client.get(f"/projects/{pid}/hotspots").json()["hotspots"] == []
+    hot = {"polygon": [[5, 20], [65, 20], [65, 150], [5, 150]], "weight": 12.0}
+    client.put(f"/projects/{pid}/hotspots", json={"hotspots": [hot]})
+    assert client.get(f"/projects/{pid}/hotspots").json()["hotspots"][0]["weight"] == 12.0
+    # the demand map feeds a valid data-constrained grow (bias magnitude is covered by
+    # the growth/MCP unit tests; here we assert the endpoint threads it through cleanly)
+    info = client.post(f"/projects/{pid}/grow",
+                       json={"target": "artery", "n_points": 400, "seed": 1}).json()
+    assert info["n_segments"] > 0
+    segs = client.get(f"/projects/{pid}/network").json()["segments"]
+    assert any(s["kind"] == "artery" for s in segs)
+    # hotspots round-trip through the document
+    doc = client.get(f"/projects/{pid}/document").json()
+    assert doc["hotspots"][0]["weight"] == 12.0
+    pid2 = client.post("/projects/import", json=doc).json()["id"]
+    assert client.get(f"/projects/{pid2}/hotspots").json()["hotspots"][0]["weight"] == 12.0
+
+
 def test_anisotropic_permeability_roundtrips_and_solves(client):
     grid = {**SMALL_GRID, "permeability": 1.0, "permeability_y": 5.0}
     pid = client.post("/projects", json={"name": "aniso", "grid": grid,

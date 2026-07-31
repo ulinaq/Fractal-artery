@@ -121,6 +121,30 @@ function drawRegions() {
     ctx.strokeStyle = "rgba(5,150,105,.7)"; ctx.lineWidth = 1.5; ctx.stroke();
   }
   drawLesions();
+  drawHotspots();
+}
+
+// growth-demand hotspots: teal outline + fill, opacity growing with the demand weight;
+// shown in tissue mode (to edit) and over the result.
+function drawHotspots() {
+  if (state.mode !== "tissue" && state.mode !== "result") return;
+  for (const h of state.hotspots) {
+    const poly = h.polygon || h;
+    const w = h.weight ?? 4;
+    ctx.beginPath(); tracePath(poly); ctx.closePath();
+    ctx.fillStyle = `rgba(13,148,136,${Math.min(0.4, 0.08 + 0.05 * w).toFixed(3)})`;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(15,118,110,.9)"; ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 3]); ctx.stroke(); ctx.setLineDash([]);
+    if (poly.length) {
+      const cx = poly.reduce((s, p) => s + p[0], 0) / poly.length;
+      const cy = poly.reduce((s, p) => s + p[1], 0) / poly.length;
+      const [tx, ty] = toCanvas(cx, cy);
+      ctx.fillStyle = "#134e4a"; ctx.font = "11px system-ui"; ctx.textAlign = "center";
+      ctx.fillText(`×${+w}`, tx, ty);
+      ctx.textAlign = "start";
+    }
+  }
 }
 
 // low-K permeability lesions: amber outline, opacity growing as K falls; shown in
@@ -244,6 +268,11 @@ function drawStroke() {
     ctx.lineWidth = 1.8;
     ctx.beginPath(); tracePath(state.lesionStroke); ctx.stroke();
     markVertices(state.lesionStroke);
+  } else if (state.mode === "tissue" && state.hotspotStroke.length) {
+    ctx.strokeStyle = "rgba(15,118,110,.95)"; ctx.fillStyle = ctx.strokeStyle;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath(); tracePath(state.hotspotStroke); ctx.stroke();
+    markVertices(state.hotspotStroke);
   }
 }
 

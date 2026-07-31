@@ -74,7 +74,7 @@ def test_server_registers_expected_tools():
     assert {"run_simulation", "run_sweep", "perfusion_parameter_maps",
             "direct_transit_metrics", "oxygen_extraction_map",
             "heterogeneous_perfusion_lesion", "anisotropic_perfusion_bed",
-            "multicompartment_perfusion",
+            "data_constrained_tree_growth", "multicompartment_perfusion",
             "adapt_vessel_network", "uncertainty_quantification",
             "sobol_sensitivity_indices", "describe_model"} <= tools
 
@@ -129,6 +129,16 @@ def test_heterogeneous_lesion_starves_local_flux():
     json.dumps(r)
     assert r["flux_in_lesion"] < r["flux_outside"]     # low-K lesion is under-perfused
     assert 0.0 <= r["starvation_ratio"] < 1.0
+
+
+def test_data_constrained_growth_concentrates_terminals():
+    import json
+
+    r = mcp_server.data_constrained_growth(hotspot_weight=10.0, n_points=500, seed=0)
+    json.dumps(r)
+    assert r["n_terminals"] > 0
+    # the tree grew denser than area alone would give inside the demand hotspot
+    assert r["concentration_ratio"] > 1.2
 
 
 def test_anisotropic_bed_channels_flux_along_high_k_axis():
