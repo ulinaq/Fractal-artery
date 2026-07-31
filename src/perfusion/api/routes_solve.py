@@ -159,16 +159,18 @@ _DECONV_FIELDS = ("Fp", "CBV", "MTT")
 
 @router.get("/projects/{pid}/kinetics/maps", response_model=FieldResponse)
 def kinetic_map(pid: str, field: str = "Fp", method: str = "semi",
-                oi: float = 0.1, project: Project = Depends(get_project),
+                oi: float = 0.1, osvd: bool = False,
+                project: Project = Depends(get_project),
                 store: ProjectStore = Depends(get_store)) -> FieldResponse:
     """Voxel-wise parametric map from the tracer.
 
     ``method='semi'`` (default) — model-free heuristics: ``field='Fp'`` (max-slope
     plasma flow) or ``'vp'`` (AUC blood volume). ``method='deconv'`` — truncated-SVD
     residue **deconvolution** (Østergaard): ``field`` in ``Fp`` (residue peak), ``CBV``
-    (∫residue) or ``MTT`` (CBV/Fp); ``oi`` is the SVD truncation fraction. Absolute
-    deconvolution accuracy needs the transit time well-sampled (raise the tracer's
-    ``n_frames``); relative maps (rCBF/rCBV/rMTT) are robust — the clinical norm."""
+    (∫residue) or ``MTT`` (CBV/Fp); ``oi`` is the SVD truncation fraction and ``osvd=true``
+    uses the block-circulant, delay-insensitive **oSVD** variant. Absolute deconvolution
+    accuracy needs the transit time well-sampled (raise the tracer's ``n_frames``);
+    relative maps (rCBF/rCBV/rMTT) are robust — the clinical norm."""
     from ..core import tkm
 
     if not project.has_tracer:
@@ -186,7 +188,8 @@ def kinetic_map(pid: str, field: str = "Fp", method: str = "semi",
         dur = float(times[-1]) if len(times) else 1.0
         ca = tkm.gamma_variate_aif(times, t0=0.08 * dur, A=3.0, B=max(0.06 * dur, 1e-6))
     if method == "deconv":
-        m = tkm.deconvolution_maps(frames, times, ca, mask=mask, oi=float(oi))[field]
+        m = tkm.deconvolution_maps(frames, times, ca, mask=mask, oi=float(oi),
+                                   circulant=bool(osvd))[field]
     else:
         m = tkm.kinetic_maps(frames, times, ca, mask=mask)[field]
     data = np.where(np.isfinite(m), m, None)
