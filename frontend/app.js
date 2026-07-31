@@ -11,9 +11,9 @@ import {
   moveNode, onEditRadius, revertEdits, saveEdits, syncEditPanel, toggleAddMode,
 } from "./edit.js";
 import {
-  adapt, computeFlow, fitKinetics, grow, loadField, loadKineticMap, loadMulticompartment,
-  loadNetwork, loadOxygen, loadResultView, pauseFlow, run, runTransient, runUQ, stopFlow,
-  stopTimer, syncFlowUI, toggleFlowPlay,
+  adapt, computeFlow, fitKinetics, grow, loadField, loadKineticMap, loadMorphometry,
+  loadMulticompartment, loadNetwork, loadOxygen, loadResultView, pauseFlow, run,
+  runTransient, runUQ, stopFlow, stopTimer, syncFlowUI, toggleFlowPlay,
 } from "./run.js";
 
 // ── undo / redo (workspace geometry history) ───────────────────────────────────
@@ -488,6 +488,8 @@ $("tissue-target").addEventListener("change", () => {
 $("btn-save-mask").addEventListener("click", () => saveMask().catch((e) => status(e.message, "err")));
 $("btn-grow").addEventListener("click", guarded(grow));
 $("btn-adapt").addEventListener("click", guarded(adapt));
+$("btn-morph-art").addEventListener("click", guarded(() => loadMorphometry("artery")));
+$("btn-morph-ven").addEventListener("click", guarded(() => loadMorphometry("vein")));
 $("btn-run").addEventListener("click", guarded(run));
 $("nonlinear").addEventListener("change", (e) => {   // max-iter only matters for the nonlinear solve
   $("maxiter-row").style.display = e.target.checked ? "" : "none";
