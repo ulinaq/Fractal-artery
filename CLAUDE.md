@@ -59,6 +59,9 @@ imports use `perfusion.core.*`.
   an MCP tool in `mcp_server.py` — keep the logic in a plain, testable function
   and add a thin `@server.tool()` wrapper — so any AI client can use it too. Treat
   "is it in MCP?" as part of done for new features.
+- **Model & formula reference**: `docs/MODELS.md` — every module's governing equation
+  (Poiseuille/Darcy/TPFA, hybrid coupling, tracer kinetics, deconvolution, oxygen,
+  adaptation, morphometry, Windkessel, UQ/Sobol) with thesis equation numbers.
 - **New-contributor / extension guide**: `docs/DEVELOPING.md` (feature → files →
   pattern → tests map).
 

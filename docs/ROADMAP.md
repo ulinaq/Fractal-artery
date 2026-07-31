@@ -10,6 +10,13 @@ Turn the `perfusion` package into a **hosted web application** for modelling blo
 circulation and perfusion in organs, usable both for **research** (writing papers,
 extending the thesis) and **teaching** (students run and explore simulations).
 
+> **The mathematics** behind every module — Poiseuille/Darcy/TPFA, the hybrid Schur
+> coupling, multi-compartment exchange, tracer kinetics & deconvolution, oxygen
+> extraction, structural adaptation, morphometry, growth, Windkessel and the UQ/Sobol
+> estimators — is written up with equations and thesis citations in
+> **[`docs/MODELS.md`](MODELS.md)**. Profiled optimisation opportunities are tracked in
+> §10 (Performance & optimisation).
+
 A user should be able to, in the browser:
 
 - load a blood-vessel drawing/image, or **draw tissue and vessels by hand**;
@@ -536,3 +543,58 @@ a research project. Each notes where it lands in the tree.
   M-matrix solve (C ≥ 0, mass-conservative). Global OEF sits below the well-mixed Kety
   limit 1−e^{−k} exactly as transit heterogeneity predicts. `GET /projects/{id}/oxygen`
   (saturation / uptake maps + OEF), an Oxygen result card, MCP `oxygen_extraction_map`.
+
+# 10. Performance & optimisation
+
+A profiling audit of the compute paths (`src/perfusion/`). The **dominant cost of a
+forward solve is `darcy.terminal_response`** — it assembles the TPFA operator, does one
+LU (`splu`) of the `n_cells × n_cells` system and back-substitutes one RHS per terminal.
+It depends **only** on the grid, the terminal *positions* and `eps` — never on segment
+radii or the flow boundary conditions — so any loop that holds the geometry fixed can
+reuse it. The findings below are ranked by impact ÷ risk; all are numerically identical
+to the previous code (verified to ~1e-12).
+
+## 10.1 Delivered
+
+- ✅ **Reuse the Darcy response across radius-only iterations** (`pipeline.run_hybrid`
+  gained `darcy_response=`; `run_adaptation` computes `terminal_response` once and reuses
+  it every iteration). Structural adaptation changes only radii, so the Darcy factorisation
+  was being rebuilt ~14–60× for nothing. **≈6.3× faster per solve** (140×160: 129 ms → 20 ms);
+  byte-identical results. The same hook now lets any outer loop pass a precomputed response.
+- ✅ **Drop the redundant operator rebuild in `run_hybrid`** — `pipeline.py:202` reassembled
+  the full 5-diagonal `tpfa_operator` just to read `tx, ty`; replaced with the cheap
+  `darcy.transmissibilities(grid)` (what `tpfa_operator` calls internally). No numerical change.
+
+## 10.2 Opportunities (measured, not yet applied)
+
+- **UQ / calibration / sweep loops reuse the Darcy response** (`uq.monte_carlo`,
+  `uq.sobol_indices`, `inverse.calibrate`, `mcp_server.sweep`). When the swept input is
+  `p_in`/`p_out`/`mu`/`hematocrit` (grid + terminals fixed) the response is identical across
+  every sample, yet recomputed each time — the same ~6× per-solve win as adaptation. Needs a
+  guard: the reuse is **invalid** when `permeability` varies (changes the operator) or
+  `r_min_frac` varies with fractal trees (moves the terminals). *Medium impact, low risk with
+  the guard.*
+- **Avoid the `.tolil()` pin round-trip** in `darcy.terminal_response`, `multicompartment.
+  terminal_response_multi` and `darcy3d` (2 sites). Converting the whole operator to LIL just
+  to zero one Dirichlet-pin row allocates a Python list-of-lists over all nonzeros; the pin can
+  be applied in the COO triplets before `tocsc()` or via a CSR indptr edit. *Medium impact on
+  large / 3-D grids, low risk.*
+- **KD-tree the terminal snapping / de-duplication** (`pipeline._snap_to_active` is
+  O(T·n_active) Python; `_spread_coincident` is an O(radius²) spiral search). Build one
+  `cKDTree` over active cells and batch-query (as `direct.py` / `growth.py` already do).
+  *Low/medium impact (masked grids with many terminals), low risk — nearest cell unchanged.*
+- **Vectorise `network_transit.arrival_times` edge construction** (the per-segment orientation
+  + weight loop; the arrival *relaxation* is an inherently sequential DAG sweep and must stay a
+  loop). *Low impact (direct-model animation only).*
+- **Maintain the CCO node/child arrays incrementally** (`growth.cco_grow` rebuilds `arr` and
+  the child list from Python lists every terminal → O(n²)). The greedy insertion is inherently
+  sequential, but the rebuild is avoidable. *Low/medium impact for large `n_terminals`.*
+
+## 10.3 Correctly sequential — do **not** vectorise
+
+The nonlinear/elasticity/phase-separation fixed points and time-stepping (`solve_nonlinear`,
+`run_hybrid` elasticity & phase-sep loops, `transport_forward`, `windkessel`) genuinely change
+the operator or state each step and already reuse a single factorisation where possible;
+Monte-Carlo/Sobol/sweep *samples* are independent (parallelisable, not vectorisable) and their
+win is response-reuse (above), not loop fusion; CCO and space-colonisation growth are iterative
+by construction.
