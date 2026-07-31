@@ -77,7 +77,21 @@ def test_server_registers_expected_tools():
             "data_constrained_tree_growth", "strahler_morphometry",
             "multicompartment_perfusion",
             "adapt_vessel_network", "uncertainty_quantification",
-            "sobol_sensitivity_indices", "describe_model"} <= tools
+            "sobol_sensitivity_indices", "calibrate_parameter_to_flow",
+            "describe_model"} <= tools
+
+
+def test_calibrate_to_flow_recovers_value():
+    import json
+
+    # target inflow from the default model, then recover the permeability
+    base = mcp_server.simulate(nx=45, ny=52, r_min_frac=0.5)
+    target = base["arterial_inflow"]
+    r = mcp_server.calibrate_to_flow(target, param="permeability", lo=0.2, hi=5.0,
+                                     nx=45, ny=52, r_min_frac=0.5)
+    json.dumps(r)
+    assert r["recovered_value"] == pytest.approx(1.0, rel=0.2)   # default K = 1
+    assert r["achieved"] == pytest.approx(target, rel=1e-2)
 
 
 def test_sobol_sensitivity_indices():

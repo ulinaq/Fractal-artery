@@ -13,6 +13,7 @@ from .. import io as perfio
 from . import helpers, runner
 from .deps import get_jobs, get_project, get_store
 from .schemas import (
+    CalibrateRequest,
     FieldResponse,
     JobInfo,
     RunRequest,
@@ -219,6 +220,19 @@ def oxygen_map(pid: str, field: str = "saturation", k: float = 1.0, c_art: float
     data = np.where(np.isfinite(array), array, None)
     return {"name": field, "shape": list(array.shape), "data": data.tolist(),
             "oef": oef, "k": k}
+
+
+@router.post("/projects/{pid}/calibrate")
+def calibrate_parameter(body: CalibrateRequest, project: Project = Depends(get_project)) -> dict:
+    """Inverse problem: recover ``param`` so the model's ``qoi`` matches ``target``
+    (bounded 1-D search over forward solves). Useful to fit permeability or inlet
+    pressure to a measured flow."""
+    try:
+        return runner.calibrate(project, body.target, body.param, body.bounds, qoi=body.qoi)
+    except runner.InputError as e:
+        raise HTTPException(400, str(e)) from None
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
 
 
 @router.post("/projects/{pid}/uq")

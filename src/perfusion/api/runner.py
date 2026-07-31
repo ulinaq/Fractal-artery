@@ -199,6 +199,19 @@ def run_project(store, project, req: RunRequest) -> None:
     store.save_result(project, result, notes=notes or None)
 
 
+def calibrate(project, target: float, param: str, bounds, qoi: str = "arterial_inflow") -> dict:
+    """Recover ``param`` so the project model's ``qoi`` matches ``target`` (inverse
+    problem). Returns the recovered value + achieved QoI as a JSON-ready dict."""
+    from .. import inverse
+
+    grid, art, ven = validate_run(project, use_vessels=True)
+    base = project.params.model_dump()
+    res = inverse.calibrate(float(target), param, grid, tuple(bounds), qoi=qoi, base=base,
+                            domain_limit=project.grid.domain_limit, art=art, ven=ven)
+    return {"param": res.param, "value": res.value, "target": res.target,
+            "achieved": res.achieved, "qoi": res.qoi, "n_eval": res.n_eval}
+
+
 def uncertainty(project, param_ranges: dict, n_samples: int = 32, seed: int = 0,
                 method: str = "correlation") -> dict:
     """Uncertainty quantification over ``param_ranges`` on the project's grid/vasculature.
