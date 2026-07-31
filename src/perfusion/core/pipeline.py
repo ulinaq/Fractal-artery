@@ -128,7 +128,8 @@ def run_hybrid(prm: Parameters, grid: Grid,
                art: Network | None = None, ven: Network | None = None,
                art_inlets=None, ven_outlets=None,
                max_iter: int = 100, tol: float = 1e-10,
-               phase_separation: bool = False, elasticity: bool = False) -> HybridResult:
+               phase_separation: bool = False, elasticity: bool = False,
+               darcy_response=None) -> HybridResult:
     """Build trees (or use the given ones), couple to Darcy, solve, post-process.
 
     Pass ``art``/``ven`` to use pre-built networks -- e.g. segmented from images
@@ -141,6 +142,12 @@ def run_hybrid(prm: Parameters, grid: Grid,
     carry the prescribed ``p_in`` / ``p_out`` (default: each tree's root). List
     several to model **multiple inlets/outlets**; the remaining leaves stay Darcy
     terminals.
+
+    ``darcy_response`` optionally supplies a precomputed ``(response, field_response,
+    sources)`` from :func:`darcy.terminal_response`, skipping the dominant Darcy
+    factorisation. Reuse it only when the grid, terminal *positions* and ``eps`` are
+    unchanged (e.g. an outer loop that varies only ``p_in``/``mu`` or the segment
+    *radii*, as in :func:`run_adaptation`) — the Darcy response is independent of both.
     """
     if art is None:
         art = geometry.arterial_tree(prm)
@@ -151,8 +158,11 @@ def run_hybrid(prm: Parameters, grid: Grid,
     if ven_outlets is not None:
         ven = replace(ven, inlet_nodes=np.asarray(ven_outlets, dtype=int))
 
-    terminal_cells = _terminal_cells(grid, art, ven, domain_limit, strict=strict_domain)
-    response, field_response, sources = darcy.terminal_response(grid, terminal_cells, eps)
+    if darcy_response is not None:
+        response, field_response, sources = darcy_response
+    else:
+        terminal_cells = _terminal_cells(grid, art, ven, domain_limit, strict=strict_domain)
+        response, field_response, sources = darcy.terminal_response(grid, terminal_cells, eps)
 
     # Per-segment viscosity (radius-dependent when Fahraeus-Lindqvist is enabled).
     def _solve(a, v, visc):
@@ -199,7 +209,7 @@ def run_hybrid(prm: Parameters, grid: Grid,
 
     pressure = darcy.reconstruct_field(field_response, sol.terminal_flux, balance=True)
     pressure = pressure.reshape(grid.nx, grid.ny, order="F")
-    _, tx, ty = darcy.tpfa_operator(grid)
+    tx, ty = darcy.transmissibilities(grid)     # cheaper than rebuilding tpfa_operator for tx/ty
     fx, fy = darcy.face_fluxes(grid, pressure, tx, ty)
     tof = timeofflight.time_of_flight(grid, fx, fy, sources, sol.terminal_flux)
     flux = timeofflight.flux_magnitude(grid, fx, fy)
@@ -244,8 +254,15 @@ def run_adaptation(prm: Parameters, grid: Grid, target_exponent: float = 3.0,
             np.concatenate([a.seg_radius, v.seg_radius]),
             np.concatenate([sol.q_a, sol.q_v]))
 
+    # Adaptation only changes radii, never terminal positions, so the Darcy terminal
+    # response is constant across every iteration — compute it once and reuse it (the
+    # dominant per-solve cost); only the network resistances change and are re-solved.
+    tcells = _terminal_cells(grid, art, ven, domain_limit)
+    resp = darcy.terminal_response(grid, tcells, eps)
+
     # fixed shear set-point = the initial mean wall shear (on-scale, so radii don't drift uniformly)
-    first = run_hybrid(prm, grid, domain_limit=domain_limit, eps=eps, art=art, ven=ven)
+    first = run_hybrid(prm, grid, domain_limit=domain_limit, eps=eps, art=art, ven=ven,
+                       darcy_response=resp)
     tau0 = adaptation.wall_shear_stress(art.seg_radius, first.solution.q_a, prm.mu)
     tau_ref = float(tau0[tau0 > 0].mean()) if np.any(tau0 > 0) else 1.0
 
@@ -254,7 +271,8 @@ def run_adaptation(prm: Parameters, grid: Grid, target_exponent: float = 3.0,
     best_err = np.inf
     result = first
     for it in range(max(1, n_iter)):
-        result = run_hybrid(prm, grid, domain_limit=domain_limit, eps=eps, art=art, ven=ven)
+        result = run_hybrid(prm, grid, domain_limit=domain_limit, eps=eps, art=art, ven=ven,
+                            darcy_response=resp)
         k = exponent(art, ven, result.solution)
         history.append(k)
         err = abs(k - target_exponent)
