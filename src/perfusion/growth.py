@@ -35,13 +35,15 @@ from scipy.spatial import cKDTree
 from .core.geometry import Network, network_from_edges
 
 
-def sample_points_in_mask(mask, domain_limit, n_points, *, seed=0):
+def sample_points_in_mask(mask, domain_limit, n_points, *, seed=0, density=None):
     """Sample ``n_points`` random points inside the active cells of ``mask``.
 
     ``mask`` is an ``(nx, ny)`` boolean grid and ``domain_limit`` is
     ``(xmin, xmax, ymin, ymax)`` in physical coordinates (matching
     :class:`perfusion.core.darcy.Grid`). Points are drawn uniformly within the
-    active cells, so they inherit the organ outline.
+    active cells, so they inherit the organ outline. Pass a ``density`` field
+    (``(nx, ny)``, non-negative) to sample cells with probability proportional to it
+    — data-constrained growth toward a target perfusion-density map.
     """
     mask = np.asarray(mask, dtype=bool)
     xmin, xmax, ymin, ymax = domain_limit
@@ -50,7 +52,18 @@ def sample_points_in_mask(mask, domain_limit, n_points, *, seed=0):
     if active.size == 0:
         raise ValueError("mask has no active cells to sample")
     rng = np.random.default_rng(seed)
-    pick = rng.integers(0, len(active), size=n_points)
+    if density is None:
+        pick = rng.integers(0, len(active), size=n_points)
+    else:
+        # data-constrained: sample active cells with probability ∝ target density,
+        # so attraction points (and hence vessels) concentrate where demand is high
+        d = np.asarray(density, dtype=float)
+        if d.shape != mask.shape:
+            raise ValueError(f"density {d.shape} must match mask {mask.shape}")
+        w = np.clip(d[active[:, 0], active[:, 1]], 0.0, None)
+        total = w.sum()
+        p = w / total if total > 0 else None      # fall back to uniform on a flat/empty map
+        pick = rng.choice(len(active), size=n_points, p=p)
     ix, iy = active[pick, 0], active[pick, 1]
     hx, hy = (xmax - xmin) / nx, (ymax - ymin) / ny
     x = xmin + (ix + rng.random(n_points)) * hx
@@ -286,18 +299,23 @@ def cco_grow(base: Network, candidates, *, n_terminals=200, d_min=None,
 
 
 def cco_grow_in_mask(base: Network, mask, domain_limit, *, n_terminals=200,
-                     n_pool=None, seed=0, **kwargs) -> Network:
-    """Convenience: sample a candidate pool in ``mask`` then :func:`cco_grow`."""
-    pool = sample_points_in_mask(mask, domain_limit, n_pool or 6 * n_terminals, seed=seed)
+                     n_pool=None, seed=0, density=None, **kwargs) -> Network:
+    """Convenience: sample a candidate pool in ``mask`` then :func:`cco_grow`.
+
+    ``density`` (an ``(nx, ny)`` target map) biases the candidate pool toward
+    high-demand tissue (data-constrained growth)."""
+    pool = sample_points_in_mask(mask, domain_limit, n_pool or 6 * n_terminals,
+                                 seed=seed, density=density)
     return cco_grow(base, pool, n_terminals=n_terminals, seed=seed, **kwargs)
 
 
 def grow_in_mask(base: Network, mask, domain_limit, *, n_points=400, seed=0,
-                 **kwargs) -> Network:
+                 density=None, **kwargs) -> Network:
     """Convenience: sample attraction points in ``mask`` then :func:`grow_network`.
 
-    Any space-colonisation keyword (``step``, ``influence_radius``, …) is
-    forwarded to :func:`grow_network`.
+    Pass ``density`` (an ``(nx, ny)`` target map) to bias the attraction points toward
+    high-demand tissue (data-constrained growth). Any space-colonisation keyword
+    (``step``, ``influence_radius``, …) is forwarded to :func:`grow_network`.
     """
-    pts = sample_points_in_mask(mask, domain_limit, n_points, seed=seed)
+    pts = sample_points_in_mask(mask, domain_limit, n_points, seed=seed, density=density)
     return grow_network(base, pts, **kwargs)

@@ -58,6 +58,47 @@ def test_sample_points_respects_the_mask():
     assert np.all((pts >= 5) & (pts < 15))
 
 
+def test_density_weighted_sampling_concentrates_points():
+    nx, ny = 40, 40
+    mask = np.ones((nx, ny), bool)
+    dom = (0.0, 40.0, 0.0, 40.0)
+    density = np.zeros((nx, ny))
+    density[nx // 2:, ny // 2:] = 1.0                 # demand only in the upper-right quadrant
+
+    uniform = growth.sample_points_in_mask(mask, dom, 2000, seed=1)
+    weighted = growth.sample_points_in_mask(mask, dom, 2000, seed=1, density=density)
+
+    def frac(p):
+        return np.mean((p[:, 0] > 20) & (p[:, 1] > 20))
+
+    assert frac(uniform) < 0.4                        # ~1/4 of the domain
+    assert frac(weighted) > 0.95                      # concentrated in the hotspot
+    # density=None is identical to the uniform sampler (regression preserved)
+    same = growth.sample_points_in_mask(mask, dom, 300, seed=7)
+    none = growth.sample_points_in_mask(mask, dom, 300, seed=7, density=None)
+    assert np.allclose(same, none)
+
+
+def test_density_growth_biases_terminals(trunk):
+    nx, ny = 50, 50
+    mask = np.ones((nx, ny), bool)
+    dom = (0.0, 50.0, 0.0, 50.0)
+    density = np.zeros((nx, ny))
+    density[nx // 2:, :] = 1.0                         # demand in the right half
+    net = growth.grow_in_mask(trunk, mask, dom, n_points=400, seed=2, density=density, step=2.0)
+    tn = net.terminal_nodes
+    assert np.mean(net.node_x[tn] > 25) > 0.6          # terminals skew to the high-demand half
+
+
+def test_flat_density_falls_back_and_validates():
+    mask = np.ones((10, 10), bool)
+    dom = (0.0, 10.0, 0.0, 10.0)
+    pts = growth.sample_points_in_mask(mask, dom, 50, seed=0, density=np.zeros((10, 10)))
+    assert pts.shape == (50, 2)                        # empty map → uniform fallback, no crash
+    with pytest.raises(ValueError, match="must match mask"):
+        growth.sample_points_in_mask(mask, dom, 10, density=np.ones((3, 3)))
+
+
 def test_from_selection_limits_growth_sources(trunk):
     # growing only from the (single) trunk tip still works and grows
     rng = np.random.default_rng(3)
