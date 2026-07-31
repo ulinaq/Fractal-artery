@@ -124,3 +124,25 @@ def test_deconvolution_recovers_flow_and_transit_time():
     assert m["Fp"][0, 0] > m["Fp"][1, 0]
     assert np.isnan(m["Fp"][2, 1])
     assert np.isnan(m["MTT"][2, 1])
+
+
+def test_osvd_is_delay_insensitive():
+    import numpy as np
+
+    from perfusion.core.tkm import deconvolve, gamma_variate_aif, one_compartment
+
+    t = np.linspace(0, 40, 400)
+    ca = gamma_variate_aif(t, t0=3.0, A=3.0, B=1.5)
+    ca = ca / ca.max()
+    curve = one_compartment(t, ca, Fp=0.5, vp=0.5 * 3.0)
+    lag = 8
+    delayed = np.concatenate([np.zeros(lag), curve[:-lag]])   # tissue bolus arrives late
+
+    def peak(c, circ):
+        return deconvolve(t, ca, c, oi=0.02, circulant=circ).ravel().max()
+
+    ssvd_shift = abs(peak(delayed, False) - peak(curve, False))
+    osvd_shift = abs(peak(delayed, True) - peak(curve, True))
+    # block-circulant oSVD is (near-)invariant to a bolus arrival delay; sSVD is not
+    assert osvd_shift < 0.02
+    assert osvd_shift < ssvd_shift
