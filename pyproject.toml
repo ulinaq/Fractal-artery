@@ -29,6 +29,7 @@ dev = [
     "httpx>=0.27",     # FastAPI TestClient
     "fakeredis>=2.20", # exercise the RQ backend without a real Redis
     "rq>=1.15",
+    "hypothesis>=6.0", # property-based conservation tests
 ]
 
 [project.scripts]
