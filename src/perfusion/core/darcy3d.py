@@ -138,19 +138,23 @@ def point_source_3d(grid: Grid3D, center: int, eps: float):
     return np.flatnonzero(support), weights
 
 
-def solve_pressure_3d(grid: Grid3D, source: np.ndarray) -> np.ndarray:
+def solve_pressure_3d(grid: Grid3D, source: np.ndarray, *, solver: str = "direct") -> np.ndarray:
     """Solve ``-div(K grad p) = source`` on the active 3-D domain.
 
     ``source`` is the net volumetric injection per cell (must sum to ~0 over the
     active domain for a well-posed Neumann problem). One active cell is pinned as
-    the pressure datum. Returns the ``(nx, ny, nz)`` pressure field.
+    the pressure datum. ``solver='amg'`` uses an algebraic-multigrid preconditioned
+    CG (optional ``pyamg`` extra) which scales far better on large grids than the
+    default direct LU. Returns the ``(nx, ny, nz)`` pressure field.
     """
+    from .linsolve import solve_spd
+
     active = grid.mask.ravel(order="F")
     A = tpfa_operator_3d(grid).tolil()
     b = np.asarray(source, dtype=float).copy()
     pin = int(np.flatnonzero(active)[0])
     A.rows[pin], A.data[pin], b[pin] = [pin], [1.0], 0.0     # datum: p_pin = 0
-    p = spla.spsolve(A.tocsr(), b)
+    p = solve_spd(A.tocsr(), b, method=solver)
     return p.reshape(grid.nx, grid.ny, grid.nz, order="F")
 
 
