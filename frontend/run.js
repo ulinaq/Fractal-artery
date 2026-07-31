@@ -85,6 +85,26 @@ function drawUQ(d) {
   $("uq-out").innerHTML = `<p class="muted">${d.n_samples} samples · sensitivity (Pearson r)</p>${rows}`;
 }
 
+// Horton–Strahler morphometry of the current tree, shown as ratios + a per-order table
+export async function loadMorphometry(target) {
+  requireProject();
+  $("morph-out").textContent = "analysing…";
+  let d;
+  try { d = await api("GET", `/projects/${state.project}/morphometry?target=${target}`); }
+  catch (e) { status(e.message, "err"); $("morph-out").textContent = e.message; return; }
+  if (!d.max_order) { $("morph-out").textContent = "no tree to analyse"; return; }
+  const f = (v) => (v == null || Number.isNaN(v)) ? "–" : v.toFixed(2);
+  const rows = Object.keys(d.counts).map((w) =>
+    `<tr><td>ω=${w}</td><td>${d.counts[w]}</td><td>${f(d.mean_length[w])}</td>`
+    + `<td>${f(d.mean_radius[w])}</td></tr>`).join("");
+  $("morph-out").innerHTML =
+    `<p class="muted">${target} · max order ${d.max_order} · `
+    + `R<sub>B</sub>=${f(d.bifurcation_ratio)} · R<sub>L</sub>=${f(d.length_ratio)} · `
+    + `R<sub>D</sub>=${f(d.diameter_ratio)}</p>`
+    + `<table><tr><td>order</td><td>N</td><td>len</td><td>rad</td></tr>${rows}</table>`;
+  status(`${target} morphometry`, "ok");
+}
+
 export async function adapt() {
   requireProject();
   if (state.vessels.arteries.length || state.vessels.veins.length) await saveVessels();

@@ -302,6 +302,21 @@ def multicompartment(n: int = 3, beta: float = 1.0, nx: int = 90, ny: int = 110,
             "compartment_mean_pressure": [float(np.nanmean(res.compartments[c])) for c in range(n)]}
 
 
+def tree_morphometry(kind: str = "artery", r_min_frac: float = 0.15, seed: int = 0) -> dict:
+    """Horton–Strahler morphometry of a fractal tree: the bifurcation (R_B), length
+    (R_L) and diameter (R_D) ratios plus the max Strahler order and per-order segment
+    counts — the standard morphometric fingerprint of a vascular tree."""
+    from .core.geometry import arterial_tree, venous_tree
+    from .core.morphometry import strahler_summary
+
+    prm = Parameters(r_min_frac=r_min_frac, seed=seed)
+    net = venous_tree(prm) if kind == "vein" else arterial_tree(prm)
+    s = strahler_summary(net)
+    return {"kind": kind, "max_order": s["max_order"], "counts": s["counts"],
+            "bifurcation_ratio": s["bifurcation_ratio"], "length_ratio": s["length_ratio"],
+            "diameter_ratio": s["diameter_ratio"]}
+
+
 def data_constrained_growth(hotspot_weight: float = 8.0, radius_frac: float = 0.22,
                             n_points: int = 500, seed: int = 0) -> dict:
     """Data-constrained vascular growth toward a target perfusion-density map.
@@ -556,6 +571,14 @@ def build_server():
         perfusion (total exchange) + each compartment's mean pressure. Keep grid coarse."""
         return multicompartment(n=n, beta=beta, nx=nx, ny=ny, p_in=p_in, p_out=p_out,
                                 r_min_frac=r_min_frac)
+
+    @server.tool()
+    def strahler_morphometry(kind: str = "artery", r_min_frac: float = 0.15,
+                             seed: int = 0) -> dict:
+        """Horton–Strahler morphometry of a fractal tree: bifurcation R_B, length R_L
+        and diameter R_D ratios + max Strahler order and per-order segment counts —
+        the standard morphometric fingerprint used to validate a vascular tree."""
+        return tree_morphometry(kind=kind, r_min_frac=r_min_frac, seed=seed)
 
     @server.tool()
     def data_constrained_tree_growth(hotspot_weight: float = 8.0, radius_frac: float = 0.22,

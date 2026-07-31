@@ -323,6 +323,23 @@ def adapt_vessels(body: AdaptRequest | None = None, project: Project = Depends(g
                      < abs(ad.murray_start - req.target_exponent))
 
 
+@router.get("/projects/{pid}/morphometry")
+def morphometry(target: str = "artery", project: Project = Depends(get_project)) -> dict:
+    """Horton–Strahler morphometry of the project's ``target`` tree (artery/vein):
+    per-order segment counts + mean length/radius, and the bifurcation / length /
+    diameter ratios. Falls back to the default fractal tree when none is drawn."""
+    from ..core.geometry import venous_tree
+    from ..core.morphometry import strahler_summary
+
+    prm = project.params.to_core()
+    art, ven = runner.build_networks(project, use_vessels=True)
+    if target == "vein":
+        net = ven if ven is not None else venous_tree(prm)
+    else:
+        net = art if art is not None else arterial_tree(prm)
+    return {"target": target, **strahler_summary(net)}
+
+
 @router.get("/projects/{pid}/network")
 def network_geometry(project: Project = Depends(get_project)) -> dict:
     """Segment geometry (domain frame) for overlaying grown/drawn vessels."""

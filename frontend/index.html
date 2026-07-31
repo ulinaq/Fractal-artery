@@ -164,6 +164,17 @@
       </details>
 
       <details class="card" data-mode="vessels">
+        <summary>Morphometry (Strahler)</summary>
+        <p class="muted">Horton–Strahler analysis of the current tree: bifurcation,
+          length and diameter ratios + per-order segment counts.</p>
+        <div class="row">
+          <button id="btn-morph-art">Artery</button>
+          <button id="btn-morph-ven">Vein</button>
+        </div>
+        <div id="morph-out" class="muted"></div>
+      </details>
+
+      <details class="card" data-mode="vessels">
         <summary>Adapt (structural remodelling)</summary>
         <p class="muted">Pries–Secomb: evolve the vessel radii under wall-shear
           remodelling toward Murray's law (|Q| ∝ r³). Replaces the tree with the

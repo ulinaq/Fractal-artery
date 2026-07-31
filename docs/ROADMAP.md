@@ -359,6 +359,12 @@ a research project. Each notes where it lands in the tree.
   grow endpoint) and MCP `data_constrained_tree_growth`. *(Follow-up: match Strahler-order
   statistics; the demand bias is strongest from a sparse base — a full pre-grown tree dilutes
   it.)*
+- ✅ **Strahler-order morphometry** (`core/morphometry.py`) — assigns Horton–Strahler orders
+  to a tree and reports the bifurcation (R_B), length (R_L) and diameter (R_D) ratios + per-
+  order segment counts/means; exact R_B=2 on a complete binary tree, ~2.1 on the fractal tree.
+  `GET …/morphometry`, a web Morphometry card (ratios + per-order table) and MCP
+  `strahler_morphometry`. Gives grown / data-constrained trees a morphometric fingerprint to
+  match measured vasculature.
 - Domain-aware growth (respect organ sub-regions / obstacles).
 
 ## 9.4 Tracer kinetics & perfusion analysis

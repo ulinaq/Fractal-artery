@@ -806,6 +806,16 @@ def test_adapt_endpoint_moves_toward_murray(client):
     assert _wait_for_job(client, jid)["state"] == "done"
 
 
+def test_morphometry_endpoint(client):
+    pid = client.post("/projects", json={"name": "morph", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    d = client.get(f"/projects/{pid}/morphometry", params={"target": "artery"}).json()
+    assert d["target"] == "artery"
+    assert d["max_order"] >= 2
+    assert 1.0 < d["bifurcation_ratio"] < 6.0
+    assert d["counts"]                                   # per-order segment counts present
+
+
 def test_growth_hotspots_persist_and_feed_growth(client):
     pid = client.post("/projects", json={"name": "grow-hot", "grid": SMALL_GRID,
                                          "params": FAST_PARAMS}).json()["id"]
