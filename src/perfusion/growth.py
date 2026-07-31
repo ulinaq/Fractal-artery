@@ -299,23 +299,41 @@ def cco_grow(base: Network, candidates, *, n_terminals=200, d_min=None,
 
 
 def cco_grow_in_mask(base: Network, mask, domain_limit, *, n_terminals=200,
-                     n_pool=None, seed=0, density=None, **kwargs) -> Network:
+                     n_pool=None, seed=0, density=None, obstacles=None, **kwargs) -> Network:
     """Convenience: sample a candidate pool in ``mask`` then :func:`cco_grow`.
 
     ``density`` (an ``(nx, ny)`` target map) biases the candidate pool toward
-    high-demand tissue (data-constrained growth)."""
+    high-demand tissue; ``obstacles`` (no-grow polygons) are excluded from it."""
+    mask = mask_without_obstacles(mask, domain_limit, obstacles)
     pool = sample_points_in_mask(mask, domain_limit, n_pool or 6 * n_terminals,
                                  seed=seed, density=density)
     return cco_grow(base, pool, n_terminals=n_terminals, seed=seed, **kwargs)
 
 
+def mask_without_obstacles(mask, domain_limit, obstacles) -> np.ndarray:
+    """Carve ``obstacles`` (a list of no-grow polygons) out of ``mask``.
+
+    Cells whose centre falls inside any obstacle polygon are deactivated, so growth
+    (attraction points and terminals) avoids those regions — domain-aware growth
+    around organ sub-structures / obstacles without editing the organ outline.
+    """
+    mask = np.asarray(mask, dtype=bool)
+    if not obstacles:
+        return mask
+    from .core.geometry import rasterize_mask
+    blocked = rasterize_mask(mask.shape[0], mask.shape[1], domain_limit, obstacles)
+    return mask & ~blocked
+
+
 def grow_in_mask(base: Network, mask, domain_limit, *, n_points=400, seed=0,
-                 density=None, **kwargs) -> Network:
+                 density=None, obstacles=None, **kwargs) -> Network:
     """Convenience: sample attraction points in ``mask`` then :func:`grow_network`.
 
     Pass ``density`` (an ``(nx, ny)`` target map) to bias the attraction points toward
-    high-demand tissue (data-constrained growth). Any space-colonisation keyword
+    high-demand tissue (data-constrained growth), or ``obstacles`` (a list of no-grow
+    polygons) to keep growth out of those regions. Any space-colonisation keyword
     (``step``, ``influence_radius``, …) is forwarded to :func:`grow_network`.
     """
+    mask = mask_without_obstacles(mask, domain_limit, obstacles)
     pts = sample_points_in_mask(mask, domain_limit, n_points, seed=seed, density=density)
     return grow_network(base, pts, **kwargs)

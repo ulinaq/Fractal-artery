@@ -148,3 +148,21 @@ def test_grown_network_conserves_mass_in_hybrid():
     res = run_hybrid(Parameters(), grid, domain_limit=dom, art=art, ven=ven)
     tf = res.solution.terminal_flux
     assert np.isclose(tf.sum(), 0.0, atol=1e-8)        # global mass balance
+
+
+def test_obstacles_keep_growth_out(trunk):
+    nx, ny = 50, 50
+    mask = np.ones((nx, ny), bool)
+    dom = (0.0, 50.0, 0.0, 50.0)
+    obstacle = [[(10, 10), (40, 10), (40, 40), (10, 40)]]   # central no-grow box
+    # sampled attraction points avoid the obstacle
+    pts = growth.sample_points_in_mask(
+        growth.mask_without_obstacles(mask, dom, obstacle), dom, 500, seed=1)
+    inside = np.mean((pts[:, 0] > 10) & (pts[:, 0] < 40) & (pts[:, 1] > 10) & (pts[:, 1] < 40))
+    assert inside == 0.0
+    # grown terminals avoid the obstacle too
+    net = growth.grow_in_mask(trunk, mask, dom, n_points=400, seed=2,
+                              obstacles=obstacle, step=2.0)
+    tn = net.terminal_nodes
+    tx, ty = net.node_x[tn], net.node_y[tn]
+    assert np.mean((tx > 12) & (tx < 38) & (ty > 12) & (ty < 38)) < 0.05
