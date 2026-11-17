@@ -49,12 +49,13 @@ def calibrate(target: float, param: str, grid: Grid, bounds: tuple[float, float]
               qoi: str = "arterial_inflow", base: dict | None = None,
               domain_limit: tuple[float, float, float, float] = (-70, 70, 0, 160),
               art: Network | None = None, ven: Network | None = None,
-              max_iter: int = 40) -> CalibrationResult:
+              max_iter: int = 40, trees=None) -> CalibrationResult:
     """Recover ``param`` so the model's ``qoi`` matches ``target`` (1-D bounded search).
 
     ``param`` is a :class:`Parameters` field (``p_in``/``p_out``/``mu``/``r_min_frac``)
     or ``"permeability"`` (varied on the grid). ``bounds`` brackets the search. Returns
     the recovered value, the achieved QoI and the number of forward solves.
+    ``trees(prm) -> (art, ven)`` optionally rebuilds the vasculature per evaluation.
     """
     base = dict(base or {})
     n = {"i": 0}
@@ -69,7 +70,9 @@ def calibrate(target: float, param: str, grid: Grid, bounds: tuple[float, float]
             kw[param] = float(x)
         else:
             raise ValueError(f"unknown param {param!r}")
-        result = run_hybrid(Parameters(**kw), g, domain_limit=domain_limit, art=art, ven=ven)
+        prm = Parameters(**kw)
+        a, v = trees(prm) if trees else (art, ven)       # e.g. r_min_frac rebuilds trees
+        result = run_hybrid(prm, g, domain_limit=domain_limit, art=a, ven=v)
         return _quantity(result, qoi)
 
     res = minimize_scalar(lambda x: (evaluate(x) - target) ** 2, bounds=bounds,

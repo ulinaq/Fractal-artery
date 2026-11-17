@@ -241,7 +241,25 @@ function drawField() {
 
 // Vessels tab: the editable networks with node handles, the selection and a
 // rubber-band preview of the next edge. Tissue tab: the same vessels, faint.
+// The default fractal tree a run would use for any kind you haven't drawn: faint
+// and dashed, so it's clear what gets solved (it vanishes once you draw that kind).
+function drawDefaultTrees() {
+  if (!state.network) return;
+  const segs = state.network.segments.filter((sg) => sg.default && !state.editable[sg.kind]);
+  if (!segs.length) return;
+  ctx.save();
+  ctx.globalAlpha = 0.35; ctx.setLineDash([4, 4]); ctx.lineCap = "round";
+  for (const sg of segs) {
+    const [x0, y0] = toCanvas(sg.x0, sg.y0), [x1, y1] = toCanvas(sg.x1, sg.y1);
+    ctx.strokeStyle = getCss(sg.kind === "vein" ? "--ven" : "--art");
+    ctx.lineWidth = rw(sg.r, 0.6, 0.8);
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawEditNetwork() {
+  drawDefaultTrees();
   const editing = state.mode === "vessels";
   const sel = state.editSel;
   for (const kind of editKinds()) {

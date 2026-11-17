@@ -88,7 +88,8 @@ def _pce_basis(names):
 def sobol_indices(param_ranges: dict, grid: Grid, n_samples: int = 48,
                   base: dict | None = None, seed: int = 0,
                   domain_limit: tuple[float, float, float, float] = (-70, 70, 0, 160),
-                  art: Network | None = None, ven: Network | None = None) -> SobolResult:
+                  art: Network | None = None, ven: Network | None = None,
+                  trees=None) -> SobolResult:
     """Variance-based (Sobol) sensitivity via a polynomial-chaos surrogate.
 
     Fits an orthonormal-Legendre degree-2 expansion to ``n_samples`` Latin-hypercube
@@ -122,7 +123,8 @@ def sobol_indices(param_ranges: dict, grid: Grid, n_samples: int = 48,
                 raise ValueError(f"unknown uncertain parameter {name!r}")
         prm = Parameters(**kw)
         g = grid if perm is None else replace(grid, permeability=perm)
-        rows.append(_qois(run_hybrid(prm, g, domain_limit=domain_limit, art=art, ven=ven)))
+        a, v = trees(prm) if trees else (art, ven)       # per-sample trees if given
+        rows.append(_qois(run_hybrid(prm, g, domain_limit=domain_limit, art=a, ven=v)))
 
     qoi_names = list(rows[0])
     outputs = np.array([[r[q] for q in qoi_names] for r in rows])   # (N, q)
@@ -170,14 +172,16 @@ class UQResult:
 def monte_carlo(param_ranges: dict, grid: Grid, n_samples: int = 32,
                 base: dict | None = None, seed: int = 0,
                 domain_limit: tuple[float, float, float, float] = (-70, 70, 0, 160),
-                art: Network | None = None, ven: Network | None = None) -> UQResult:
+                art: Network | None = None, ven: Network | None = None,
+                trees=None) -> UQResult:
     """Monte-Carlo UQ over ``param_ranges`` (``{name: (low, high)}``).
 
     Each input is either a :class:`Parameters` field or ``"permeability"`` (varied on
     the grid). ``base`` sets the fixed Parameters values; ``art``/``ven`` fix the
     vasculature (else fractal trees are (re)built per sample, so ``r_min_frac``
-    uncertainty is only meaningful with fractal trees). Returns the QoI distribution
-    and first-order sensitivities.
+    uncertainty is only meaningful with fractal trees); ``trees(prm) -> (art, ven)``
+    rebuilds them per sample in a custom way (e.g. fitted into a project's domain).
+    Returns the QoI distribution and first-order sensitivities.
     """
     if n_samples < 2:
         raise ValueError("n_samples must be >= 2 for statistics")
@@ -203,7 +207,8 @@ def monte_carlo(param_ranges: dict, grid: Grid, n_samples: int = 32,
                 raise ValueError(f"unknown uncertain parameter {name!r}")
         prm = Parameters(**kw)
         g = grid if perm is None else replace(grid, permeability=perm)
-        rows.append(_qois(run_hybrid(prm, g, domain_limit=domain_limit, art=art, ven=ven)))
+        a, v = trees(prm) if trees else (art, ven)       # per-sample trees if given
+        rows.append(_qois(run_hybrid(prm, g, domain_limit=domain_limit, art=a, ven=v)))
 
     qoi_names = list(rows[0])
     outputs = np.array([[r[q] for q in qoi_names] for r in rows])

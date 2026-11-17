@@ -472,8 +472,11 @@ export function syncEditPanel() {
       const m = state.editable[k];
       return `${m.seg_start.length} ${k} segments, ${(m.inlet_nodes || []).length} ${k === "vein" ? "outlet" : "inlet"}(s)`;
     });
-    $("node-info").textContent = counts.length ? counts.join(" · ")
-      : "Empty — click the canvas to start a vessel (empty = default fractal trees on Run).";
+    const dflt = state.network && state.network.defaults || [];
+    const missing = ["artery", "vein"].filter((k) => !state.editable[k] && dflt.includes(k));
+    $("node-info").textContent = (counts.length ? counts.join(" · ") : "No vessels drawn yet.")
+      + (missing.length ? ` Dashed = the default ${missing.join(" + ")} tree used on Run`
+        + " — draw your own to replace it." : "");
   }
 }
 

@@ -148,6 +148,7 @@ async function newProject() {
   state.project = p.id;
   resetGeometry();
   stopFlow(); state.tracer = null; state.hasResult = false;
+  await loadNetwork();                      // the default trees a run would use (dashed)
   showProjectLink(p.id);
   $("grow-info").textContent = ""; $("run-info").textContent = "";
   setMode("vessels");

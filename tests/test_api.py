@@ -120,7 +120,9 @@ def test_grow_then_run(client):
 
     # the grown tree is exposed as segment geometry for the front-end overlay
     net = client.get(f"/projects/{pid}/network").json()
-    assert len(net["segments"]) == grown["n_segments"]
+    own = [sg for sg in net["segments"] if not sg.get("default")]
+    assert len(own) == grown["n_segments"]
+    assert net["defaults"] == ["vein"]          # the vein a run would use is the default
     assert {"x0", "y0", "x1", "y1", "r", "kind"} <= set(net["segments"][0])
 
     # the CCO method is also available and produces a usable tree
@@ -180,7 +182,8 @@ def test_image_upload_segments_a_network(client):
     r = client.post(f"/projects/{pid}/image", content=img, params={"min_size": 30})
     assert r.status_code == 200
 
-    segs = client.get(f"/projects/{pid}/network").json()["segments"]
+    segs = [sg for sg in client.get(f"/projects/{pid}/network").json()["segments"]
+            if not sg.get("default")]
     assert len(segs) > 10
     xs = [c for s in segs for c in (s["x0"], s["x1"])]
     ys = [c for s in segs for c in (s["y0"], s["y1"])]
@@ -1246,3 +1249,40 @@ def test_explore_grow_places_roots_where_the_organ_attaches(client, dim):
                                            "solve": False, "nx": 16,
                                            "artery": {"root": mine}}).json()
     assert d["roots"]["artery"] == mine
+
+
+def test_default_trees_are_fitted_into_the_project_domain(client):
+    """A project with no vessels runs on default fractal trees — fitted inside its own
+    domain (the raw thesis trees sit in a fixed frame, partly outside most domains),
+    and reported by /network so the UI can draw what is solved."""
+    for dom in ([0, 100, 0, 120], [0, 400, 0, 200]):
+        grid = {"nx": 40, "ny": 40, "lx": dom[1] - dom[0], "ly": dom[3] - dom[2],
+                "domain_limit": dom}
+        pid = client.post("/projects", json={"name": "d", "grid": grid,
+                                             "params": FAST_PARAMS}).json()["id"]
+        net = client.get(f"/projects/{pid}/network").json()
+        assert sorted(net["defaults"]) == ["artery", "vein"]
+        xs = [v for sg in net["segments"] for v in (sg["x0"], sg["x1"])]
+        ys = [v for sg in net["segments"] for v in (sg["y0"], sg["y1"])]
+        assert min(xs) >= dom[0]
+        assert max(xs) <= dom[1]
+        assert min(ys) >= dom[2]
+        assert max(ys) <= dom[3]
+        assert max(xs) - min(xs) > 0.5 * (dom[1] - dom[0]) or \
+            max(ys) - min(ys) > 0.5 * (dom[3] - dom[2])      # actually fills the domain
+        jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+        assert _wait_for_job(client, jid)["state"] == "done"
+        res = client.get(f"/projects/{pid}/results").json()
+        assert res["arterial_inflow"] > 0
+        assert res["arterial_inflow"] == pytest.approx(res["venous_outflow"], rel=1e-6)
+
+
+def test_uq_with_default_trees_still_responds_to_tree_depth(client):
+    """With no drawn vessels the default trees are rebuilt per sample, so the tree
+    depth (r_min_frac) remains an effective uncertain input."""
+    pid = client.post("/projects", json={"name": "uq", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    r = client.post(f"/projects/{pid}/uq", json={"params": {"r_min_frac": [0.4, 0.7]},
+                                                 "n_samples": 6})
+    assert r.status_code == 200, r.text
+    assert r.json()["std"]["arterial_inflow"] > 0
