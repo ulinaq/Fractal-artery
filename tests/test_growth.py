@@ -166,3 +166,48 @@ def test_obstacles_keep_growth_out(trunk):
     tn = net.terminal_nodes
     tx, ty = net.node_x[tn], net.node_y[tn]
     assert np.mean((tx > 12) & (tx < 38) & (ty > 12) & (ty < 38)) < 0.05
+
+
+def _trunk_3d():
+    from perfusion.core.geometry import grow_tree_3d
+    return grow_tree_3d((30, 30, 3), (0, 0, 1), root_radius=1.5, min_radius=0.0,
+                        length_to_radius=6, max_generations=2)
+
+
+def test_sample_points_in_3d_mask_stay_inside():
+    from perfusion.growth import sample_points_in_mask
+    from perfusion.treegen import DOMAIN_3D, shape_mask_3d
+    mask = shape_mask_3d("ellipsoid", 20, 20, 20)
+    pts = sample_points_in_mask(mask, DOMAIN_3D, 300, seed=1)
+    assert pts.shape == (300, 3)
+    c = np.array([30.0, 30.0, 30.0])
+    r = 0.85 * 30 * 1.1                        # semi-axis + one cell of slack
+    assert np.all(np.linalg.norm(pts - c, axis=1) <= r)
+
+
+def test_space_colonisation_grows_a_3d_tree_into_the_tissue():
+    from perfusion.growth import grow_network, sample_points_in_mask
+    from perfusion.treegen import DOMAIN_3D, shape_mask_3d
+    base = _trunk_3d()
+    pts = sample_points_in_mask(shape_mask_3d("box", 16, 16, 16), DOMAIN_3D, 200, seed=0)
+    net = grow_network(base, pts, max_iter=30)
+    assert net.is_3d
+    assert net.n_segments > base.n_segments
+    assert np.ptp(net.node_z) > np.ptp(base.node_z)    # it filled the volume
+    # Murray-tapered: no child thicker than its parent
+    parent_seg = net.incoming_segment[net.seg_start]
+    has_parent = parent_seg >= 0
+    assert np.all(net.seg_radius[has_parent] <= net.seg_radius[parent_seg[has_parent]] + 1e-12)
+
+
+def test_cco_grows_in_3d_and_rejects_wrong_dimension():
+    from perfusion.growth import cco_grow
+    base = _trunk_3d()
+    rng = np.random.default_rng(0)
+    pool = rng.uniform(5, 55, size=(300, 3))
+    net = cco_grow(base, pool, n_terminals=25, seed=0)
+    assert net.is_3d
+    assert net.n_segments >= base.n_segments + 25          # one new edge per terminal
+    assert net.terminal_nodes.size > base.terminal_nodes.size
+    with pytest.raises(ValueError, match=r"\(M, 3\)"):
+        cco_grow(base, pool[:, :2], n_terminals=5)

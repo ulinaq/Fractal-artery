@@ -228,3 +228,12 @@ def test_prune_tree_reduces_generations():
     assert r["removed_segments"] > 0
     assert r["after"]["segments"] < r["before"]["segments"]
     assert r["after"]["max_order"] <= r["before"]["max_order"]
+
+
+@pytest.mark.parametrize(("dim", "shape"), [(2, "kidney"), (3, "hemisphere")])
+def test_generate_trees_fills_tissue_and_conserves_mass(dim, shape):
+    r = mcp_server.generate_trees(dim=dim, shape=shape, generations=3, fill="cco",
+                                  n_terminals=15)
+    assert r["artery"]["segments"] > 7
+    assert r["inflow"] > 0
+    assert r["inflow"] == pytest.approx(r["outflow"], rel=1e-6)

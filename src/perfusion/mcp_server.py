@@ -356,6 +356,43 @@ def prune_tree(kind: str = "artery", steps: int = 1, r_min_frac: float = 0.15,
             "removed_segments": int(net.n_segments - pruned.n_segments)}
 
 
+def generate_trees(dim: int = 2, shape: str = "ellipse", generations: int = 4,
+                   fill: str = "colonization", fill_steps: int = 40, n_terminals: int = 60,
+                   artery_root=None, vein_root=None, artery_direction=None,
+                   vein_direction=None, artery_angle: float = 90.0, vein_angle: float = -90.0,
+                   solve: bool = True, seed: int = 0) -> dict:
+    """Grow an arterial + venous tree into a tissue shape (2-D or 3-D) and solve.
+
+    A fractal skeleton of ``generations`` branching levels starts at each root
+    (``*_root`` = [x, y] or [x, y, z]; 2-D trunk angle in degrees, 3-D direction
+    vector), then ``fill`` ("none" | "colonization" | "cco") grows it on to fill the
+    ``shape`` (2-D: rectangle/ellipse/kidney/wedge; 3-D: box/ellipsoid/cylinder/
+    hemisphere). Returns per-tree stats and, with ``solve``, the perfused inflow."""
+    from . import treegen
+
+    d3 = int(dim) == 3
+    dom = treegen.DOMAIN_3D if d3 else treegen.DOMAIN_2D
+    cx, cy = (dom[0] + dom[1]) / 2, (dom[2] + dom[3]) / 2
+    a_root = artery_root or ([cx, cy, dom[4] + 3] if d3 else [cx, dom[2] + 8])
+    v_root = vein_root or ([cx, cy, dom[5] - 3] if d3 else [cx, dom[3] - 8])
+    spec = treegen.GenSpec(
+        dim=3 if d3 else 2, shape=shape, generations=int(np.clip(generations, 1, 10)),
+        fill=fill, fill_steps=int(np.clip(fill_steps, 0, 400)),
+        n_terminals=int(np.clip(n_terminals, 1, 600)), seed=seed, nx=20 if d3 else 60,
+        artery=treegen.TreeSpec(tuple(a_root), artery_angle,
+                                tuple(artery_direction or (0, 0, 1))),
+        vein=treegen.TreeSpec(tuple(v_root), vein_angle, tuple(vein_direction or (0, 0, -1)),
+                              radius=2.4, gamma=1.2))
+    art, ven, mask, domain, _ = treegen.build(spec)
+    out = {"dim": spec.dim, "shape": shape, "fill": fill, "active_cells": int(mask.sum()),
+           "artery": treegen.tree_stats(art), "vein": treegen.tree_stats(ven)}
+    if solve:
+        q = treegen.solve(spec, art, ven, mask, domain).solution.terminal_flux
+        out["inflow"] = float(q[q > 0].sum())
+        out["outflow"] = float(-q[q < 0].sum())
+    return out
+
+
 def data_constrained_growth(hotspot_weight: float = 8.0, radius_frac: float = 0.22,
                             n_points: int = 500, seed: int = 0) -> dict:
     """Data-constrained vascular growth toward a target perfusion-density map.
@@ -637,6 +674,27 @@ def build_server():
         artery/vein tree — the inverse of growth (the trunk to the inlet is kept).
         Returns segment/terminal counts and max Strahler order before vs after."""
         return prune_tree(kind=kind, steps=steps, r_min_frac=r_min_frac, seed=seed)
+
+    @server.tool()
+    def grow_trees_in_tissue(dim: int = 2, shape: str = "ellipse", generations: int = 4,
+                             fill: str = "colonization", fill_steps: int = 40,
+                             n_terminals: int = 60, artery_root: list[float] | None = None,
+                             vein_root: list[float] | None = None,
+                             artery_direction: list[float] | None = None,
+                             vein_direction: list[float] | None = None,
+                             artery_angle: float = 90.0, vein_angle: float = -90.0,
+                             solve: bool = True, seed: int = 0) -> dict:
+        """Grow artery + vein trees into a tissue shape in 2-D or 3-D: a fractal
+        skeleton (`generations` levels) from placed roots, then a space-filling
+        `fill` (colonization steps / CCO terminals). Shapes — 2-D: rectangle,
+        ellipse, kidney, wedge; 3-D: box, ellipsoid, cylinder, hemisphere. Returns
+        segment/terminal/Strahler stats per tree and the perfused inflow/outflow."""
+        return generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
+                              fill_steps=fill_steps, n_terminals=n_terminals,
+                              artery_root=artery_root, vein_root=vein_root,
+                              artery_direction=artery_direction,
+                              vein_direction=vein_direction, artery_angle=artery_angle,
+                              vein_angle=vein_angle, solve=solve, seed=seed)
 
     @server.tool()
     def data_constrained_tree_growth(hotspot_weight: float = 8.0, radius_frac: float = 0.22,

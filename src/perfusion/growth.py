@@ -38,16 +38,18 @@ from .core.geometry import Network, network_from_edges
 def sample_points_in_mask(mask, domain_limit, n_points, *, seed=0, density=None):
     """Sample ``n_points`` random points inside the active cells of ``mask``.
 
-    ``mask`` is an ``(nx, ny)`` boolean grid and ``domain_limit`` is
-    ``(xmin, xmax, ymin, ymax)`` in physical coordinates (matching
-    :class:`perfusion.core.darcy.Grid`). Points are drawn uniformly within the
-    active cells, so they inherit the organ outline. Pass a ``density`` field
-    (``(nx, ny)``, non-negative) to sample cells with probability proportional to it
-    — data-constrained growth toward a target perfusion-density map.
+    ``mask`` is an ``(nx, ny)`` boolean grid with ``domain_limit`` =
+    ``(xmin, xmax, ymin, ymax)`` (matching :class:`perfusion.core.darcy.Grid`), or
+    an ``(nx, ny, nz)`` grid with ``(xmin, xmax, ymin, ymax, zmin, zmax)`` for 3-D
+    growth. Points are drawn uniformly within the active cells, so they inherit
+    the organ outline. Pass a ``density`` field (same shape as ``mask``,
+    non-negative) to sample cells with probability proportional to it —
+    data-constrained growth toward a target perfusion-density map.
     """
     mask = np.asarray(mask, dtype=bool)
-    xmin, xmax, ymin, ymax = domain_limit
-    nx, ny = mask.shape
+    dim = mask.ndim
+    if len(domain_limit) != 2 * dim:
+        raise ValueError(f"a {dim}-D mask needs a {2 * dim}-value domain_limit")
     active = np.argwhere(mask)
     if active.size == 0:
         raise ValueError("mask has no active cells to sample")
@@ -60,15 +62,27 @@ def sample_points_in_mask(mask, domain_limit, n_points, *, seed=0, density=None)
         d = np.asarray(density, dtype=float)
         if d.shape != mask.shape:
             raise ValueError(f"density {d.shape} must match mask {mask.shape}")
-        w = np.clip(d[active[:, 0], active[:, 1]], 0.0, None)
+        w = np.clip(d[tuple(active.T)], 0.0, None)
         total = w.sum()
         p = w / total if total > 0 else None      # fall back to uniform on a flat/empty map
         pick = rng.choice(len(active), size=n_points, p=p)
-    ix, iy = active[pick, 0], active[pick, 1]
-    hx, hy = (xmax - xmin) / nx, (ymax - ymin) / ny
-    x = xmin + (ix + rng.random(n_points)) * hx
-    y = ymin + (iy + rng.random(n_points)) * hy
-    return np.column_stack([x, y])
+    lo = np.asarray(domain_limit[0::2], dtype=float)
+    h = (np.asarray(domain_limit[1::2], dtype=float) - lo) / np.asarray(mask.shape)
+    return lo + (active[pick] + rng.random((n_points, dim))) * h
+
+
+def _positions(net: Network) -> np.ndarray:
+    """Node coordinates as an ``(n, 2)`` or ``(n, 3)`` array."""
+    cols = [net.node_x, net.node_y] + ([net.node_z] if net.is_3d else [])
+    return np.column_stack(cols)
+
+
+def _check_points(net: Network, pts, name):
+    pts = np.asarray(pts, dtype=float)
+    dim = 3 if net.is_3d else 2
+    if pts.ndim != 2 or pts.shape[1] != dim:
+        raise ValueError(f"{name} must be an (M, {dim}) array for a {dim}-D tree")
+    return pts
 
 
 def _parent_nodes(base: Network) -> np.ndarray:
@@ -131,12 +145,10 @@ def grow_network(base: Network, attraction_points, *, seed_nodes=None,
         A new network (base topology + grown branches), rooted at ``base``'s
         root, with Murray-tapered radii.
     """
-    pts = np.asarray(attraction_points, dtype=float)
-    if pts.ndim != 2 or pts.shape[1] != 2:
-        raise ValueError("attraction_points must be an (M, 2) array")
+    pts = _check_points(base, attraction_points, "attraction_points")
 
-    # Node arrays, seeded from the base network.
-    pos = np.column_stack([base.node_x, base.node_y]).tolist()
+    # Node arrays, seeded from the base network (2-D or 3-D).
+    pos = _positions(base).tolist()
     parent = _parent_nodes(base).tolist()
     if seed_nodes is None:
         seed_nodes = set(base.terminal_nodes.tolist())
@@ -145,9 +157,7 @@ def grow_network(base: Network, attraction_points, *, seed_nodes=None,
     eligible = [i in seed_nodes for i in range(base.n_nodes)]
 
     # Length scales from the combined bounding box.
-    all_x = np.concatenate([base.node_x, pts[:, 0]])
-    all_y = np.concatenate([base.node_y, pts[:, 1]])
-    extent = max(np.ptp(all_x), np.ptp(all_y), 1.0)
+    extent = max(float(np.ptp(np.vstack([_positions(base), pts]), axis=0).max()), 1.0)
     step = float(step if step is not None else 0.02 * extent)
     influence_radius = float(influence_radius if influence_radius is not None else 0.25 * extent)
     kill_radius = float(kill_radius if kill_radius is not None else 2.0 * step)
@@ -181,17 +191,17 @@ def grow_network(base: Network, attraction_points, *, seed_nodes=None,
         for k in np.flatnonzero(within):
             node = int(elig_idx[nearest[k]])
             v = ap[k] - node_arr[node]
-            norm = np.hypot(v[0], v[1])
+            norm = np.linalg.norm(v)
             if norm > 0:
-                pull[node] = pull.get(node, np.zeros(2)) + v / norm
+                pull[node] = pull.get(node, 0.0) + v / norm
 
         grew = False
         for node, direction in pull.items():
-            norm = np.hypot(direction[0], direction[1])
+            norm = np.linalg.norm(direction)
             if norm == 0:
                 continue
             new_xy = node_arr[node] + step * direction / norm
-            pos.append([float(new_xy[0]), float(new_xy[1])])
+            pos.append([float(c) for c in new_xy])
             parent.append(node)
             eligible.append(True)
             grew = True
@@ -203,8 +213,8 @@ def grow_network(base: Network, attraction_points, *, seed_nodes=None,
 
 def _assemble(base, pos, parent, *, exponent, leaf_radius):
     """Turn the grown (positions, parent) tree into a rooted :class:`Network`."""
-    node_x = np.array([p[0] for p in pos])
-    node_y = np.array([p[1] for p in pos])
+    P = np.asarray(pos, dtype=float)
+    node_x, node_y = P[:, 0], P[:, 1]
     parent = np.asarray(parent, dtype=int)
     n_nodes = len(pos)
 
@@ -218,6 +228,8 @@ def _assemble(base, pos, parent, *, exponent, leaf_radius):
     radius = _murray_radii(parent, children, base.root_node, n_nodes,
                            exponent=exponent, leaf_radius=leaf_radius)
 
+    if P.shape[1] == 3:
+        return _assemble_3d(base, P, parent, radius)
     edges = []
     for v in range(n_nodes):
         p = parent[v]
@@ -225,6 +237,25 @@ def _assemble(base, pos, parent, *, exponent, leaf_radius):
             length = float(np.hypot(node_x[v] - node_x[p], node_y[v] - node_y[p]))
             edges.append((int(p), int(v), max(length, 1e-9), float(radius[v])))
     return network_from_edges(node_x, node_y, edges, root=base.root_node)
+
+
+def _assemble_3d(base, P, parent, radius):
+    """3-D twin of the 2-D assembly: the grown tree is already parent→child
+    oriented from ``base``'s root, so build the :class:`Network` directly."""
+    from .core.geometry import NodeRole
+
+    child = np.flatnonzero(parent >= 0)
+    ss, se = parent[child], child
+    deg = np.bincount(np.concatenate([ss, se]), minlength=len(P))
+    role = np.where(deg >= 2, int(NodeRole.BIFURCATION), int(NodeRole.TERMINAL))
+    role[base.root_node] = int(NodeRole.ROOT)
+    d = P[se] - P[ss]
+    return Network(
+        node_x=P[:, 0], node_y=P[:, 1], node_z=P[:, 2], node_role=role,
+        seg_start=ss, seg_end=se, seg_length=np.maximum(np.linalg.norm(d, axis=1), 1e-9),
+        seg_radius=radius[se], seg_angle=np.arctan2(d[:, 1], d[:, 0]),
+        root_node=int(base.root_node), inlet_nodes=base.inlet_nodes,
+    )
 
 
 def cco_grow(base: Network, candidates, *, n_terminals=200, d_min=None,
@@ -247,18 +278,17 @@ def cco_grow(base: Network, candidates, *, n_terminals=200, d_min=None,
     d_min : minimum spacing between terminals; defaults to half the
         characteristic spacing ``sqrt(area / n_terminals)`` of the candidate box.
     """
-    cand = np.asarray(candidates, dtype=float)
-    if cand.ndim != 2 or cand.shape[1] != 2:
-        raise ValueError("candidates must be an (M, 2) array")
+    cand = _check_points(base, candidates, "candidates")
+    dim = cand.shape[1]
 
-    pos = np.column_stack([base.node_x, base.node_y]).tolist()
+    pos = _positions(base).tolist()
     parent = _parent_nodes(base).tolist()
     term = [pos[i] for i in base.terminal_nodes.tolist()] or [pos[base.root_node]]
     terminals = np.asarray(term, dtype=float)
 
-    if d_min is None:
-        area = max(np.ptp(cand[:, 0]) * np.ptp(cand[:, 1]), 1.0)
-        d_min = 0.5 * np.sqrt(area / max(n_terminals, 1))
+    if d_min is None:          # half the characteristic spacing (area or volume)^(1/dim)
+        size = max(float(np.prod(np.ptp(cand, axis=0))), 1.0)
+        d_min = 0.5 * (size / max(n_terminals, 1)) ** (1.0 / dim)
 
     rng = np.random.default_rng(seed)
     added = 0
@@ -266,7 +296,7 @@ def cco_grow(base: Network, candidates, *, n_terminals=200, d_min=None,
         if added >= n_terminals:
             break
         p = cand[idx]
-        if np.min(np.hypot(terminals[:, 0] - p[0], terminals[:, 1] - p[1])) < d_min:
+        if np.min(np.linalg.norm(terminals - p, axis=1)) < d_min:
             continue                                   # too close to a terminal
 
         arr = np.asarray(pos)
@@ -279,7 +309,7 @@ def cco_grow(base: Network, candidates, *, n_terminals=200, d_min=None,
             denom = np.einsum("ij,ij->i", ab, ab)
             s = np.clip(np.einsum("ij,ij->i", p - a, ab) / np.where(denom > 0, denom, 1), 0, 1)
             m = a + s[:, None] * ab
-            j = int(np.argmin(np.hypot(m[:, 0] - p[0], m[:, 1] - p[1])))
+            j = int(np.argmin(np.linalg.norm(m - p, axis=1)))
             v, pu, sj = int(child[j]), int(parent[child[j]]), float(s[j])
             if sj <= 1e-6:
                 new_parent = pu
@@ -287,10 +317,10 @@ def cco_grow(base: Network, candidates, *, n_terminals=200, d_min=None,
                 new_parent = v
             else:                                       # split pu->v at the foot m_j
                 new_parent = len(pos)
-                pos.append([float(m[j, 0]), float(m[j, 1])])
+                pos.append([float(c) for c in m[j]])
                 parent.append(pu)
                 parent[v] = new_parent
-        pos.append([float(p[0]), float(p[1])])
+        pos.append([float(c) for c in p])
         parent.append(new_parent)
         terminals = np.vstack([terminals, p])
         added += 1
