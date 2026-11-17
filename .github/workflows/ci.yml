@@ -36,5 +36,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: Syntax-check the zero-build front-end
-        run: node --check frontend/app.js
+      - name: Syntax-check the zero-build front-end (every module)
+        run: for f in frontend/*.js; do node --check "$f" || exit 1; done
+
+  ui:
+    # Browser tests: a real server + headless Chromium drive the web app
+    # (vessel/tissue editing, zoom-accurate clicks, run, prune + undo, explorer).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Chromium for Playwright
+        run: uv run --extra api --extra image --extra ui playwright install --with-deps chromium
+
+      - name: Browser tests
+        run: uv run --extra api --extra image --extra ui pytest tests/ui -q
