@@ -10,15 +10,17 @@ optimisation is reachable interactively without shoehorning it into a project.
 from __future__ import annotations
 
 import numpy as np
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from .. import optimize
 from ..core.darcy import Grid
 from ..core.pipeline import run_hybrid
 from . import helpers
+from .deps import get_store
 from .schemas import (
     ExploreGrowRequest,
     ExploreOptimizeRequest,
+    ExploreProjectRequest,
     ExploreRequest,
     ShapePolygonRequest,
 )
@@ -133,7 +135,7 @@ def grow_spec(req: ExploreGrowRequest):
         return treegen.TreeSpec(root=tuple(root), angle=angle, direction=tuple(d),
                                 radius=t.radius, gamma=t.gamma)
 
-    nx = min(req.nx, 36) if req.dim == 3 else req.nx
+    nx = min(req.nx, 48) if req.dim == 3 else req.nx   # sparse monolithic solve
     return treegen.GenSpec(
         dim=req.dim, shape=req.shape, polygon=req.polygon, size=req.size,
         extent=req.extent, twist=req.twist, jitter=req.jitter,
@@ -245,3 +247,39 @@ def shape_polygon(req: ShapePolygonRequest) -> dict:
                 "polygon": organs.polygon(req.name, req.domain, req.size, seed=req.seed)}
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from None
+
+
+@router.post("/explore/project")
+def explore_to_project(req: ExploreProjectRequest, store=Depends(get_store)) -> dict:
+    """Turn the current explorer setup into a **project**.
+
+    2-D → a workspace project: the organ outline as an editable tissue region and
+    the grown artery/vein as editable networks. 3-D → a 3-D project (``grid.nz``,
+    raster tissue mask, 3-D trees) to run and view in the 3-D viewer. Returns the
+    new project's id and the page to open."""
+    from .. import treegen
+    from .schemas import GridIn, ParametersIn
+
+    try:
+        spec = grow_spec(req)
+        art, ven, mask, domain, outline = treegen.build(spec)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    dom = [float(v) for v in domain]
+    if req.dim == 3:
+        n = mask.shape[0]
+        grid = GridIn(nx=n, ny=n, nz=n, lx=dom[1] - dom[0], ly=dom[3] - dom[2],
+                      lz=dom[5] - dom[4], domain_limit=tuple(dom), tissue=req.shape)
+    else:
+        grid = GridIn(nx=spec.nx, ny=spec.ny, lx=dom[1] - dom[0], ly=dom[3] - dom[2],
+                      domain_limit=tuple(dom))
+    project = store.create(req.name, ParametersIn(), grid)
+    project.artery_network, project.vein_network = art, ven
+    if req.dim == 3:
+        project.mask = np.asarray(mask, dtype=bool)
+    else:
+        project.regions = [outline]
+    store.save(project)
+    page = (f"/viewer3d.html?project={project.id}" if req.dim == 3
+            else f"/?project={project.id}")
+    return {"id": project.id, "dim": req.dim, "open": page}

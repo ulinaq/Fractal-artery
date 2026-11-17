@@ -81,6 +81,10 @@ no separate dev server.
   colonisation (growth steps, attraction points, step length, influence radius) or
   CCO (terminals) — then see the solved field, Strahler orders and inflow.
   *Animate growth* replays it generation by generation, then step by step.
+  **📤 Open as project** saves the setup as a project (`POST /explore/project`):
+  2-D → this workspace (editable), 3-D → the 3-D viewer (Run + field picker).
+- **Default trees** — with no vessels drawn, the fractal trees a run would use are
+  shown dashed in the Vessels tab (fitted to the project's domain).
 - **3-D viewer** (`viewer3d.html`) — a separate page (linked from the header)
   that renders results in a rotatable, **dependency-free canvas** projection (no
   WebGL/vtk.js, works offline). Two models via `GET /demo3d?model=`: a synthetic

@@ -25,6 +25,40 @@ from .core.pipeline import run_hybrid
 _PARAM_FIELDS = ("p_in", "p_out", "mu", "r_min_frac", "hematocrit")
 
 
+def geometry_fixed(names, art=None, ven=None, trees=None) -> bool:
+    """Whether varying ``names`` leaves the Darcy problem unchanged across samples:
+    no permeability change, and the vessel terminals don't move — i.e. tree depth
+    (``r_min_frac``) is not varied, or the trees are fixed (given, not rebuilt)."""
+    if "permeability" in names:
+        return False
+    if "r_min_frac" in names:
+        return art is not None and ven is not None and trees is None
+    return True
+
+
+def _sample_solver(names, grid, domain_limit, art, ven, trees):
+    """``(prm, grid) -> HybridResult`` for a sweep. When the geometry is fixed across
+    samples the trees and the Darcy factorisation are built once (lazily, from the
+    first sample) and reused — identical results, ~one LU instead of one per sample."""
+    from .core.pipeline import darcy_response_for
+
+    if not geometry_fixed(names, art, ven, trees):
+        def solve(prm, g):
+            a, v = trees(prm) if trees else (art, ven)
+            return run_hybrid(prm, g, domain_limit=domain_limit, art=a, ven=v)
+        return solve
+
+    cache = {}
+
+    def solve_reusing(prm, g):
+        if not cache:
+            a, v = trees(prm) if trees else (art, ven)
+            cache["a"], cache["v"], cache["r"] = darcy_response_for(prm, g, domain_limit, a, v)
+        return run_hybrid(prm, g, domain_limit=domain_limit, art=cache["a"], ven=cache["v"],
+                          darcy_response=cache["r"])
+    return solve_reusing
+
+
 def latin_hypercube(n: int, d: int, rng: np.random.Generator) -> np.ndarray:
     """Latin-hypercube samples in the unit cube ``[0, 1)^d`` (stratified per axis)."""
     edges = np.arange(n)[:, None]
@@ -88,7 +122,8 @@ def _pce_basis(names):
 def sobol_indices(param_ranges: dict, grid: Grid, n_samples: int = 48,
                   base: dict | None = None, seed: int = 0,
                   domain_limit: tuple[float, float, float, float] = (-70, 70, 0, 160),
-                  art: Network | None = None, ven: Network | None = None) -> SobolResult:
+                  art: Network | None = None, ven: Network | None = None,
+                  trees=None) -> SobolResult:
     """Variance-based (Sobol) sensitivity via a polynomial-chaos surrogate.
 
     Fits an orthonormal-Legendre degree-2 expansion to ``n_samples`` Latin-hypercube
@@ -110,6 +145,7 @@ def sobol_indices(param_ranges: dict, grid: Grid, n_samples: int = 48,
     hi = np.array([param_ranges[k][1] for k in names], dtype=float)
     samples = lo + unit * (hi - lo)
 
+    solver = _sample_solver(names, grid, domain_limit, art, ven, trees)
     rows = []
     for row in samples:
         kw, perm = dict(base or {}), None
@@ -122,7 +158,7 @@ def sobol_indices(param_ranges: dict, grid: Grid, n_samples: int = 48,
                 raise ValueError(f"unknown uncertain parameter {name!r}")
         prm = Parameters(**kw)
         g = grid if perm is None else replace(grid, permeability=perm)
-        rows.append(_qois(run_hybrid(prm, g, domain_limit=domain_limit, art=art, ven=ven)))
+        rows.append(_qois(solver(prm, g)))
 
     qoi_names = list(rows[0])
     outputs = np.array([[r[q] for q in qoi_names] for r in rows])   # (N, q)
@@ -170,14 +206,16 @@ class UQResult:
 def monte_carlo(param_ranges: dict, grid: Grid, n_samples: int = 32,
                 base: dict | None = None, seed: int = 0,
                 domain_limit: tuple[float, float, float, float] = (-70, 70, 0, 160),
-                art: Network | None = None, ven: Network | None = None) -> UQResult:
+                art: Network | None = None, ven: Network | None = None,
+                trees=None) -> UQResult:
     """Monte-Carlo UQ over ``param_ranges`` (``{name: (low, high)}``).
 
     Each input is either a :class:`Parameters` field or ``"permeability"`` (varied on
     the grid). ``base`` sets the fixed Parameters values; ``art``/``ven`` fix the
     vasculature (else fractal trees are (re)built per sample, so ``r_min_frac``
-    uncertainty is only meaningful with fractal trees). Returns the QoI distribution
-    and first-order sensitivities.
+    uncertainty is only meaningful with fractal trees); ``trees(prm) -> (art, ven)``
+    rebuilds them per sample in a custom way (e.g. fitted into a project's domain).
+    Returns the QoI distribution and first-order sensitivities.
     """
     if n_samples < 2:
         raise ValueError("n_samples must be >= 2 for statistics")
@@ -191,6 +229,7 @@ def monte_carlo(param_ranges: dict, grid: Grid, n_samples: int = 32,
     samples = lo + unit * (hi - lo)
 
     base = dict(base or {})
+    solver = _sample_solver(names, grid, domain_limit, art, ven, trees)
     rows = []
     for row in samples:
         kw, perm = dict(base), None
@@ -203,7 +242,7 @@ def monte_carlo(param_ranges: dict, grid: Grid, n_samples: int = 32,
                 raise ValueError(f"unknown uncertain parameter {name!r}")
         prm = Parameters(**kw)
         g = grid if perm is None else replace(grid, permeability=perm)
-        rows.append(_qois(run_hybrid(prm, g, domain_limit=domain_limit, art=art, ven=ven)))
+        rows.append(_qois(solver(prm, g)))
 
     qoi_names = list(rows[0])
     outputs = np.array([[r[q] for q in qoi_names] for r in rows])

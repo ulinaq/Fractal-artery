@@ -495,7 +495,7 @@ function setDim(dim) {
   setRoots(dim);
   // scale the skeleton to the domain: the 3-D box (60³) is smaller than the 2-D
   // window (140×160), and 3-D colonisation grows many segments per step
-  const D = dim === 3 ? { ltr: 5, gen: 4, ar: 1.5, vr: 1.8, steps: 25, res: [12, 36, 22] }
+  const D = dim === 3 ? { ltr: 5, gen: 4, ar: 1.5, vr: 1.8, steps: 25, res: [12, 48, 22] }
                       : { ltr: 10, gen: 4, ar: 2, vr: 2.4, steps: 40, res: [30, 200, 80] };
   const e = num("extent");                     // trunk calibre scales with the object
   $("ltr").value = D.ltr; $("generations").value = D.gen; $("fill-steps").value = D.steps;
@@ -592,6 +592,21 @@ async function animate() {
   evaluate();
 }
 $("btn-animate").addEventListener("click", animate);
+
+// ── send the current setup to a project (2-D → workspace, 3-D → 3-D viewer) ─────
+async function toProject() {
+  const btn = $("btn-project"); btn.disabled = true;
+  status("creating project…");
+  try {
+    const shape = S.dim === 3 ? $("shape3").value : (S.polygon ? "custom" : $("shape2").value);
+    const made = await post("/explore/project",
+                            { ...request({ solve: false }), name: `explorer ${shape} (${S.dim}-D)` });
+    status("project created", "ok");
+    window.open(made.open, "_blank");
+  } catch (e) { status(e.message, "err"); }
+  finally { btn.disabled = false; }
+}
+$("btn-project").addEventListener("click", toProject);
 
 // ── optimise (2-D default frame): loads the best asymmetry / L:R / exponent ────
 async function optimise() {

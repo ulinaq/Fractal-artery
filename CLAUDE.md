@@ -268,6 +268,22 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   sent, and the explorer follows them until the user moves a root. A new organ
   needs an outline/mask *and* a roots entry whose trunks lead into the tissue.
 
+- **Coupling choice** (`run_hybrid`/`run_hybrid_3d(coupling=)`): `"schur"` (dense
+  terminal response, reusable via `darcy_response=`) or `"monolithic"` (bed pressures
+  as unknowns, `network.MonolithicDarcy`, `O(nnz)`); `"auto"` switches above
+  `MONOLITHIC_AUTO_ENTRIES`. They must agree to machine precision — keep
+  `test_monolithic_coupling_matches_schur` green. TOF treats inflow `< 1e-12·max` as
+  stagnant (`timeofflight._dead_cells`), else round-off makes it ill-posed.
+- **3-D projects**: `GridIn.nz` set ⇒ 3-D (6-value `domain_limit`, raster `(nx,ny,nz)`
+  mask, `node_z` trees); `runner.solve` → `run_hybrid_3d`. 2-D-only routes use the
+  `deps.get_project_2d` dependency (409). New project features must either work in
+  3-D or be guarded.
+- **Default trees** (no vessels drawn): `runner.default_trees` fits the thesis trees
+  jointly into the project domain; every solve path uses
+  `build_networks(defaults=True)`; sweeps rebuild them per sample via
+  `runner.tree_builder` (so `r_min_frac` stays effective).
+- **Browser tests**: `tests/ui/` (Playwright; `--extra ui`), run in the CI `ui` job.
+
 ## Gotchas
 
 - The mollifier uses the thesis power-1 bump `exp(-1/(1-r²))` (not `^8`), restricts

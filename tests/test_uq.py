@@ -77,3 +77,67 @@ def test_determinism_and_validation(grid):
         uq.monte_carlo({"p_in": (5.0, 20.0)}, grid, n_samples=1)
     with pytest.raises(ValueError, match="unknown uncertain parameter"):
         uq.monte_carlo({"bogus": (0.0, 1.0)}, grid, n_samples=4)
+
+
+# ── Darcy-response reuse across sweep samples ──────────────────────────────────
+def _count_factorisations(monkeypatch):
+    from perfusion.core import darcy
+    calls = {"n": 0}
+    real = darcy.terminal_response
+
+    def counting(*a, **k):
+        calls["n"] += 1
+        return real(*a, **k)
+    monkeypatch.setattr(darcy, "terminal_response", counting)
+    return calls
+
+
+def test_monte_carlo_reuses_the_darcy_factorisation_when_geometry_is_fixed(monkeypatch):
+    grid = Grid(nx=30, ny=34, lx=140, ly=160)
+    ranges = {"p_in": (5.0, 15.0), "mu": (0.8, 1.4)}
+    calls = _count_factorisations(monkeypatch)
+    fast = uq.monte_carlo(ranges, grid, n_samples=8, base={"r_min_frac": 0.5})
+    assert calls["n"] == 1                      # one LU for all 8 samples
+    assert fast.mean["arterial_inflow"] > 0
+    calls["n"] = 0
+    uq.monte_carlo({**ranges, "permeability": (0.9, 1.1)}, grid, n_samples=8,
+                   base={"r_min_frac": 0.5})
+    assert calls["n"] == 8                      # K varies -> must refactorise each time
+
+
+def test_reused_response_gives_identical_results():
+    """Reuse must be numerically identical to recomputing per sample."""
+    from perfusion import Parameters, run_hybrid
+    from perfusion.core.pipeline import darcy_response_for
+    grid = Grid(nx=30, ny=34, lx=140, ly=160)
+    a, v, resp = darcy_response_for(Parameters(r_min_frac=0.5), grid)
+    for p_in, mu in [(5.0, 1.0), (12.0, 1.3)]:
+        prm = Parameters(p_in=p_in, mu=mu, r_min_frac=0.5)
+        fresh = run_hybrid(prm, grid)
+        reused = run_hybrid(prm, grid, art=a, ven=v, darcy_response=resp)
+        assert np.allclose(fresh.pressure, reused.pressure, rtol=1e-12, atol=1e-14)
+        assert np.allclose(fresh.solution.terminal_flux, reused.solution.terminal_flux,
+                           rtol=1e-12, atol=1e-14)
+
+
+def test_tree_depth_sweeps_still_rebuild_the_geometry(monkeypatch):
+    grid = Grid(nx=24, ny=28, lx=140, ly=160)
+    calls = _count_factorisations(monkeypatch)
+    res = uq.monte_carlo({"r_min_frac": (0.4, 0.7)}, grid, n_samples=4)
+    assert calls["n"] == 4                      # terminals move -> no reuse
+    assert res.std["arterial_inflow"] > 0
+    assert uq.geometry_fixed(["p_in", "mu", "hematocrit"])
+    assert not uq.geometry_fixed(["permeability"])
+    assert not uq.geometry_fixed(["r_min_frac"])
+    assert uq.geometry_fixed(["r_min_frac"], art=object(), ven=object())   # fixed trees
+
+
+def test_calibration_reuses_the_factorisation_and_recovers_p_in(monkeypatch):
+    from perfusion import Parameters, inverse, run_hybrid
+    grid = Grid(nx=24, ny=28, lx=140, ly=160)
+    true = run_hybrid(Parameters(p_in=12.0, r_min_frac=0.5), grid)
+    target = float(true.solution.terminal_flux.clip(min=0).sum())
+    calls = _count_factorisations(monkeypatch)
+    res = inverse.calibrate(target, "p_in", grid, (1.0, 30.0), base={"r_min_frac": 0.5})
+    assert calls["n"] == 1                      # every evaluation reused one LU
+    assert res.value == pytest.approx(12.0, rel=1e-3)

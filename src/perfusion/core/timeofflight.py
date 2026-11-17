@@ -31,6 +31,17 @@ def _cell_sources(grid: Grid, sources, terminal_flux: np.ndarray) -> np.ndarray:
     return q
 
 
+# a cell whose inflow is below this fraction of the largest inflow is stagnant: its
+# "inflow" is round-off (~1e-17), which would otherwise give a meaningless TOF ~1e20
+_DEAD_RTOL = 1e-12
+
+
+def _dead_cells(diag: np.ndarray) -> np.ndarray:
+    """Cells with no real inflow (diagonal of the TOF operator ≈ 0, relative)."""
+    d = np.abs(diag)
+    return d <= _DEAD_RTOL * (d.max() if d.size else 0.0)
+
+
 def time_of_flight(grid: Grid, fx: np.ndarray, fy: np.ndarray,
                    sources: list[tuple[np.ndarray, np.ndarray]],
                    terminal_flux: np.ndarray) -> np.ndarray:
@@ -54,7 +65,7 @@ def time_of_flight(grid: Grid, fx: np.ndarray, fy: np.ndarray,
     diag = inflow + injection
     A = (-inflow_op + sp.diags(diag)).tocsr()
 
-    dead = A.diagonal() == 0                               # cells with no inflow
+    dead = _dead_cells(A.diagonal())                       # cells with no (real) inflow
     if dead.any():
         A = A + sp.diags(dead.astype(float))
 
@@ -75,7 +86,7 @@ def time_of_flight_3d(grid, fx, fy, fz, sources, terminal_flux) -> np.ndarray:
     inflow = np.asarray(inflow_op.sum(axis=1)).ravel()
     injection = np.maximum(_cell_sources(grid, sources, terminal_flux), 0.0)
     A = (-inflow_op + sp.diags(inflow + injection)).tocsr()
-    dead = A.diagonal() == 0
+    dead = _dead_cells(A.diagonal())
     if dead.any():
         A = A + sp.diags(dead.astype(float))
     tof = spla.spsolve(A, np.full(grid.n_cells, grid.cell_volume * grid.porosity))

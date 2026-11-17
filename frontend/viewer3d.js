@@ -39,16 +39,52 @@ async function loadProject() {
   $("model-row").style.display = "none";     // project mode: no demo picker
   $("gen-row").style.display = "none";
   $("status").textContent = "loading project…";
-  const r = await fetch(`/projects/${PROJECT}/view3d`);
+  const r = await fetch(`/projects/${PROJECT}/view3d?field=${$("v3-field").value}`);
   if (!r.ok) {
     $("status").textContent = r.status === 404 ? "project not found" : "3-D view unavailable";
     $("status").className = "status err"; return;
   }
   setData(await r.json());
+  if (data.dim === 3) show3dProject();
   $("status").textContent = data.has_result
     ? "showing solved result" : "showing vessels — run a simulation for the 3-D field";
   $("status").className = "status ok";
 }
+
+// A 3-D project (e.g. sent from the Tree explorer): run it here and pick the field.
+function show3dProject() {
+  $("proj-card").hidden = false;
+  $("link-2d").href = "/explorer.html";          // 3-D projects live in the explorer/viewer
+  $("link-2d").textContent = "🌳 Tree explorer";
+  $("proj-desc").textContent = `${data.tissue || "tissue"} · grid ${data.shape.join("×")} · `
+    + `${data.segments.length} vessel segments`;
+  const s = data.summary;
+  const f = (v) => (Math.abs(v) < 1e-3 || Math.abs(v) > 1e4) ? v.toExponential(2) : v.toFixed(3);
+  $("v3-summary").innerHTML = s && data.has_result
+    ? [["arterial inflow", s.arterial_inflow], ["venous outflow", s.venous_outflow],
+       ["MTT", s.mtt], ["CTH", s.cth]]
+      .map(([k, v]) => `<div class="stat"><b>${f(v)}</b><span>${k}</span></div>`).join("")
+    : "";
+  $("v3-run").textContent = data.has_result ? "↻ Re-run 3-D simulation" : "▶ Run 3-D simulation";
+}
+
+async function run3d() {
+  const btn = $("v3-run"); btn.disabled = true;
+  $("v3-run-info").textContent = "solving…";
+  try {
+    const job = await (await fetch(`/projects/${PROJECT}/run`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json();
+    let st = job;
+    while (st.state !== "done" && st.state !== "error") {
+      await new Promise((r) => setTimeout(r, 400));
+      st = await (await fetch(`/jobs/${job.id}`)).json();
+    }
+    $("v3-run-info").textContent = st.state === "done" ? "" : (st.error || "run failed");
+    await loadProject();
+  } finally { btn.disabled = false; }
+}
+$("v3-run").addEventListener("click", () => run3d().catch((e) => { $("v3-run-info").textContent = e.message; }));
+$("v3-field").addEventListener("change", () => loadProject().catch(() => {}));
 
 function setData(d) {
   data = d;
@@ -83,7 +119,7 @@ function render() {
     const alpha = Number($("opacity").value) / 100;
     const pts = voxels.map((v) => {
       const [sx, sy, depth] = project(v[0], v[1], v[2]);
-      return { sx, sy, depth, t: (v[3] - min) / span };
+      return { sx, sy, depth, t: Math.max(0, Math.min(1, (v[3] - min) / span)) };
     }).sort((a, b) => a.depth - b.depth);          // painter's: far first
     ctx.globalAlpha = alpha;
     for (const p of pts) {
@@ -92,6 +128,14 @@ function render() {
       ctx.fillRect(p.sx - r, p.sy - r, 2 * r, 2 * r);
     }
     ctx.globalAlpha = 1;
+  }
+
+  if (!data.pressure.voxels.length && data.tissue_points) {   // unsolved 3-D project
+    ctx.fillStyle = "rgba(52,211,153,.35)";
+    for (const v of data.tissue_points) {
+      const [sx, sy] = project(v[0], v[1], v[2]);
+      ctx.fillRect(sx - 1, sy - 1, 2, 2);
+    }
   }
 
   if ($("show-trees").checked) {

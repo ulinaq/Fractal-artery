@@ -121,6 +121,39 @@ def _spread_coincident(grid: Grid, cells: np.ndarray) -> np.ndarray:
     return cells
 
 
+# above this many dense entries (n_cells × terminals ≈ 8 bytes each) "auto" switches
+# from the Schur response to the sparse monolithic solve (~200 MB of dense block)
+MONOLITHIC_AUTO_ENTRIES = 25_000_000
+
+
+def use_monolithic(coupling: str, n_cells: int, n_terminals: int) -> bool:
+    """Whether a solve should use the monolithic coupling (see :func:`run_hybrid`)."""
+    if coupling not in ("auto", "schur", "monolithic"):
+        raise ValueError("coupling must be 'auto', 'schur' or 'monolithic'")
+    return coupling == "monolithic" or (
+        coupling == "auto" and n_cells * n_terminals > MONOLITHIC_AUTO_ENTRIES)
+
+
+def darcy_response_for(prm: Parameters, grid: Grid,
+                       domain_limit: tuple[float, float, float, float] = (-70, 70, 0, 160),
+                       art: Network | None = None, ven: Network | None = None,
+                       eps: float = 4.0):
+    """``(art, ven, response)`` for reusing the Darcy factorisation across solves.
+
+    Builds the trees (from ``prm`` unless given) and the terminal response once; pass
+    ``art``/``ven``/``darcy_response=response`` to :func:`run_hybrid` in a loop that
+    keeps the grid (incl. permeability / mask), the terminal positions and ``eps``
+    fixed — e.g. sweeps over ``p_in``, ``p_out``, ``mu`` or hematocrit. Results are
+    identical to recomputing; only the dominant LU + back-substitution is skipped.
+    """
+    if art is None:
+        art = geometry.arterial_tree(prm)
+    if ven is None:
+        ven = geometry.venous_tree(prm)
+    cells = _terminal_cells(grid, art, ven, domain_limit)
+    return art, ven, darcy.terminal_response(grid, cells, eps)
+
+
 def run_hybrid(prm: Parameters, grid: Grid,
                domain_limit: tuple[float, float, float, float] = (-70, 70, 0, 160),
                eps: float = 4.0, nonlinear: bool = False,
@@ -129,7 +162,7 @@ def run_hybrid(prm: Parameters, grid: Grid,
                art_inlets=None, ven_outlets=None,
                max_iter: int = 100, tol: float = 1e-10,
                phase_separation: bool = False, elasticity: bool = False,
-               darcy_response=None) -> HybridResult:
+               darcy_response=None, coupling: str = "auto") -> HybridResult:
     """Build trees (or use the given ones), couple to Darcy, solve, post-process.
 
     Pass ``art``/``ven`` to use pre-built networks -- e.g. segmented from images
@@ -148,6 +181,13 @@ def run_hybrid(prm: Parameters, grid: Grid,
     factorisation. Reuse it only when the grid, terminal *positions* and ``eps`` are
     unchanged (e.g. an outer loop that varies only ``p_in``/``mu`` or the segment
     *radii*, as in :func:`run_adaptation`) — the Darcy response is independent of both.
+
+    ``coupling`` chooses how the Darcy bed enters the network solve: ``"schur"`` —
+    the dense terminal response (``O(n_cells · T)`` memory, fastest for small
+    problems, and reusable across solves); ``"monolithic"`` — one sparse system with
+    the bed pressures as unknowns (``O(nnz)`` memory: fine grids, many terminals);
+    ``"auto"`` (default) picks monolithic only when the dense block would exceed
+    ``MONOLITHIC_AUTO_ENTRIES``. Both give the same solution.
     """
     if art is None:
         art = geometry.arterial_tree(prm)
@@ -162,7 +202,12 @@ def run_hybrid(prm: Parameters, grid: Grid,
         response, field_response, sources = darcy_response
     else:
         terminal_cells = _terminal_cells(grid, art, ven, domain_limit, strict=strict_domain)
-        response, field_response, sources = darcy.terminal_response(grid, terminal_cells, eps)
+        if use_monolithic(coupling, grid.n_cells, len(terminal_cells)):
+            response, sources = darcy.coupling_operator(grid, terminal_cells, eps)
+            field_response = None              # the bed pressure comes from the solve
+        else:
+            response, field_response, sources = darcy.terminal_response(grid, terminal_cells,
+                                                                        eps)
 
     # Per-segment viscosity (radius-dependent when Fahraeus-Lindqvist is enabled).
     def _solve(a, v, visc):
@@ -207,7 +252,10 @@ def run_hybrid(prm: Parameters, grid: Grid,
     else:
         sol = _solve(art, ven, (_segment_viscosity(art, prm), _segment_viscosity(ven, prm)))
 
-    pressure = darcy.reconstruct_field(field_response, sol.terminal_flux, balance=True)
+    if field_response is None:                 # monolithic: the bed is part of the solve
+        pressure = np.asarray(sol.darcy_pressure)
+    else:
+        pressure = darcy.reconstruct_field(field_response, sol.terminal_flux, balance=True)
     pressure = pressure.reshape(grid.nx, grid.ny, order="F")
     tx, ty = darcy.transmissibilities(grid)     # cheaper than rebuilding tpfa_operator for tx/ty
     fx, fy = darcy.face_fluxes(grid, pressure, tx, ty)

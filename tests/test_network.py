@@ -126,3 +126,49 @@ def test_per_tree_viscosity(art, ven, grid):
     mu_a = np.full(art.n_segments, 2.0)
     arr = network.solve_linear(art, ven, response, 10.0, 0.0, (mu_a, 2.0))
     assert np.allclose(scalar.q_a, arr.q_a)
+
+
+# ── monolithic (sparse) coupling == Schur (dense response) ─────────────────────
+@pytest.mark.parametrize("kw", [{}, {"nonlinear": True}, {"elasticity": True},
+                                {"phase_separation": True}])
+def test_monolithic_coupling_matches_schur(kw):
+    from perfusion import Grid, Parameters, run_hybrid
+    prm = Parameters(r_min_frac=0.3, compliance=0.02, fahraeus_lindqvist=True)
+    grid = Grid(nx=50, ny=58, lx=140, ly=160)
+    a = run_hybrid(prm, grid, coupling="schur", **kw)
+    b = run_hybrid(prm, grid, coupling="monolithic", **kw)
+    scale = np.nanmax(np.abs(a.pressure))
+    assert np.nanmax(np.abs(a.pressure - b.pressure)) < 1e-9 * scale
+    assert np.allclose(a.solution.terminal_flux, b.solution.terminal_flux,
+                       rtol=1e-9, atol=1e-13)
+    assert np.allclose(a.solution.q_a, b.solution.q_a, rtol=1e-9, atol=1e-13)
+    assert b.solution.darcy_pressure is not None          # the bed came from the solve
+    q = b.solution.terminal_flux
+    assert q[q > 0].sum() == pytest.approx(-q[q < 0].sum(), rel=1e-9)
+
+
+def test_monolithic_system_is_sparse():
+    """No dense (n_cells × T) block: the assembled matrix has O(nnz) entries."""
+    from perfusion import Grid, Parameters
+    from perfusion.core import darcy
+    from perfusion.core.geometry import arterial_tree, venous_tree
+    from perfusion.core.network import _assemble, _resistances
+    from perfusion.core.pipeline import _terminal_cells
+    prm, grid = Parameters(r_min_frac=0.2), Grid(nx=60, ny=70, lx=140, ly=160)
+    art, ven = arterial_tree(prm), venous_tree(prm)
+    cells = _terminal_cells(grid, art, ven, (-70, 70, 0, 160))
+    op, _ = darcy.coupling_operator(grid, cells, 4.0)
+    sysm = _assemble(art, ven, op, 1.0, 0.0, *_resistances(art, ven, 1.0))
+    n, t = grid.n_cells, len(cells)
+    assert sysm.A.nnz < 20 * (n + art.n_nodes + ven.n_nodes)      # O(cells + network)
+    assert sysm.A.nnz < n * t / 10                                # ≪ the dense n×T block
+
+
+def test_coupling_choice_is_validated_and_auto_switches():
+    from perfusion.core.pipeline import MONOLITHIC_AUTO_ENTRIES, use_monolithic
+    assert not use_monolithic("auto", 1000, 100)
+    assert use_monolithic("auto", MONOLITHIC_AUTO_ENTRIES, 2)
+    assert use_monolithic("monolithic", 10, 1)
+    assert not use_monolithic("schur", 10**9, 10**4)
+    with pytest.raises(ValueError, match="coupling must be"):
+        use_monolithic("nope", 1, 1)

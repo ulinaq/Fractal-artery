@@ -602,7 +602,7 @@ to the previous code (verified to ~1e-12).
 
 ## 10.2 Opportunities (measured, not yet applied)
 
-- **UQ / calibration / sweep loops reuse the Darcy response** (`uq.monte_carlo`,
+- ✅ *(delivered — see §11.1 #3)* **UQ / calibration / sweep loops reuse the Darcy response** (`uq.monte_carlo`,
   `uq.sobol_indices`, `inverse.calibrate`, `mcp_server.sweep`). When the swept input is
   `p_in`/`p_out`/`mu`/`hematocrit` (grid + terminals fixed) the response is identical across
   every sample, yet recomputed each time — the same ~6× per-solve win as adaptation. Needs a
@@ -646,11 +646,14 @@ Effort: **S** ≲ a day, **M** a few days, **L** a week+, **XL** research.
 
 | # | Item | Why | Effort | Lands in |
 |---|---|---|---|---|
-| 1 | **Monolithic sparse coupling** — one sparse saddle-point solve of network + Darcy cells instead of the dense `T×T` terminal response (`O(T·n_cells)` memory for the field columns) | the scaling wall: fine 3-D grids (`>36³`) and thousands of terminals; also lifts the explorer's 3-D resolution cap | L | `core/network`, `core/darcy`, `core/darcy3d` |
-| 2 | **3-D project path** — store / edit / solve 3-D trees + organ masks in projects (today 3-D lives in the explorer and viewer); "send explorer result to a project" | turns the explorer into a modelling front door; makes 3-D results exportable / analysable | M–L | `api` (store, schemas), `frontend` |
-| 3 | **Darcy-response reuse in UQ / calibration / sweeps** (§10.2) when only `p_in/p_out/μ/H` vary — guard against `K` or terminal changes | ≈6× per sample, measured for adaptation | S–M | `uq`, `inverse`, `mcp_server.sweep` |
-| 4 | **Workspace default trees follow the project domain** — the fallback fractal trees use fixed 100×120 roots, so a larger domain is only partly perfused and they are not drawn on the result | correctness / clarity for the new domain-size feature | S | `api/runner`, `frontend/render` |
-| 5 | **Automated UI tests** — the Playwright drives used during development (draw/branch/drag, tissue editing, zoom, explorer, run) as a CI job | the web app is now the main entry point; regressions are only caught by hand | M | `tests/ui/`, `.github/workflows` |
+| 1 | ✅ **Monolithic sparse coupling** — `run_hybrid`/`run_hybrid_3d(coupling=)`, `network.MonolithicDarcy`, `darcy[3d].coupling_operator[_3d]`; identical to Schur to machine precision; 48³ × 2 048 terminals: 3.8 → 1.4 GB, 37.7 → 13.5 s; explorer 3-D cap 36³ → 48³ | done | | |
+| 2 | ✅ **3-D project path** — `GridIn.nz`/6-value domain, 3-D raster mask + trees, `run_hybrid_3d` in projects, `POST /explore/project` (2-D → workspace, 3-D → viewer with Run + field picker), clear 409s for 2-D-only analyses, document round trip | done | | |
+| 3 | ✅ **Darcy-response reuse in UQ / Sobol / calibration / sweeps** — `uq._sample_solver` + `geometry_fixed` guard; 16-sample MC on 120×140: 4.9× faster, identical | done | | |
+| 4 | ✅ **Default trees follow the project domain** — `runner.default_trees` (joint fit, `geometry.transform_network`), shown dashed in Vessels and on the result, rebuilt per sample in sweeps | done | | |
+| 5 | ✅ **Automated UI tests** — `tests/ui/` (Playwright, real server + Chromium), CI `ui` job | done | | |
+
+Still open from this tier: grow / adapt / tracer / kinetics / oxygen **on 3-D projects**
+(they answer 409 today), and editing 3-D trees by hand.
 
 ## 11.2 Modelling & numerics
 
@@ -688,8 +691,8 @@ Effort: **S** ≲ a day, **M** a few days, **L** a week+, **XL** research.
 
 ## 11.5 Performance (from §10.2, measured, not yet applied)
 
-- Avoid the `.tolil()` Dirichlet-pin round-trip in `darcy.terminal_response`,
-  `multicompartment` and `darcy3d`. *S.*
+- ✅ ~~Avoid the `.tolil()` pin round-trip~~ in `darcy.terminal_response` and `darcy3d`
+  (`darcy.pin_row`); `multicompartment` still uses it. *S.*
 - KD-tree the 2-D terminal snapping (`pipeline._snap_to_active` is `O(T·n_active)`; the 3-D
   path already uses `cKDTree`) and the coincident-cell spreading. *S.*
 - Maintain CCO node/child arrays incrementally (`growth.cco_grow` is `O(n²)`). *S–M.*

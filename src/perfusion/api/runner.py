@@ -51,9 +51,60 @@ def network_from_strokes(polylines, root_xy=None):
     return network_from_polylines(segs, radii=radii, root_xy=root_xy, snap_tol=0.5)
 
 
+def is_3d(project) -> bool:
+    return bool(getattr(project.grid, "is_3d", False))
+
+
+def build_grid3d(project):
+    """A 3-D project's ``Grid3D`` (+ 6-value window) with its raster tissue mask."""
+    g = project.grid
+    raster = getattr(project, "mask", None)
+    mask = None
+    if raster is not None and np.asarray(raster).shape == (g.nx, g.ny, g.nz):
+        mask = np.asarray(raster, dtype=bool)
+    return g.to_core3d(mask=mask), tuple(g.domain_limit)
+
+
+def default_trees_3d(project):
+    """Fallback 3-D artery + vein for a 3-D project: fractal trees grown from the
+    tissue's anatomical roots (``organs.roots``), sized to the domain — the same
+    proportions as the Tree explorer's defaults."""
+    from .. import organs
+    from ..core.geometry import grow_tree_3d
+
+    dom = tuple(project.grid.domain_limit)
+    name = project.grid.tissue if project.grid.tissue in organs.SHAPES_3D else "box"
+    roots = organs.roots(name, 3, dom)
+    size = float(min(dom[1] - dom[0], dom[3] - dom[2], dom[5] - dom[4]))
+    r0 = 0.025 * size
+    kw = dict(min_radius=0.0, length_to_radius=5.0, max_generations=4, exponent=2.8,
+              jitter=0.3)
+    art = grow_tree_3d(roots["artery"]["root"], roots["artery"]["direction"],
+                       root_radius=r0, gamma=1.4, seed=0, **kw)
+    ven = grow_tree_3d(roots["vein"]["root"], roots["vein"]["direction"],
+                       root_radius=1.2 * r0, gamma=1.2, seed=7, mirror=True, **kw)
+    return art, ven
+
+
+def defaults_for(project):
+    """The project's fallback (art, ven): 3-D defaults for a 3-D project, else the
+    domain-fitted 2-D fractal trees."""
+    return default_trees_3d(project) if is_3d(project) else default_trees(project)
+
+
+def require_2d(project, feature: str) -> None:
+    """Raise :class:`InputError` for a 2-D-only feature on a 3-D project."""
+    if is_3d(project):
+        raise InputError(f"{feature} works on 2-D projects; this is a 3-D project — "
+                         "view and run it in the 3-D viewer.")
+
+
 def build_grid(project):
     """Grid + its domain window, with the tissue mask: a stored raster mask if
-    present (shape must match the grid), else the drawn tissue polygons, else none."""
+    present (shape must match the grid), else the drawn tissue polygons, else none.
+    A 3-D project gets its ``Grid3D`` (see :func:`build_grid3d`)."""
+    if is_3d(project):
+        return build_grid3d(project)
     nx, ny, domain_limit = project.grid.nx, project.grid.ny, project.grid.domain_limit
     raster = getattr(project, "mask", None)
     if raster is not None and np.asarray(raster).shape == (nx, ny):
@@ -71,8 +122,37 @@ def build_grid(project):
     return project.grid.to_core(mask=mask), domain_limit
 
 
-def build_networks(project, use_vessels):
-    """Arterial/venous networks: a grown/segmented tree wins, else hand-drawn."""
+def fit_to_domain(nets, domain_limit, margin=0.05):
+    """Fit trees (fitted *jointly*, so artery and vein keep their relative layout)
+    into ``domain_limit``: one uniform scale — the trees keep their shape and calibre
+    ratios — and centred, their combined bounding box filling the window minus a
+    ``margin`` fraction."""
+    from ..core.geometry import transform_network
+
+    x0, x1, y0, y1 = domain_limit
+    xs = np.concatenate([n.node_x for n in nets])
+    ys = np.concatenate([n.node_y for n in nets])
+    bw, bh = max(np.ptp(xs), 1e-9), max(np.ptp(ys), 1e-9)
+    s = (1 - 2 * margin) * min((x1 - x0) / bw, (y1 - y0) / bh)
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    bcx, bcy = (xs.min() + xs.max()) / 2, (ys.min() + ys.max()) / 2
+    return [transform_network(n, s, (cx - s * bcx, cy - s * bcy)) for n in nets]
+
+
+def default_trees(project, prm=None):
+    """The fallback fractal artery + vein for a project with no vessels of that kind,
+    fitted into the project's own domain (the raw thesis trees are built in a fixed
+    frame and extend partly outside most project domains). ``prm`` lets a sweep
+    rebuild them per sample (e.g. varying ``r_min_frac``)."""
+    prm = prm if prm is not None else project.params.to_core()
+    art, ven = fit_to_domain([arterial_tree(prm), venous_tree(prm)],
+                             project.grid.domain_limit)
+    return art, ven
+
+
+def build_networks(project, use_vessels, defaults=False):
+    """Arterial/venous networks: a grown/segmented tree wins, else hand-drawn; with
+    ``defaults`` a missing tree is the domain-fitted default fractal tree."""
     art = ven = None
     if use_vessels and project.has_vessels:
         art = polylines_to_network(project.arteries) if project.arteries else None
@@ -81,7 +161,25 @@ def build_networks(project, use_vessels):
         art = project.artery_network
     if project.vein_network is not None:
         ven = project.vein_network
+    if defaults and (art is None or ven is None):
+        d_art, d_ven = defaults_for(project)
+        art = art if art is not None else d_art
+        ven = ven if ven is not None else d_ven
     return art, ven
+
+
+def tree_builder(project):
+    """For sweeps (UQ / calibration): ``prm -> (art, ven)`` rebuilding the default
+    trees per sample when the project has none (so ``r_min_frac`` matters), else
+    ``None`` (the project's own trees are used as-is)."""
+    art, ven = build_networks(project, use_vessels=True)
+    if art is not None and ven is not None:
+        return None
+
+    def build(prm):
+        d_art, d_ven = default_trees(project, prm)
+        return (art if art is not None else d_art), (ven if ven is not None else d_ven)
+    return build
 
 
 def snap_io(net, points):
@@ -118,6 +216,8 @@ def validate_run(project, use_vessels):
     """Check the model can be solved; raise :class:`InputError` with a clear,
     actionable message for the common misconfigurations. Returns (grid, art, ven)."""
     prm = project.params.to_core()
+    if is_3d(project):
+        return _validate_run_3d(project, prm)
     grid, _ = build_grid(project)
     if grid.mask is not None:
         active = int(np.asarray(grid.mask).sum())
@@ -135,12 +235,8 @@ def validate_run(project, use_vessels):
                 "rest make the system singular. Edit the tissue outline so it is one "
                 "connected area (or clear it to use the whole domain).")
 
-    art, ven = build_networks(project, use_vessels)
-    if project.inlets and art is None:
-        art = arterial_tree(prm)
-    if project.outlets and ven is None:
-        ven = venous_tree(prm)
-    # art/ven None is fine: run_hybrid falls back to the default fractal trees.
+    # a missing tree is the default fractal tree, fitted into this project's domain
+    art, ven = build_networks(project, use_vessels, defaults=True)
     if prm.p_in == prm.p_out:
         raise InputError(
             f"p_in equals p_out ({prm.p_in}); there is no pressure drop to drive flow. "
@@ -160,6 +256,31 @@ def validate_run(project, use_vessels):
     return grid, art, ven
 
 
+def _validate_run_3d(project, prm):
+    """The 3-D counterpart of :func:`validate_run` → ``(Grid3D, art, ven)``."""
+    from scipy.ndimage import label
+
+    grid, _ = build_grid3d(project)
+    active = int(grid.mask.sum())
+    if active == 0:
+        raise InputError("The 3-D tissue mask has no active cells.")
+    n_blobs = label(grid.mask)[1]
+    if n_blobs > 1:
+        raise InputError(f"The 3-D tissue is split into {n_blobs} disconnected regions; "
+                         "the Darcy solve needs one connected tissue.")
+    if prm.p_in == prm.p_out:
+        raise InputError(f"p_in equals p_out ({prm.p_in}); there is no pressure drop to "
+                         "drive flow. Set p_in above p_out.")
+    art, ven = build_networks(project, use_vessels=True, defaults=True)
+    if not (art.is_3d and ven.is_3d):
+        raise InputError("A 3-D project needs 3-D vessel trees (with z coordinates).")
+    for net, name, word in ((art, "arterial", "inlet"), (ven, "venous", "outlet")):
+        if net.terminal_nodes.size == 0:
+            raise InputError(f"The {name} tree has no free ends: every end is marked as "
+                             f"an {word}, so it cannot exchange blood with the tissue.")
+    return grid, art, ven
+
+
 def solve(project, *, use_vessels, nonlinear=False, max_iter=100, tol=1e-10,
           phase_separation=False, elasticity=False, compliance=0.01):
     """Build the model (grid, trees, inlet/outlet nodes) and run the hybrid solve."""
@@ -170,6 +291,10 @@ def solve(project, *, use_vessels, nonlinear=False, max_iter=100, tol=1e-10,
         prm.compliance = compliance
     grid, art, ven = validate_run(project, use_vessels)
     domain_limit = project.grid.domain_limit
+    if is_3d(project):                      # the 3-D hybrid: pressure, flux, time-of-flight
+        from ..core.pipeline3d import run_hybrid_3d
+
+        return run_hybrid_3d(prm, grid, art, ven, tuple(domain_limit))
     return run_hybrid(prm, grid, domain_limit=domain_limit, nonlinear=nonlinear,
                       art=art, ven=ven,
                       art_inlets=snap_io(art, project.inlets),
@@ -187,9 +312,7 @@ def solve_direct_model(project, use_vessels, rho_c=0.0):
     if prm.p_in == prm.p_out:
         raise InputError(f"p_in equals p_out ({prm.p_in}); there is no pressure drop to "
                          "drive flow. Set p_in above p_out in Parameters.")
-    art, ven = build_networks(project, use_vessels)
-    art = art if art is not None else arterial_tree(prm)
-    ven = ven if ven is not None else venous_tree(prm)
+    art, ven = build_networks(project, use_vessels, defaults=True)
     conns = connect_terminals(art, ven, rho_c=float(rho_c), viscosity=prm.mu)
     sol = solve_direct(art, ven, conns, prm.p_in, prm.p_out, viscosity=prm.mu)
     return art, ven, sol
@@ -198,6 +321,7 @@ def solve_direct_model(project, use_vessels, rho_c=0.0):
 def run_project(store, project, req: RunRequest) -> None:
     """Execute the simulation (hybrid Darcy or direct-connection) and persist it."""
     if getattr(req, "model", "hybrid") == "direct":
+        require_2d(project, "The direct-connection model")
         art, ven, sol = solve_direct_model(project, req.use_vessels, req.rho_c)
         store.save_direct_result(project, art, ven, sol)
         return
@@ -220,8 +344,11 @@ def calibrate(project, target: float, param: str, bounds, qoi: str = "arterial_i
 
     grid, art, ven = validate_run(project, use_vessels=True)
     base = project.params.model_dump()
+    build = tree_builder(project)           # default trees rebuilt per sample if used
     res = inverse.calibrate(float(target), param, grid, tuple(bounds), qoi=qoi, base=base,
-                            domain_limit=project.grid.domain_limit, art=art, ven=ven)
+                            domain_limit=project.grid.domain_limit,
+                            art=None if build else art, ven=None if build else ven,
+                            trees=build)
     return {"param": res.param, "value": res.value, "target": res.target,
             "achieved": res.achieved, "qoi": res.qoi, "n_eval": res.n_eval}
 
@@ -238,14 +365,19 @@ def uncertainty(project, param_ranges: dict, n_samples: int = 32, seed: int = 0,
     grid, art, ven = validate_run(project, use_vessels=True)
     base = project.params.model_dump()          # fixed Parameters fields
     ranges = {k: tuple(v) for k, v in param_ranges.items()}
+    build = tree_builder(project)           # default trees rebuilt per sample if used
+    if build:
+        art = ven = None
     if method == "sobol":
         res = uq.sobol_indices(ranges, grid, n_samples=n_samples, base=base, seed=seed,
-                               domain_limit=project.grid.domain_limit, art=art, ven=ven)
+                               domain_limit=project.grid.domain_limit, art=art, ven=ven,
+                               trees=build)
         return {"method": "sobol", "names": res.names, "qoi_names": res.qoi_names,
                 "n_samples": res.n_samples, "first_order": res.first_order,
                 "total_effect": res.total_effect, "fit_r2": res.fit_r2}
     res = uq.monte_carlo(ranges, grid, n_samples=n_samples, base=base, seed=seed,
-                         domain_limit=project.grid.domain_limit, art=art, ven=ven)
+                         domain_limit=project.grid.domain_limit, art=art, ven=ven,
+                         trees=build)
     return {"method": "correlation", "names": res.names, "qoi_names": res.qoi_names,
             "n_samples": int(n_samples), "mean": res.mean, "std": res.std,
             "p05": res.p05, "p95": res.p95, "sensitivity": res.sensitivity}

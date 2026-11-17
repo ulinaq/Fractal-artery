@@ -148,6 +148,7 @@ async function newProject() {
   state.project = p.id;
   resetGeometry();
   stopFlow(); state.tracer = null; state.hasResult = false;
+  await loadNetwork();                      // the default trees a run would use (dashed)
   showProjectLink(p.id);
   $("grow-info").textContent = ""; $("run-info").textContent = "";
   setMode("vessels");
@@ -538,6 +539,10 @@ function syncParamInputs(info) {
 // Open an existing project by id (shareable URL: ?project=<id>).
 async function openProject(id) {
   const info = await api("GET", `/projects/${id}`);
+  if (info.grid && info.grid.nz) {           // a 3-D project lives in the 3-D viewer
+    location.href = `/viewer3d.html?project=${info.id}`;
+    return;
+  }
   state.project = info.id;
   $("proj-name").value = info.name;
   syncParamInputs(info);                     // reflect the project's stored settings

@@ -126,6 +126,24 @@ Face fluxes from the reconstructed pressure: `q_face = T_face (p_i − p_j)`
 (`darcy.face_fluxes`). `pipeline.run_hybrid` chains geometry → response → solve →
 reconstruct → fluxes → time-of-flight.
 
+**Monolithic (sparse) coupling** — the same model without forming `Φ`. The bed
+pressures `P` join the unknowns and the system stays sparse:
+
+```
+A_pin P − W_src (s∘q) = 0                 (Darcy rows: pinned TPFA, mollified sources)
+p_node(k) − p_ref − W_avg[:,k]ᵀ P = 0     (coupling rows)
+Σ_j s_j q_j = 0                            (balance)
+```
+
+Eliminating `P` gives back `Φ = W_avgᵀ A_pin⁻¹ W_src` exactly, so both forms agree to
+machine precision (tested: linear, nonlinear, elasticity, phase separation, 3-D). The
+Schur form stores a dense `n_cells × T` block; the monolithic form is `O(nnz)` — at
+48³ cells and 2 048 terminals it needs 1.4 GB instead of 3.8 GB and solves 2.8× faster.
+`run_hybrid` / `run_hybrid_3d(coupling="auto"|"schur"|"monolithic")`; `"auto"` switches
+above `pipeline.MONOLITHIC_AUTO_ENTRIES` dense entries (`network.MonolithicDarcy`,
+`darcy.coupling_operator`, `darcy3d.coupling_operator_3d`). Sweeps that keep the grid and
+terminals fixed reuse one Schur response instead (`pipeline.darcy_response_for`).
+
 ---
 
 ## 4. Multi-compartment Darcy (arteriole → capillary → venule)
@@ -194,6 +212,9 @@ diffusion neglected:
 V_pore dC/dt = A C + inject·c_a(t) − extract·C
 C^{n+1} = C^n + dt[θ L C^{n+1} + (1−θ) L C^n] + dt·source·c_a
 ```
+
+Cells whose net inflow is below `10⁻¹²·max` are **stagnant** (their "inflow" is
+round-off): they get `T = V_pore` rather than a meaningless ~10²⁰.
 
 `θ=0` explicit Euler (CFL-limited, `dt ≤ min V/outflux`), `θ=½` Crank–Nicolson
 (default), `θ=1` implicit Euler. One LU of `I − θ dt L` is reused for all steps.
