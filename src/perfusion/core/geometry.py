@@ -534,3 +534,73 @@ def grow_tree_3d(root_xyz, direction=(0.0, 0.0, 1.0), *, root_radius=2.0,
         seg_length=np.asarray(seg_len), seg_radius=np.asarray(seg_rad),
         seg_angle=np.asarray(seg_ang), root_node=0, node_z=np.asarray(zs),
     )
+
+
+def _subnetwork(net: Network, keep_seg: np.ndarray) -> Network:
+    """The network restricted to ``keep_seg`` segments; nodes left with no segment
+    are dropped unless they are inlets. Reindexes nodes, re-derives roles by degree,
+    and carries ``inlet_nodes``/``root_node``/``node_z`` across."""
+    ss, se = net.seg_start[keep_seg], net.seg_end[keep_seg]
+    keep_node = np.zeros(net.n_nodes, bool)
+    keep_node[ss] = True
+    keep_node[se] = True
+    keep_node[net.inlet_nodes] = True
+    old2new = np.full(net.n_nodes, -1, dtype=int)
+    old2new[keep_node] = np.arange(int(keep_node.sum()))
+    ss2, se2 = old2new[ss], old2new[se]
+    nx, ny = net.node_x[keep_node], net.node_y[keep_node]
+    inlets = old2new[net.inlet_nodes]
+    deg = np.bincount(np.concatenate([ss2, se2]), minlength=len(nx))
+    role = np.where(deg >= 2, int(NodeRole.BIFURCATION), int(NodeRole.TERMINAL))
+    role[inlets] = int(NodeRole.ROOT)
+    root = int(old2new[net.root_node]) if keep_node[net.root_node] else int(inlets[0])
+    return Network(
+        node_x=nx, node_y=ny, node_role=role, seg_start=ss2, seg_end=se2,
+        seg_length=net.seg_length[keep_seg], seg_radius=net.seg_radius[keep_seg],
+        seg_angle=net.seg_angle[keep_seg], root_node=root, inlet_nodes=inlets,
+        node_z=net.node_z[keep_node] if net.node_z is not None else None,
+    )
+
+
+def prune_terminal_branches(net: Network, steps: int = 1) -> Network:
+    """Prune the outermost ``steps`` generations of a tree — the inverse of growth.
+
+    One step removes every *terminal branch*: the chain of segments from a free end
+    (a degree-1 node that is not an inlet/outlet) back through pass-through
+    (degree-2) nodes to the nearest junction. All terminal branches of a generation
+    go at once, so a junction whose children were all pruned becomes a free end
+    that the next step removes. A chain that reaches an inlet/outlet (the trunk) is
+    never removed, so the fed tree survives; loops are untouched (no free end).
+    Segment geometry and radii of what remains are unchanged.
+    """
+    steps = int(steps)
+    if steps < 0:
+        raise ValueError("steps must be >= 0")
+    for _ in range(steps):
+        if net.n_segments == 0:
+            break
+        deg = net.node_degree
+        inlet = np.zeros(net.n_nodes, bool)
+        inlet[net.inlet_nodes] = True
+        adj: list[list[tuple[int, int]]] = [[] for _ in range(net.n_nodes)]
+        for s, (a, b) in enumerate(zip(net.seg_start, net.seg_end, strict=True)):
+            adj[a].append((int(b), s))
+            adj[b].append((int(a), s))
+        drop = np.zeros(net.n_segments, bool)
+        for leaf in np.flatnonzero((deg == 1) & ~inlet):
+            chain, prev, cur = [], -1, int(leaf)
+            while True:
+                nxt = [(v, s) for v, s in adj[cur] if s not in chain and v != prev]
+                if not nxt:                           # an isolated chain end: whole fragment
+                    break
+                v, s = nxt[0]
+                chain.append(s)
+                prev, cur = cur, v
+                if inlet[cur] or deg[cur] != 2:       # junction, trunk or the far end
+                    break
+            if not inlet[cur]:                        # never cut the fed trunk
+                drop[chain] = True
+        if not drop.any():
+            break
+        net = _subnetwork(net, ~drop)
+    return net

@@ -335,6 +335,27 @@ def tree_morphometry(kind: str = "artery", r_min_frac: float = 0.15, seed: int =
             "diameter_ratio": s["diameter_ratio"]}
 
 
+def prune_tree(kind: str = "artery", steps: int = 1, r_min_frac: float = 0.15,
+               seed: int = 0) -> dict:
+    """Prune ``steps`` generations of terminal branches off a fractal tree (the
+    inverse of growth): each step removes every free-end branch back to its nearest
+    junction, never the trunk to the inlet. Reports segments/terminals and the max
+    Strahler order before vs after."""
+    from .core.geometry import arterial_tree, prune_terminal_branches, venous_tree
+    from .core.morphometry import strahler_summary
+
+    prm = Parameters(r_min_frac=r_min_frac, seed=seed)
+    net = venous_tree(prm) if kind == "vein" else arterial_tree(prm)
+    pruned = prune_terminal_branches(net, int(np.clip(steps, 0, 50)))
+
+    def stats(n):
+        return {"segments": int(n.n_segments), "terminals": int(n.terminal_nodes.size),
+                "max_order": int(strahler_summary(n)["max_order"]) if n.n_segments else 0}
+
+    return {"kind": kind, "steps": int(steps), "before": stats(net), "after": stats(pruned),
+            "removed_segments": int(net.n_segments - pruned.n_segments)}
+
+
 def data_constrained_growth(hotspot_weight: float = 8.0, radius_frac: float = 0.22,
                             n_points: int = 500, seed: int = 0) -> dict:
     """Data-constrained vascular growth toward a target perfusion-density map.
@@ -608,6 +629,14 @@ def build_server():
         and diameter R_D ratios + max Strahler order and per-order segment counts —
         the standard morphometric fingerprint used to validate a vascular tree."""
         return tree_morphometry(kind=kind, r_min_frac=r_min_frac, seed=seed)
+
+    @server.tool()
+    def prune_vessel_tree(kind: str = "artery", steps: int = 1, r_min_frac: float = 0.15,
+                          seed: int = 0) -> dict:
+        """Prune the outermost `steps` generations of terminal branches off a fractal
+        artery/vein tree — the inverse of growth (the trunk to the inlet is kept).
+        Returns segment/terminal counts and max Strahler order before vs after."""
+        return prune_tree(kind=kind, steps=steps, r_min_frac=r_min_frac, seed=seed)
 
     @server.tool()
     def data_constrained_tree_growth(hotspot_weight: float = 8.0, radius_frac: float = 0.22,

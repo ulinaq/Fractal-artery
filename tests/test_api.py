@@ -968,6 +968,103 @@ def test_editable_absent_without_networks(client):
                       ).status_code == 404
 
 
+def _drawn_tree(x0, y_root, y_tip, inlet=0):
+    """A small Y-shaped tree drawn node by node, as the canvas editor sends it."""
+    return {"node_x": [x0, x0, x0 - 20, x0 + 20], "node_y": [y_root, 60, y_tip, y_tip],
+            "seg_start": [0, 1, 1], "seg_end": [1, 2, 3], "seg_radius": [3, 2, 2],
+            "inlet_nodes": [inlet], "root_node": inlet}
+
+
+def test_editable_creates_tree_from_scratch_and_solves(client):
+    """The canvas editor draws vessels straight into the network: PUT /editable
+    creates trees the project didn't have, with inlet/outlet *nodes*, and the run
+    feeds exactly those nodes (no I/O points needed)."""
+    pid = client.post("/projects", json={"name": "drawn", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    body = {"artery": _drawn_tree(-20, 10, 120), "vein": _drawn_tree(20, 150, 30)}
+    r = client.put(f"/projects/{pid}/editable", json=body)
+    assert r.status_code == 200, r.text
+    ed = client.get(f"/projects/{pid}/editable").json()
+    assert ed["artery"]["inlet_nodes"] == [0]
+    assert ed["vein"]["inlet_nodes"] == [0]
+    assert len(ed["artery"]["seg_start"]) == 3
+
+    job = client.post(f"/projects/{pid}/run", json={"use_vessels": True}).json()
+    final = _wait_for_job(client, job["id"])
+    assert final["state"] == "done", final.get("error")
+    res = client.get(f"/projects/{pid}/results").json()
+    assert res["arterial_segments"] == 3
+    assert res["venous_segments"] == 3
+    assert res["arterial_inflow"] > 0
+    assert res["arterial_inflow"] == pytest.approx(res["venous_outflow"], rel=1e-6)
+
+
+def test_editable_keeps_multiple_outlets_across_reload(client, tmp_path):
+    """Several inlet/outlet nodes must survive the store's .npz round trip."""
+    pid = client.post("/projects", json={"name": "drawn", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    vein = _drawn_tree(20, 150, 30)
+    vein["inlet_nodes"] = [0, 2, 3]
+    assert client.put(f"/projects/{pid}/editable", json={"vein": vein}).status_code == 200
+    fresh = TestClient(create_app(store=ProjectStore(tmp_path)))     # reopen from disk
+    assert fresh.get(f"/projects/{pid}/editable").json()["vein"]["inlet_nodes"] == [0, 2, 3]
+
+
+def test_run_rejects_tree_whose_every_end_is_an_outlet(client):
+    """A vein with no free (terminal) end can't drain the tissue -> clear error,
+    not a silent zero-flow 'solution'."""
+    pid = client.post("/projects", json={"name": "drawn", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    vein = {"node_x": [20, 20, 20], "node_y": [150, 90, 30], "seg_start": [0, 1],
+            "seg_end": [1, 2], "seg_radius": [2, 2], "inlet_nodes": [0, 2]}
+    client.put(f"/projects/{pid}/editable",
+               json={"artery": _drawn_tree(-20, 10, 120), "vein": vein})
+    job = client.post(f"/projects/{pid}/run", json={"use_vessels": True}).json()
+    final = _wait_for_job(client, job["id"])
+    assert final["state"] == "error"
+    assert "venous tree has no free ends" in final["error"]
+
+
+def test_prune_removes_terminal_generations(client):
+    pid = client.post("/projects", json={"name": "prune", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    client.put(f"/projects/{pid}/editable", json={"artery": _drawn_tree(0, 10, 120)})
+    r = client.post(f"/projects/{pid}/prune", json={"target": "artery", "steps": 1})
+    assert r.status_code == 200, r.text
+    info = r.json()
+    assert info["n_removed"] == 2          # both branches of the Y; the trunk stays
+    assert info["n_segments"] == 1
+    a = client.get(f"/projects/{pid}/editable").json()["artery"]
+    assert len(a["seg_start"]) == 1
+    assert a["inlet_nodes"] == [0]
+    # the default fractal tree is pruned when nothing was drawn
+    r = client.post(f"/projects/{pid}/prune", json={"target": "vein", "steps": 2}).json()
+    assert r["n_removed"] > 0
+    assert client.post(f"/projects/{pid}/prune", json={"target": "x"}).status_code == 422
+
+
+def test_editable_new_tree_defaults_inlet_to_root(client):
+    pid = client.post("/projects", json={"name": "drawn", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    tree = _drawn_tree(0, 10, 120)
+    tree.pop("inlet_nodes")
+    tree["root_node"] = 2
+    assert client.put(f"/projects/{pid}/editable", json={"artery": tree}).status_code == 200
+    a = client.get(f"/projects/{pid}/editable").json()["artery"]
+    assert a["inlet_nodes"] == [2]
+
+
+def test_editable_zero_segments_removes_tree(client):
+    pid = client.post("/projects", json={"name": "drawn", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    client.put(f"/projects/{pid}/editable", json={"artery": _drawn_tree(0, 10, 120)})
+    empty = {"node_x": [], "node_y": [], "seg_radius": [], "seg_start": [], "seg_end": []}
+    assert client.put(f"/projects/{pid}/editable", json={"artery": empty}).status_code == 200
+    assert client.get(f"/projects/{pid}/editable").json()["artery"] is None
+    # clearing a tree that doesn't exist is a harmless no-op
+    assert client.put(f"/projects/{pid}/editable", json={"vein": empty}).status_code == 200
+
+
 def test_mask_makes_the_solved_domain_organ_shaped(client):
     pid = client.post("/projects", json={"name": "mask", "grid": SMALL_GRID,
                                          "params": FAST_PARAMS}).json()["id"]

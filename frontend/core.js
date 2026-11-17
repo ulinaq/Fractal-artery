@@ -25,24 +25,21 @@ export async function api(method, path, body) {
 // ── application state ───────────────────────────────────────────────────────
 export const state = {
   project: null,
-  mode: "vessels",           // "vessels" | "tissue" | "io" | "edit" | "result"
+  mode: "vessels",           // "vessels" | "tissue" | "result"
   field: "pressure",
-  vessels: { arteries: [], veins: [] },   // saved strokes
-  stroke: [],                // current in-progress vessel polyline (domain coords)
-  regions: [],               // saved tissue outline polygons (domain coords)
-  regionStroke: [],          // current in-progress tissue polygon
+  vessels: { arteries: [], veins: [] },   // legacy hand-drawn polylines (vectorized on open)
+  regions: [],               // tissue outline polygons (domain coords) -> mask
   lesions: [],               // low-K patches: {polygon:[[x,y]...], permeability}
-  lesionStroke: [],          // current in-progress lesion polygon
   hotspots: [],              // growth-demand targets: {polygon:[[x,y]...], weight}
-  hotspotStroke: [],         // current in-progress hotspot polygon
-  inlets: [],                // arterial inlet points (domain coords)
-  outlets: [],               // venous outlet points (domain coords)
+  tissueStroke: [],          // polygon being drawn in the Tissue tab
+  tissueSel: null,           // {type, idx, vertex} selected tissue polygon / vertex
+  inlets: [],                // legacy inlet points (adopted onto network nodes on open)
+  outlets: [],               // legacy outlet points
+  legacyIO: false,           // legacy points were adopted -> clear them server-side on save
   network: null,             // {segments:[...]} overlaid in result mode
-  editable: null,            // {artery, vein} vessel networks being edited
-  editSource: null,          // "network" once an editable vessel network is loaded
-  editSel: null,             // {kind, node, seg} current selection
-  editDrag: false,           // a node is being dragged
-  editAdd: false,            // add-branch mode: clicks grow new edges
+  editable: { artery: null, vein: null },  // the vessel networks being edited
+  editSel: null,             // {kind, node, seg} selected vessel node
+  hover: null,               // pointer position (domain) for rubber-band previews
   fieldData: null,           // {name, shape, data, vmin, vmax}
   tracer: null,              // {shape, times, vmax, frames:[...]}
   flow: { active: false, idx: 0, timer: null },

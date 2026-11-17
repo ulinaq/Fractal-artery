@@ -27,6 +27,8 @@ from .schemas import (
     NetworkModel,
     NetworksEditIn,
     ProjectInfo,
+    PruneInfo,
+    PruneRequest,
     VesselsIn,
 )
 from .store import Project, ProjectStore
@@ -165,11 +167,20 @@ def put_editable(body: NetworksEditIn, project: Project = Depends(get_project),
     """Apply moved nodes + resized segments to the stored trees.
 
     A pure move/resize (no ``seg_start``/``seg_end``) keeps the topology; sending
-    topology rebuilds it. Either way the result is invalidated (geometry changed).
+    topology rebuilds it. Sending topology also lets the editor *create* a tree
+    the project doesn't have yet (drawn from scratch on the canvas) and *remove*
+    one (zero segments). Any change invalidates the result (geometry changed).
     """
     def apply(net, edit):
-        if edit.seg_start is not None and edit.seg_end is not None:
-            # topology may have changed (add/delete) -> rebuild from scratch
+        topology = edit.seg_start is not None and edit.seg_end is not None
+        if topology and len(edit.seg_start) == 0:
+            return None                       # every edge deleted -> no tree
+        if net is None and not topology:
+            raise HTTPException(404, "project has no editable arterial/venous tree")
+        if net is not None and net.is_3d:
+            raise HTTPException(409, "a 3-D tree cannot be edited in the 2-D editor")
+        if topology:
+            # topology may have changed (add/delete/new tree) -> rebuild from scratch
             return helpers.rebuild_network(net, edit.node_x, edit.node_y, edit.seg_start,
                                            edit.seg_end, edit.seg_radius,
                                            edit.inlet_nodes, edit.root_node)
@@ -188,15 +199,12 @@ def put_editable(body: NetworksEditIn, project: Project = Depends(get_project),
             seg_angle=np.arctan2(ny_[se] - ny_[ss], nx_[se] - nx_[ss]),
         )
 
-    changed = False
-    if body.artery is not None and project.artery_network is not None:
-        project.artery_network = apply(project.artery_network, body.artery)
-        changed = True
-    if body.vein is not None and project.vein_network is not None:
-        project.vein_network = apply(project.vein_network, body.vein)
-        changed = True
-    if not changed:
+    if body.artery is None and body.vein is None:
         raise HTTPException(404, "project has no editable arterial/venous tree")
+    if body.artery is not None:
+        project.artery_network = apply(project.artery_network, body.artery)
+    if body.vein is not None:
+        project.vein_network = apply(project.vein_network, body.vein)
     store.clear_result(project)     # geometry changed -> stale result; also saves
     return project_info(project)
 
@@ -297,6 +305,34 @@ def grow_vessels(body: GrowRequest | None = None, project: Project = Depends(get
     store.clear_result(project)   # persist the tree; invalidate stale result
     return GrowInfo(id=project.id, n_segments=network.n_segments,
                     n_terminals=int(network.terminal_nodes.size))
+
+
+@router.post("/projects/{pid}/prune", response_model=PruneInfo)
+def prune_vessels(body: PruneRequest | None = None, project: Project = Depends(get_project),
+                  store: ProjectStore = Depends(get_store)) -> PruneInfo:
+    """Prune ``steps`` generations of terminal branches off the arterial *or* venous
+    tree — the inverse of :func:`grow_vessels`. Works on the same base (drawn strokes,
+    else the stored tree, else the default fractal tree) and stores the result."""
+    from ..core.geometry import prune_terminal_branches, venous_tree
+
+    req = body or PruneRequest()
+    if req.target not in ("artery", "vein"):
+        raise HTTPException(422, "target must be 'artery' or 'vein'")
+    prm = project.params.to_core()
+    if req.target == "artery":
+        polys, existing, default = project.arteries, project.artery_network, arterial_tree
+    else:
+        polys, existing, default = project.veins, project.vein_network, venous_tree
+    base = (polys and runner.network_from_strokes(polys)) or existing or default(prm)
+    network = prune_terminal_branches(base, req.steps)
+    if req.target == "artery":
+        project.artery_network, project.arteries = network, []
+    else:
+        project.vein_network, project.veins = network, []
+    store.clear_result(project)   # persist the tree; invalidate stale result
+    return PruneInfo(id=project.id, n_segments=network.n_segments,
+                     n_terminals=int(network.terminal_nodes.size),
+                     n_removed=base.n_segments - network.n_segments)
 
 
 @router.post("/projects/{pid}/adapt", response_model=AdaptInfo)
