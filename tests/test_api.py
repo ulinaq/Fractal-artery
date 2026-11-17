@@ -1342,9 +1342,8 @@ def test_explorer_3d_result_becomes_a_runnable_3d_project(client):
 def test_2d_only_features_say_so_on_a_3d_project(client):
     pid = _explorer_project(client, 3)["id"]
     for method, path, body in [
-        ("post", "tracer", {}), ("get", "oxygen?field=saturation", None),
-        ("put", "mask", {"regions": []}), ("post", "grow", {}),
-        ("get", "results/field/pressure", None),
+        ("put", "mask", {"regions": []}), ("get", "results/field/pressure", None),
+        ("get", "tracer", None), ("post", "uq", {"params": {"p_in": [9, 11]}}),
     ]:
         r = getattr(client, method)(f"/projects/{pid}/{path}",
                                     **({"json": body} if body is not None else {}))
@@ -1354,6 +1353,64 @@ def test_2d_only_features_say_so_on_a_3d_project(client):
     final = _wait_for_job(client, jid)
     assert final["state"] == "error"
     assert "2-D projects" in final["error"]
+
+
+def test_3d_project_flow_kinetics_and_oxygen(client):
+    """Tracer, kinetics, kinetic maps and oxygen run on a 3-D project and show in
+    the 3-D viewer (voxel fields + a per-frame tracer animation)."""
+    pid = _explorer_project(client, 3)["id"]
+    assert client.get(f"/projects/{pid}/view3d?field=tracer").status_code == 409  # no tracer
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    jid = client.post(f"/projects/{pid}/tracer", json={"n_frames": 12}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+
+    kin = client.get(f"/projects/{pid}/kinetics?model=1CM").json()
+    assert kin["Fp"] > 0
+    assert len(kin["measured"]) == 12
+    fp = client.get(f"/projects/{pid}/kinetics/maps?field=Fp").json()
+    assert len(fp["shape"]) == 3
+    ox = client.get(f"/projects/{pid}/oxygen?field=saturation&k=1").json()
+    assert len(ox["shape"]) == 3
+    # the uptake rate is scaled by the *organ* volume, not the bounding box, so the
+    # well-mixed estimate (~1 - e^-k, lower with heterogeneity) holds inside a mask
+    assert 0.25 < ox["oef"] < 0.75
+
+    anim = client.get(f"/projects/{pid}/view3d?field=tracer").json()["tracer"]
+    assert len(anim["frames"]) == 12
+    assert len(anim["frames"][0]) == len(anim["xyz"])
+    assert max(max(f) for f in anim["frames"]) > 0
+    for field in ("saturation", "Fp", "vp", "CBV", "MTT"):
+        v = client.get(f"/projects/{pid}/view3d?field={field}").json()
+        assert v["pressure"]["name"] == field
+        assert v["pressure"]["voxels"], field
+    assert 0 < client.get(f"/projects/{pid}/view3d?field=saturation&k=2").json()["oef"] < 1
+    assert client.get(f"/projects/{pid}/view3d?field=nope").status_code == 422
+
+
+@pytest.mark.parametrize("method", ["colonization", "cco"])
+def test_3d_project_grows_into_its_tissue(client, method):
+    pid = _explorer_project(client, 3)["id"]
+    before = client.get(f"/projects/{pid}/view3d").json()["segments"]
+    r = client.post(f"/projects/{pid}/grow",
+                    json={"target": "artery", "method": method, "n_points": 40})
+    assert r.status_code == 200, r.text
+    after = client.get(f"/projects/{pid}/view3d").json()
+    assert len(after["segments"]) > len(before)
+    zs = [z for sg in after["segments"] for z in (sg[2], sg[5])]
+    assert max(zs) - min(zs) > 0                       # still a volumetric tree
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+
+
+def test_3d_project_adapts_toward_murray(client):
+    pid = _explorer_project(client, 3)["id"]
+    r = client.post(f"/projects/{pid}/adapt", json={"n_iter": 20})
+    assert r.status_code == 200, r.text
+    info = r.json()
+    assert info["n_iter"] >= 1
+    assert abs(info["murray_final"] - 3) <= abs(info["murray_start"] - 3)
+    assert client.get(f"/projects/{pid}/document").json()["artery_network"]["node_z"]
 
 
 def test_3d_project_prune_morphometry_and_document_round_trip(client):

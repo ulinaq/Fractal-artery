@@ -31,6 +31,10 @@ class HybridResult3D:
     domain_limit: tuple                        # (xmin, xmax, ymin, ymax, zmin, zmax)
     flux: np.ndarray | None = None             # (nx, ny, nz) Darcy flux magnitude
     tof: np.ndarray | None = None              # (nx, ny, nz) time-of-flight
+    fx: np.ndarray | None = None               # interior x/y/z face fluxes (face_fluxes_3d)
+    fy: np.ndarray | None = None
+    fz: np.ndarray | None = None
+    sources: list | None = None                # per-terminal mollified (cells, weights)
 
 
 def _spread_coincident_3d(grid: Grid3D, cells: np.ndarray) -> np.ndarray:
@@ -103,9 +107,27 @@ def _snap_to_active_3d(grid: Grid3D, cells: np.ndarray) -> np.ndarray:
     return cells
 
 
+def darcy_coupling_3d(grid: Grid3D, art: Network, ven: Network, domain_limit,
+                      eps: float = 2.0, coupling: str = "auto"):
+    """Precompute the 3-D Darcy coupling once, for solves that keep the grid, the
+    terminal positions and ``eps`` fixed (e.g. radius adaptation) — pass it to
+    :func:`run_hybrid_3d` as ``darcy=``. Returns ``(kind, operator, field_response,
+    sources)`` with ``kind`` ``"monolithic"`` (sparse ``MonolithicDarcy``, no field
+    response) or ``"schur"`` (dense terminal response)."""
+    from .pipeline import use_monolithic
+
+    cells = _terminal_cells_3d(grid, art, ven, domain_limit)
+    if use_monolithic(coupling, grid.n_cells, len(cells)):
+        op, sources = darcy3d.coupling_operator_3d(grid, cells, eps)
+        return "monolithic", op, None, sources
+    response, field_response, sources = darcy3d.terminal_response_3d(grid, cells, eps)
+    return "schur", response, field_response, sources
+
+
 def run_hybrid_3d(prm: Parameters, grid: Grid3D, art: Network, ven: Network,
                   domain_limit, eps: float = 2.0,
-                  art_inlets=None, ven_outlets=None, coupling: str = "auto") -> HybridResult3D:
+                  art_inlets=None, ven_outlets=None, coupling: str = "auto",
+                  darcy=None) -> HybridResult3D:
     """Couple 3-D arterial/venous trees to the 3-D Darcy bed and solve.
 
     ``art``/``ven`` are 3-D networks (``node_z`` set, e.g. from
@@ -113,24 +135,21 @@ def run_hybrid_3d(prm: Parameters, grid: Grid3D, art: Network, ven: Network,
     window ``(xmin, xmax, ymin, ymax, zmin, zmax)`` the grid maps to. ``prm``
     supplies ``p_in``/``p_out`` and the (scalar) viscosity ``mu``. ``coupling`` is as
     in :func:`perfusion.core.pipeline.run_hybrid` — the sparse ``"monolithic"`` solve
-    is what makes fine 3-D grids with many terminals fit in memory.
+    is what makes fine 3-D grids with many terminals fit in memory. ``darcy`` reuses a
+    :func:`darcy_coupling_3d` computed for the same grid / terminals / ``eps``.
     """
     if art_inlets is not None:
         art = replace(art, inlet_nodes=np.asarray(art_inlets, dtype=int))
     if ven_outlets is not None:
         ven = replace(ven, inlet_nodes=np.asarray(ven_outlets, dtype=int))
 
-    from .pipeline import use_monolithic
-
-    terminal_cells = _terminal_cells_3d(grid, art, ven, domain_limit)
-    if use_monolithic(coupling, grid.n_cells, len(terminal_cells)):
-        coupling_op, sources = darcy3d.coupling_operator_3d(grid, terminal_cells, eps)
-        sol = network.solve_linear(art, ven, coupling_op, prm.p_in, prm.p_out, prm.mu)
+    if darcy is None:
+        darcy = darcy_coupling_3d(grid, art, ven, domain_limit, eps, coupling)
+    kind, operator, field_response, sources = darcy
+    sol = network.solve_linear(art, ven, operator, prm.p_in, prm.p_out, prm.mu)
+    if kind == "monolithic":
         pressure = np.asarray(sol.darcy_pressure)
     else:
-        response, field_response, sources = darcy3d.terminal_response_3d(
-            grid, terminal_cells, eps)
-        sol = network.solve_linear(art, ven, response, prm.p_in, prm.p_out, prm.mu)
         pressure = reconstruct_field(field_response, sol.terminal_flux, balance=True)
     pressure = pressure.reshape(grid.nx, grid.ny, grid.nz, order="F")
     # the same post-processing as 2-D: Darcy flux magnitude + time-of-flight
@@ -139,4 +158,4 @@ def run_hybrid_3d(prm: Parameters, grid: Grid3D, art: Network, ven: Network,
     tof = time_of_flight_3d(grid, fx, fy, fz, sources, sol.terminal_flux)
     return HybridResult3D(art=art, ven=ven, grid=grid, solution=sol,
                           pressure=pressure, domain_limit=tuple(domain_limit),
-                          flux=flux, tof=tof)
+                          flux=flux, tof=tof, fx=fx, fy=fy, fz=fz, sources=sources)
