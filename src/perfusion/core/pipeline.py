@@ -121,6 +121,26 @@ def _spread_coincident(grid: Grid, cells: np.ndarray) -> np.ndarray:
     return cells
 
 
+def darcy_response_for(prm: Parameters, grid: Grid,
+                       domain_limit: tuple[float, float, float, float] = (-70, 70, 0, 160),
+                       art: Network | None = None, ven: Network | None = None,
+                       eps: float = 4.0):
+    """``(art, ven, response)`` for reusing the Darcy factorisation across solves.
+
+    Builds the trees (from ``prm`` unless given) and the terminal response once; pass
+    ``art``/``ven``/``darcy_response=response`` to :func:`run_hybrid` in a loop that
+    keeps the grid (incl. permeability / mask), the terminal positions and ``eps``
+    fixed — e.g. sweeps over ``p_in``, ``p_out``, ``mu`` or hematocrit. Results are
+    identical to recomputing; only the dominant LU + back-substitution is skipped.
+    """
+    if art is None:
+        art = geometry.arterial_tree(prm)
+    if ven is None:
+        ven = geometry.venous_tree(prm)
+    cells = _terminal_cells(grid, art, ven, domain_limit)
+    return art, ven, darcy.terminal_response(grid, cells, eps)
+
+
 def run_hybrid(prm: Parameters, grid: Grid,
                domain_limit: tuple[float, float, float, float] = (-70, 70, 0, 160),
                eps: float = 4.0, nonlinear: bool = False,

@@ -29,7 +29,8 @@ _LX, _LY = _DOMAIN[1] - _DOMAIN[0], _DOMAIN[3] - _DOMAIN[2]
 
 def simulate(p_in: float = 10.0, p_out: float = 0.0, nx: int = 120, ny: int = 140,
              r_min_frac: float = 0.15, nonlinear: bool = False,
-             max_iter: int = 100, model: str = "hybrid", rho_c: float = 0.0) -> dict:
+             max_iter: int = 100, model: str = "hybrid", rho_c: float = 0.0,
+             _reuse=None) -> dict:
     """Run a perfusion simulation on fractal trees; return a JSON summary.
 
     ``model="hybrid"`` (default) couples arterial/venous trees to a Darcy capillary
@@ -51,8 +52,9 @@ def simulate(p_in: float = 10.0, p_out: float = 0.0, nx: int = 120, ny: int = 14
         return {"model": "direct", "arterial_inflow": perfusion, "venous_outflow": perfusion,
                 "n_connections": len(conns)}
     grid = Grid(nx=nx, ny=ny, lx=_LX, ly=_LY)
+    art, ven, resp = _reuse if _reuse is not None else (None, None, None)
     result = run_hybrid(prm, grid, domain_limit=_DOMAIN, nonlinear=nonlinear,
-                        max_iter=int(max_iter))
+                        max_iter=int(max_iter), art=art, ven=ven, darcy_response=resp)
     summary = results_summary(result)
     summary["grid"] = {"nx": nx, "ny": ny}
     summary["model"] = "hybrid"
@@ -71,9 +73,18 @@ def sweep(param: str, values, **base) -> dict:
     """
     if param not in _SWEEPABLE:
         raise ValueError(f"param must be one of {_SWEEPABLE}")
+    reuse = None
+    if param != "r_min_frac" and base.get("model", "hybrid") == "hybrid":
+        # p_in / p_out leave grid and terminals unchanged: factorise the Darcy bed once
+        from .core.pipeline import darcy_response_for
+
+        nx = int(np.clip(base.get("nx", 120), 20, 250))
+        ny = int(np.clip(base.get("ny", 140), 20, 250))
+        prm0 = Parameters(r_min_frac=base.get("r_min_frac", 0.15))
+        reuse = darcy_response_for(prm0, Grid(nx=nx, ny=ny, lx=_LX, ly=_LY), _DOMAIN)
     points = []
     for v in values:
-        s = simulate(**{**base, param: float(v)})
+        s = simulate(**{**base, param: float(v)}, _reuse=reuse)
         points.append({"value": float(v),
                        "arterial_inflow": s["arterial_inflow"],
                        "flux_mean": s["flux_mean"], "tof_mean": s["tof_mean"]})

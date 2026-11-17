@@ -17,7 +17,6 @@ from scipy.optimize import minimize_scalar
 from .core.darcy import Grid
 from .core.geometry import Network
 from .core.parameters import Parameters
-from .core.pipeline import run_hybrid
 
 _PARAM_FIELDS = ("p_in", "p_out", "mu", "r_min_frac")
 
@@ -57,8 +56,11 @@ def calibrate(target: float, param: str, grid: Grid, bounds: tuple[float, float]
     the recovered value, the achieved QoI and the number of forward solves.
     ``trees(prm) -> (art, ven)`` optionally rebuilds the vasculature per evaluation.
     """
+    from .uq import _sample_solver
+
     base = dict(base or {})
     n = {"i": 0}
+    solver = _sample_solver([param], grid, domain_limit, art, ven, trees)
 
     def evaluate(x: float) -> float:
         n["i"] += 1
@@ -70,9 +72,8 @@ def calibrate(target: float, param: str, grid: Grid, bounds: tuple[float, float]
             kw[param] = float(x)
         else:
             raise ValueError(f"unknown param {param!r}")
-        prm = Parameters(**kw)
-        a, v = trees(prm) if trees else (art, ven)       # e.g. r_min_frac rebuilds trees
-        result = run_hybrid(prm, g, domain_limit=domain_limit, art=a, ven=v)
+        # reuses the Darcy factorisation unless param moves terminals / changes K
+        result = solver(Parameters(**kw), g)
         return _quantity(result, qoi)
 
     res = minimize_scalar(lambda x: (evaluate(x) - target) ** 2, bounds=bounds,
