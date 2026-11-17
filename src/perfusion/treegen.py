@@ -25,16 +25,25 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from . import growth
+from . import growth, organs
 from .core.darcy import Grid
 from .core.geometry import Network, grow_tree, grow_tree_3d, rasterize_mask
 from .core.parameters import Parameters, bifurcation_geometry
 
-DOMAIN_2D = (-70.0, 70.0, 0.0, 160.0)
+DOMAIN_2D = (-70.0, 70.0, 0.0, 160.0)          # at extent 1
 DOMAIN_3D = (0.0, 60.0, 0.0, 60.0, 0.0, 60.0)
-SHAPES_2D = ("rectangle", "ellipse", "kidney", "wedge", "custom")
-SHAPES_3D = ("box", "ellipsoid", "cylinder", "hemisphere")
+SHAPES_2D = (*organs.SHAPES_2D, "custom")
+SHAPES_3D = tuple(organs.SHAPES_3D)
 FILLS = ("none", "colonization", "cco")
+
+
+def domain_for(dim: int, extent: float = 1.0) -> tuple:
+    """The physical window, scaled by ``extent`` (bigger objects): the 2-D window
+    grows about its bottom-centre, the 3-D box from its origin corner."""
+    e = float(extent)
+    if dim == 3:
+        return tuple(v * e for v in DOMAIN_3D)
+    return (DOMAIN_2D[0] * e, DOMAIN_2D[1] * e, 0.0, DOMAIN_2D[3] * e)
 
 
 @dataclass
@@ -46,7 +55,6 @@ class TreeSpec:
     direction: tuple = (0.0, 0.0, 1.0)    # 3-D trunk direction
     radius: float = 2.0                   # trunk radius
     gamma: float = 1.4                    # branching asymmetry (>= 1; 1 = symmetric)
-    branch_angle: float = 35.0            # 3-D half-angle between children, degrees
 
 
 @dataclass
@@ -57,12 +65,15 @@ class GenSpec:
     shape: str = "ellipse"
     polygon: list | None = None           # custom 2-D tissue outline (domain coords)
     size: float = 0.85                    # preset shape scale (fraction of the domain)
+    extent: float = 1.0                   # domain scale: >1 explores a bigger object
     artery: TreeSpec = field(default_factory=lambda: TreeSpec((0.0, 8.0), 90.0))
     vein: TreeSpec = field(default_factory=lambda: TreeSpec((0.0, 152.0), -90.0, radius=2.4,
                                                             gamma=1.2))
     generations: int = 4                  # fractal levels of branching
     length_to_radius: float = 10.0
     exponent: float = 2.8                 # Murray bifurcation exponent
+    twist: float = 90.0                   # 3-D: rotation of each branching plane (deg)
+    jitter: float = 0.3                   # 3-D: random variation of angles/lengths (0..1)
     fill: str = "colonization"            # "none" | "colonization" | "cco"
     fill_target: str = "both"             # "both" | "artery" | "vein"
     fill_steps: int = 40                  # colonisation iterations ("growth steps")
@@ -77,61 +88,36 @@ class GenSpec:
 
 
 # ── tissue shapes ─────────────────────────────────────────────────────────────
-def shape_polygon(shape: str, size: float = 0.85, domain=DOMAIN_2D, n: int = 24) -> list:
-    """A preset 2-D tissue outline (closed polygon, domain coordinates). ``n``
-    vertices for curved shapes — few enough to drag as handles in the explorer."""
-    x0, x1, y0, y1 = domain
-    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
-    ax, ay = size * (x1 - x0) / 2, size * (y1 - y0) / 2
-    t = np.linspace(0, 2 * np.pi, n, endpoint=False)
-    if shape == "rectangle":
-        pts = [(-1, -1), (1, -1), (1, 1), (-1, 1)]
-        return [[cx + ax * u, cy + ay * v] for u, v in pts]
-    if shape == "wedge":                     # a fan opening upward from the base
-        pts = [(-0.25, -1), (0.25, -1), (1, 1), (-1, 1)]
-        return [[cx + ax * u, cy + ay * v] for u, v in pts]
-    if shape == "kidney":                    # an ellipse with a hilum notch on the left
-        r = 1 - 0.32 * np.exp(-((np.angle(np.exp(1j * (t - np.pi)))) ** 2) / 0.18)
-        return [[cx + ax * r[i] * np.cos(t[i]), cy + ay * r[i] * np.sin(t[i])] for i in range(n)]
-    if shape == "ellipse":
-        return [[cx + ax * np.cos(a), cy + ay * np.sin(a)] for a in t]
-    raise ValueError(f"unknown 2-D shape {shape!r}; choose from {SHAPES_2D}")
+def shape_polygon(shape: str, size: float = 0.85, domain=DOMAIN_2D, seed: int = 0) -> list:
+    """A preset 2-D tissue outline (closed polygon, domain coordinates) from the
+    organ library (:mod:`perfusion.organs`)."""
+    return organs.polygon(shape, domain, size, seed=seed)
 
 
 def shape_mask_3d(shape: str, nx: int, ny: int, nz: int, size: float = 0.85,
-                  domain=DOMAIN_3D) -> np.ndarray:
+                  domain=DOMAIN_3D, seed: int = 0) -> np.ndarray:
     """A preset 3-D tissue mask on the cell centres of an ``(nx, ny, nz)`` grid."""
-    lo = np.asarray(domain[0::2], float)
-    hi = np.asarray(domain[1::2], float)
-    c, half = (lo + hi) / 2, size * (hi - lo) / 2
-    axes = [lo[k] + (np.arange(m) + 0.5) * (hi[k] - lo[k]) / m for k, m in enumerate((nx, ny, nz))]
-    X, Y, Z = np.meshgrid(*axes, indexing="ij")
-    u, v, w = (X - c[0]) / half[0], (Y - c[1]) / half[1], (Z - c[2]) / half[2]
-    if shape == "box":
-        return (np.abs(u) <= 1) & (np.abs(v) <= 1) & (np.abs(w) <= 1)
-    if shape == "ellipsoid":
-        return u**2 + v**2 + w**2 <= 1
-    if shape == "cylinder":                  # axis along z
-        return (u**2 + v**2 <= 1) & (np.abs(w) <= 1)
-    if shape == "hemisphere":                # dome sitting on the bottom of the box
-        wz = (Z - lo[2]) / (2 * half[2])
-        return u**2 + v**2 + wz**2 <= 1
-    raise ValueError(f"unknown 3-D shape {shape!r}; choose from {SHAPES_3D}")
+    return organs.mask_3d(shape, nx, ny, nz, domain, size, seed=seed)
 
 
 def tissue(spec: GenSpec):
     """``(mask, domain, outline)``: the tissue mask on the Darcy grid, the domain
     window, and the 2-D outline polygon (``None`` in 3-D)."""
+    domain = domain_for(spec.dim, spec.extent)
     if spec.dim == 3:
         n = int(spec.nx)
-        return shape_mask_3d(spec.shape, n, n, n, spec.size), DOMAIN_3D, None
-    poly = spec.polygon if spec.shape == "custom" else shape_polygon(spec.shape, spec.size)
+        mask = shape_mask_3d(spec.shape, n, n, n, spec.size, domain, seed=spec.seed)
+        if not mask.any():
+            raise ValueError("the tissue shape covers no grid cells — raise the resolution")
+        return mask, domain, None
+    poly = (spec.polygon if spec.shape == "custom"
+            else shape_polygon(spec.shape, spec.size, domain, seed=spec.seed))
     if not poly or len(poly) < 3:
         raise ValueError("a custom tissue shape needs a polygon with at least 3 points")
-    mask = rasterize_mask(spec.nx, spec.ny, DOMAIN_2D, [poly])
+    mask = rasterize_mask(spec.nx, spec.ny, domain, [poly])
     if not mask.any():
         raise ValueError("the tissue shape covers no grid cells")
-    return mask, DOMAIN_2D, [list(map(float, p)) for p in poly]
+    return mask, domain, [list(map(float, p)) for p in poly]
 
 
 # ── trees ─────────────────────────────────────────────────────────────────────
@@ -144,12 +130,12 @@ def _branching_tables(gamma: float, exponent: float, generations: int):
 def fractal_tree(t: TreeSpec, spec: GenSpec, *, venous: bool) -> Network:
     """The fractal skeleton: ``spec.generations`` levels of branching from ``t.root``."""
     g = int(spec.generations)
-    if spec.dim == 3:
-        ratio = 2.0 ** (-1.0 / spec.exponent)            # symmetric Murray split
+    if spec.dim == 3:      # truly 3-D: twisting branch planes, Murray-law asymmetry
         return grow_tree_3d(tuple(t.root), tuple(t.direction), root_radius=t.radius,
                             min_radius=0.0, length_to_radius=spec.length_to_radius,
-                            theta=np.radians(t.branch_angle), ratio=ratio,
-                            max_generations=g, mirror=venous)
+                            max_generations=g, mirror=venous, gamma=t.gamma,
+                            exponent=spec.exponent, twist=np.radians(spec.twist),
+                            jitter=spec.jitter, seed=spec.seed + (7 if venous else 0))
     angles, ratios = _branching_tables(t.gamma, spec.exponent, g)
     return grow_tree(tuple(t.root[:2]), np.radians(t.angle), t.radius, 0.0,
                      spec.length_to_radius, angles, ratios,
@@ -213,3 +199,19 @@ def solve(spec: GenSpec, art: Network, ven: Network, mask, domain,
     grid = Grid(nx=spec.nx, ny=spec.ny, lx=domain[1] - domain[0], ly=domain[3] - domain[2],
                 mask=mask)
     return run_hybrid(prm, grid, domain, art=art, ven=ven)
+
+
+def homogeneity(res) -> dict:
+    """Perfusion-homogeneity measures of a solved 2-D or 3-D result (Paper D):
+    flux range/std/L2/mean and time-of-flight std/max over the active tissue."""
+    mask = np.asarray(res.grid.mask, bool)
+    v = res.flux[mask]
+    v = v[np.isfinite(v)]
+    tof = res.tof[mask]
+    tof = tof[np.isfinite(tof) & (tof > 0)]
+    out = {"flux_range": float(v.max() - v.min()) if v.size else float("inf"),
+           "flux_std": float(v.std()) if v.size else float("inf"),
+           "flux_l2": float(np.linalg.norm(v)), "flux_mean": float(v.mean()) if v.size else 0.0,
+           "tof_std": float(tof.std()) if tof.size else float("inf"),
+           "tof_max": float(tof.max()) if tof.size else float("inf")}
+    return out

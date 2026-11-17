@@ -5,7 +5,9 @@
 // Tissue (edit the organ/lesion/hotspot polygons vertex by vertex — tissue.js)
 // and Result. This module owns project lifecycle, history, modes and wiring.
 
-import { canvas, W, H, DOMAIN, GRID_L, api, state, status, $, numOf } from "./core.js";
+import {
+  canvas, DOMAIN, GRID_L, api, state, status, $, numOf, onViewChange, setDomain, vp,
+} from "./core.js";
 import { redraw } from "./render.js";
 import {
   adoptLegacyIO, clearEditDirty, clearKind, deleteSelectedNode, deselect, editPointerDown,
@@ -87,7 +89,7 @@ function historyRedo() {
 // Actions that require a project (disabled until one exists, or while busy).
 const NEEDS_PROJECT = [
   "btn-save-file", "btn-save-vessels", "btn-edit-revert", "btn-clear-kind", "img-file",
-  "btn-save-mask", "btn-tissue-revert", "btn-tissue-close", "btn-clear-tissue",
+  "btn-save-mask", "btn-tissue-revert", "btn-tissue-close", "btn-clear-tissue", "btn-organ",
   "btn-grow", "btn-prune", "btn-adapt", "btn-run", "btn-flow",
 ];
 
@@ -131,6 +133,8 @@ function resetGeometry() {
 }
 
 async function newProject() {
+  const w = Math.max(10, numOf("dom-w")), h = Math.max(10, numOf("dom-h"));
+  setDomain(0, w, 0, h);
   const body = {
     name: $("proj-name").value || "workspace",
     params: { p_in: numOf("p_in"), p_out: numOf("p_out"),
@@ -239,11 +243,8 @@ async function uploadImage(file) {
 }
 
 // ── canvas pointer routing ────────────────────────────────────────────────────
-const canvasXY = (e) => {
-  const rect = canvas.getBoundingClientRect();
-  return [(e.clientX - rect.left) * (W / rect.width),
-          (e.clientY - rect.top) * (H / rect.height)];
-};
+const canvasXY = (e) => vp.eventXY(e);
+onViewChange(() => redraw());          // zoom / pan / resize
 
 canvas.addEventListener("pointerdown", (e) => {
   if (state.mode === "result" || state.busy || e.button !== 0) return;
@@ -472,6 +473,41 @@ $("flow-scrub").addEventListener("input", (e) => {
   pauseFlow(); state.flow.idx = Number(e.target.value); syncFlowUI(); redraw();
 });
 
+// domain size / grid resolution (for New projects): ny follows the domain aspect
+function syncGridInfo() {
+  const w = numOf("dom-w"), h = numOf("dom-h"), nx = numOf("nx"), ny = numOf("ny");
+  $("grid-info").textContent = `${nx} × ${ny} = ${(nx * ny).toLocaleString()} cells · cell ≈ `
+    + `${(w / nx).toFixed(2)} × ${(h / ny).toFixed(2)} units`;
+}
+const keepAspect = () => { $("ny").value = Math.max(10, Math.round(numOf("nx") * numOf("dom-h") / numOf("dom-w"))); syncGridInfo(); };
+$("dom-w").addEventListener("change", keepAspect);
+$("dom-h").addEventListener("change", keepAspect);
+$("nx").addEventListener("change", keepAspect);
+$("ny").addEventListener("change", syncGridInfo);
+syncGridInfo();
+
+// organ presets for the tissue: an editable outline from the organ library
+(async function loadOrganPresets() {
+  try {
+    const sh = await api("GET", "/shapes");
+    $("organ-preset").innerHTML = Object.entries(sh["2d"])
+      .map(([v, t]) => `<option value="${v}">${t}</option>`).join("");
+    $("organ-preset").value = "kidney";
+  } catch { $("organ-preset").innerHTML = "<option>unavailable</option>"; }
+})();
+$("btn-organ").addEventListener("click", guarded(async () => {
+  requireProject();
+  if (state.regions.length && !confirm("Replace the current organ outline with this preset?")) return;
+  const r = await api("POST", "/shapes/polygon", {
+    name: $("organ-preset").value, size: 0.9,
+    domain: [DOMAIN.xmin, DOMAIN.xmax, DOMAIN.ymin, DOMAIN.ymax],
+  });
+  state.regions = [r.polygon];
+  $("tissue-target").value = "organ"; syncTargetRows();
+  markTissueDirty(); recordHistory(); syncTissuePanel(); redraw();
+  status(`${$("organ-preset").selectedOptions[0].text} outline inserted — drag its points to adjust, then Save tissue`, "ok");
+}));
+
 // warn before closing the tab with unsaved geometry
 window.addEventListener("beforeunload", (e) => {
   if ($("btn-save-vessels").textContent.endsWith("•") || $("btn-save-mask").textContent.endsWith("•")) {
@@ -491,6 +527,10 @@ function syncParamInputs(info) {
   if (g) {
     if (g.nx != null) $("nx").value = g.nx;
     if (g.ny != null) $("ny").value = g.ny;
+    const dl = g.domain_limit || [0, g.lx || 100, 0, g.ly || 120];
+    setDomain(dl[0], dl[1], dl[2], dl[3]);              // this project's physical window
+    $("dom-w").value = +(dl[1] - dl[0]).toFixed(2); $("dom-h").value = +(dl[3] - dl[2]).toFixed(2);
+    syncGridInfo();
     $("perm_y").value = g.permeability_y != null ? g.permeability_y / (g.permeability || 1) : 1;
   }
 }

@@ -2,6 +2,7 @@
 
 import time
 
+import numpy as np
 import pytest
 
 pytest.importorskip("fastapi")
@@ -1132,6 +1133,20 @@ def test_explore_grow_shapes_fills_and_dims(client, dim, shape, fill):
         assert d["field"]["shape"] == [40, 46]
     else:
         assert d["field"]["voxels"]
+        assert len(d["field"]["voxels"][0]) == 4
+
+
+@pytest.mark.parametrize("field", ["pressure", "flux", "tof"])
+def test_explore_grow_3d_computes_flux_tof_and_objective(client, field):
+    body = {"dim": 3, "shape": "ellipsoid", "fill": "none", "generations": 3, "nx": 16,
+            "field": field, "kind": "tof_std"}
+    d = client.post("/explore/grow", json=body).json()
+    assert d["field"]["name"] == field
+    vals = [v[3] for v in d["field"]["voxels"]]
+    assert all(np.isfinite(vals))
+    assert d["field"]["min"] <= d["field"]["max"]
+    assert d["kind"] == "tof_std"
+    assert np.isfinite(d["objective"])
 
 
 def test_explore_grow_generations_add_branches_and_roots_move(client):
@@ -1154,3 +1169,80 @@ def test_explore_grow_custom_polygon_and_fill_steps(client):
     assert few["stats"]["artery"]["segments"] < many["stats"]["artery"]["segments"]
     bad = client.post("/explore/grow", json={"shape": "custom", "polygon": [[0, 0], [1, 1]]})
     assert bad.status_code == 422
+
+
+def test_shapes_endpoints(client):
+    s = client.get("/shapes").json()
+    assert {"heart", "kidney", "brain", "liver", "lung"} <= set(s["2d"])
+    assert {"heart", "kidney", "brain", "liver", "lung"} <= set(s["3d"])
+    r = client.post("/shapes/polygon", json={"name": "heart", "domain": [0, 100, 0, 120]})
+    assert r.status_code == 200
+    poly = np.array(r.json()["polygon"])
+    assert poly[:, 0].min() >= 0
+    assert poly[:, 0].max() <= 100
+    assert client.post("/shapes/polygon", json={"name": "nope"}).status_code == 422
+    assert client.post("/shapes/polygon",
+                       json={"name": "heart", "domain": [5, 1, 0, 1]}).status_code == 422
+
+
+def test_explore_grow_extent_and_organs(client):
+    d = client.post("/explore/grow", json={"shape": "brain", "extent": 2.0, "fill": "none",
+                                           "solve": False}).json()
+    assert d["domain"] == [-140.0, 140.0, 0.0, 320.0]
+    # the brain's anatomical arterial entry (circle of Willis, below), scaled ×2
+    from perfusion import organs
+    anat = organs.roots("brain", 2, d["domain"])
+    assert d["roots"]["artery"] == pytest.approx(anat["artery"]["root"])
+    assert d["aims"]["artery"] == pytest.approx(90.0)
+    d3 = client.post("/explore/grow", json={"dim": 3, "shape": "heart", "nx": 14,
+                                            "twist": 70, "jitter": 0.5, "fill": "none",
+                                            "generations": 3}).json()
+    assert d3["inflow"] > 0
+    zs = [s[2] for s in d3["segments"]] + [s[5] for s in d3["segments"]]
+    xs = [s[0] for s in d3["segments"]] + [s[3] for s in d3["segments"]]
+    assert np.ptp(xs) > 1                                   # not confined to a plane
+    assert np.ptp(zs) > 1
+
+
+def test_explore_grow_large_domain_with_scaled_trees(client):
+    """The explorer opens at ×4 and can scale to ×16: scaled roots/calibre are valid."""
+    for e in (4, 16):
+        body = {"extent": e, "fill": "colonization", "nx": 50, "ny": 57,
+                "artery": {"root": [0, 8 * e], "radius": 2 * e},
+                "vein": {"root": [0, 152 * e], "angle": -90, "radius": 2.4 * e}}
+        r = client.post("/explore/grow", json=body)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["domain"] == [-70 * e, 70 * e, 0, 160 * e]
+        assert d["inflow"] > 0
+
+
+@pytest.mark.parametrize("dim", [2, 3])
+def test_explore_grow_places_roots_where_the_organ_attaches(client, dim):
+    """Picking an organ puts the artery/vein where they attach anatomically, aimed
+    into the tissue; a root the user places is respected."""
+    from perfusion import organs
+    shapes = ["kidney", "heart", "liver", "lung", "brain"]
+    roots = {}
+    for shape in shapes:
+        body = {"dim": dim, "shape": shape, "fill": "none", "solve": False, "nx": 16}
+        d = client.post("/explore/grow", json=body).json()
+        anat = organs.roots(shape, dim, d["domain"])
+        assert d["roots"]["artery"] == pytest.approx(anat["artery"]["root"])
+        assert d["roots"]["vein"] == pytest.approx(anat["vein"]["root"])
+        assert d["segments"][0][:dim] == pytest.approx(anat["artery"]["root"], abs=0.01)
+        roots[shape] = tuple(np.round(d["roots"]["artery"], 3))
+    assert len(set(roots.values())) == len(shapes)          # each organ differs
+    # kidney: artery and vein both at the hilum, pointing into the organ (+x)
+    k = client.post("/explore/grow", json={"dim": dim, "shape": "kidney", "fill": "none",
+                                           "solve": False, "nx": 16}).json()
+    if dim == 2:
+        assert k["aims"]["artery"] == pytest.approx(0.0)
+    else:
+        assert k["aims"]["artery"] == pytest.approx([1.0, 0.0, 0.0])
+    # a placed root wins over the anatomical default
+    mine = [1.0, 2.0] if dim == 2 else [10.0, 11.0, 12.0]
+    d = client.post("/explore/grow", json={"dim": dim, "shape": "kidney", "fill": "none",
+                                           "solve": False, "nx": 16,
+                                           "artery": {"root": mine}}).json()
+    assert d["roots"]["artery"] == mine

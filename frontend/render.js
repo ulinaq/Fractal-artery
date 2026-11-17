@@ -2,11 +2,12 @@
 // the vessel-network overlay, edit handles, the direct-connection view and the
 // drawing/tissue/IO overlays. Depends only on core.js + palette.js (no feature
 // logic), so the rest of the app just calls redraw().
-import { ctx, W, H, toCanvas, getCss, state, $, editKinds } from "./core.js";
+import { ctx, DOMAIN, W, H, toCanvas, getCss, state, $, editKinds, vp, zoomPx } from "./core.js";
 import { VIRIDIS, viridis } from "./palette.js";
 
 export function redraw() {
-  ctx.clearRect(0, 0, W, H);
+  vp.begin();                    // HiDPI transform + clear
+  drawBackdrop();
   if (state.mode !== "result") $("colorbar").hidden = true;   // fields only show in Result
   if (state.mode === "result" && state.resultModel === "direct") {
     if (state.flow.active && state.tracer && state.tracer.network) {
@@ -27,6 +28,17 @@ export function redraw() {
   drawTissueStroke();
   drawIO();
 }
+
+// the physical domain as a white sheet on a soft backdrop, so zoom/pan reads clearly
+function drawBackdrop() {
+  ctx.fillStyle = "#f1f5f9"; ctx.fillRect(0, 0, W, H);
+  const [x0, y0] = toCanvas(DOMAIN.xmin, DOMAIN.ymax), [x1, y1] = toCanvas(DOMAIN.xmax, DOMAIN.ymin);
+  ctx.fillStyle = "#fff"; ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+  ctx.strokeStyle = "#cbd5e1"; ctx.lineWidth = 1; ctx.strokeRect(x0 + 0.5, y0 + 0.5, x1 - x0, y1 - y0);
+}
+
+// radius (domain units) → on-screen line width, thickening as you zoom in
+const rw = (r, k = 1, min = 1) => Math.max(min, r * k * zoomPx());
 
 // tracer frames are addressed by index, so the flow animation reaches in directly
 export function drawTracerFrame(idx) {
@@ -78,7 +90,7 @@ function drawDirect() {
       const [ax, ay] = toCanvas(x0, y0), [bx, by] = toCanvas(x1, y1);
       const t = Math.min(1, f / fmax);
       ctx.globalAlpha = 0.4 + 0.6 * t; ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(1, 5 * t); ctx.lineCap = "round";
+      ctx.lineWidth = Math.max(1, 5 * t * Math.sqrt(zoomPx())); ctx.lineCap = "round";
       ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
     }
   };
@@ -216,8 +228,9 @@ function paintHeatmap(data, nx, ny, vmin, vmax) {
     }
   }
   octx.putImageData(img, 0, 0);
-  ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(off, 0, 0, W, H);
+  const [x0, y0] = toCanvas(DOMAIN.xmin, DOMAIN.ymax), [x1, y1] = toCanvas(DOMAIN.xmax, DOMAIN.ymin);
+  ctx.imageSmoothingEnabled = vp.zoom < 3;            // zoomed in: show the grid cells
+  ctx.drawImage(off, x0, y0, x1 - x0, y1 - y0);
 }
 
 function drawField() {
@@ -239,7 +252,7 @@ function drawEditNetwork() {
     for (let s = 0; s < n.seg_start.length; s++) {
       const [x0, y0] = toCanvas(n.node_x[n.seg_start[s]], n.node_y[n.seg_start[s]]);
       const [x1, y1] = toCanvas(n.node_x[n.seg_end[s]], n.node_y[n.seg_end[s]]);
-      ctx.lineWidth = Math.max(1.2, n.seg_radius[s] * 1.0);
+      ctx.lineWidth = rw(n.seg_radius[s], 1, 1.2);
       ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
     }
     ctx.globalAlpha = 1;
@@ -251,9 +264,9 @@ function drawEditNetwork() {
       const [x1, y1] = toCanvas(n.node_x[n.seg_end[s]], n.node_y[n.seg_end[s]]);
       ctx.strokeStyle = getCss("--accent");
       if (segSel) {
-        ctx.globalAlpha = 0.25; ctx.lineWidth = Math.max(1.2, n.seg_radius[s]) + 10;
+        ctx.globalAlpha = 0.25; ctx.lineWidth = rw(n.seg_radius[s], 1, 1.2) + 10;
         ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-        ctx.globalAlpha = 1; ctx.lineWidth = Math.max(2, n.seg_radius[s]);
+        ctx.globalAlpha = 1; ctx.lineWidth = rw(n.seg_radius[s], 1, 2);
         ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
       } else {
         ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
@@ -286,7 +299,7 @@ function drawNetworkOverlay() {
   for (const s of state.network.segments) {
     const [x0, y0] = toCanvas(s.x0, s.y0), [x1, y1] = toCanvas(s.x1, s.y1);
     ctx.strokeStyle = s.kind === "vein" ? "rgba(191,219,254,.95)" : "rgba(254,202,202,.95)";
-    ctx.lineWidth = Math.max(0.6, s.r * 0.5);
+    ctx.lineWidth = rw(s.r, 0.5, 0.6);
     ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
   }
 }

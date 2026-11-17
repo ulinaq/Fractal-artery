@@ -178,6 +178,15 @@ gamma-variate bolus delayed by its arrival.
 `A t = 1` on the net-inflow connectivity, `t` = time for blood to reach each cell.
 **Flux magnitude** `|v| = √(fx² + fy²)` at cell centres.
 
+**In 3-D** the same post-processing runs on the voxel bed (`run_hybrid_3d` returns
+`pressure`, `flux`, `tof`): `darcy3d.face_fluxes_3d` gives interior-face fluxes
+`T (p_owner − p_neighbour)` per axis — **zero on faces touching an inactive cell**, so
+nothing leaks across an organ-shaped mask — `flux_magnitude_3d` averages them to cell
+centres `|v| = √(qx² + qy² + qz²)`, and `timeofflight.time_of_flight_3d` solves the same
+upwind system on `darcy3d.upwind_operator_3d` with pore volume `V = hx·hy·hz·φ`
+(`Grid3D.porosity`). Ordering check: TOF is shortest at the arterial injection cells,
+longer at the venous drains, longest in stagnant tissue.
+
 **Tracer transport** (`transport`, θ-rule, Eq. 5.7) — advection of a contrast bolus,
 diffusion neglected:
 
@@ -302,6 +311,32 @@ r_parent^γ = Σ r_child^γ           (γ = exponent, default 3)
 **Data-constrained growth**: attraction points sampled with probability ∝ a target
 density map (`sample_points_in_mask(density=)`); **obstacles** deactivate no-grow cells.
 
+**Dimension-agnostic.** Sampling, colonisation and CCO work on 2-D *or* 3-D trees: the
+dimension follows the base network (`node_z`) and the mask (`(nx, ny)` with a 4-value
+window, or `(nx, ny, nz)` with a 6-value window); distances use `‖·‖₂` and the CCO
+spacing default is `d_min = ½ (size / n_terminals)^(1/dim)`.
+
+**3-D fractal skeleton** (`geometry.grow_tree_3d`). Each bifurcation splits in a
+*branching plane* through the parent direction `d`; that plane's normal `n` is rotated
+about `d` by the **twist** `θ_t` (default 90°) relative to the parent's plane,
+
+```
+n_child = R_d(θ_t + ε) n_parent,      d_k = R_n(±φ_k (1 + ε')) d,
+r_k = ρ_k r,                          L_k = ρ_k L (1 + ε'')
+```
+
+with `(φ_k, ρ_k)` from Murray's law (`bifurcation_geometry(γ, ξ)`, or a symmetric
+`±θ, ratio`) and seeded jitter `ε` (`jitter ∈ [0, 1]`). A fixed global rotation axis
+(the old rule) kept every generation in one plane; rotating relative to the parent
+plane makes the tree volumetric from the second generation
+(`tests/test_geometry.py::test_grow_tree_3d_is_volumetric_not_planar`).
+`grow_tree(max_generations=)` caps the 2-D fractal depth the same way.
+
+**Pruning** (`geometry.prune_terminal_branches`) — the inverse of growth: one step
+removes every *terminal branch* (a free end, back through degree-2 nodes, to its
+nearest junction); chains reaching an inlet/outlet are never removed, loops have no free
+end and are untouched. Radii of what remains are unchanged.
+
 ---
 
 ## 13. Transient — 2-element Windkessel
@@ -332,6 +367,31 @@ target.
 
 **Optimisation (`optimize.py`)** — minimise flux-/TOF-heterogeneity over the tree's
 branching asymmetries (Nelder–Mead / differential evolution), Paper D.
+
+---
+
+## 15. Organ domains & anatomical roots
+
+`perfusion/organs.py` (service layer, pure NumPy). Stylised, **connected** organ tissue
+domains in unit coordinates, placed into a physical window: organs keep their
+proportions (uniform scale `min(half-extents)`), generic shapes stretch to fill.
+
+- **2-D outlines** (closed polygons → `rasterize_mask`): ellipse, rectangle, wedge,
+  heart (frontal silhouette), kidney (with a hilum notch), brain (gyri + cerebellum),
+  liver, lung, tongue, tumour (seeded lobulated blob), placenta (disc).
+- **3-D masks** (implicit inside-tests on cell centres): box, ellipsoid, cylinder,
+  hemisphere, heart (the myocardial **wall** — a tilted egg-shaped ventricular mass
+  minus a closed cavity), kidney (bean minus hilum), brain (two hemispheres joined
+  below the longitudinal fissure), liver (two lobes), lung (dome, concave base),
+  tumour.
+
+Every shape must stay **one connected region** at every resolution (a split mask leaves
+a singular Darcy block) — `tests/test_organs.py`. `organs.roots(name, dim, domain)`
+gives each organ's **anatomical** arterial inlet / venous outlet and trunk aim (renal
+hilum, aortic root → apex, porta hepatis / hepatic veins, circle of Willis / sagittal
+sinus, lung hilum, tongue root, cord insertion), tested so every trunk leads into the
+tissue. `treegen` (explorer service) builds: skeleton from those roots →
+optional fill → solve, in 2-D or 3-D, with `extent` scaling the whole window.
 
 ---
 

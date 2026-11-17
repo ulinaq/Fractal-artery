@@ -13,7 +13,7 @@ in `legacy/` (reference only — do not extend it). New work goes in
 pure compute engine (NumPy/SciPy only, no I/O/viz/web deps); `io`, `viz`,
 `segmentation`, `growth`, `optimize` are service layers built on it; `api`
 (FastAPI back-end — see `perfusion/api/`) sits on top and also serves the
-zero-build 2-D web `frontend/` (plain HTML/CSS/ES-modules, mounted at `/` by
+zero-build web `frontend/` — 2-D workspace, Tree explorer, 3-D viewer (plain HTML/CSS/ES-modules, mounted at `/` by
 `api.app._mount_frontend`, no build step). `api.app.create_app` is thin — it sets
 `app.state.store`/`jobs`, exposes `/health` + `/frontend-version`, mounts the
 frontend, and includes three `APIRouter` modules grouped by concern:
@@ -240,6 +240,10 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   with actionable messages (empty mask, mask split into disconnected Darcy regions,
   `p_in == p_out`); `jobs._describe_error` surfaces those verbatim and adds a
   traceback tail for unexpected errors. The frontend shows it in a styled box.
+- **Viewport** (`frontend/viewport.js`): every canvas fills its stage (HiDPI) with
+  zoom/pan/fit. Map coordinates only through `toCanvas`/`toDomain` (workspace,
+  `core.js`) or the explorer's `tc`/`td` — never through raw canvas width/height.
+  The workspace domain is per project (`setDomain`, from `grid.domain_limit`).
 - **Frontend UX**: global undo/redo (`recordHistory` snapshots the editable
   geometry; ⌘/Ctrl+Z), context-aware keyboard shortcuts (Del/Enter/I/A/V/G/R/Esc/1–3),
   a build-version badge (`GET /frontend-version`) that flags a stale tab, three
@@ -252,6 +256,17 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   colonisation/CCO/sampling are **dimension-agnostic** (2-D or 3-D by the base
   network / mask), and `pipeline3d` now snaps terminals outside a 3-D mask to the
   nearest active cell (`_snap_to_active_3d`), like 2-D — keep both invariants.
+  `grow_tree_3d` rotates each bifurcation's plane by `twist` relative to its
+  parent's (the old fixed-axis rule left every generation in one plane — keep the
+  volumetric regression test); optional `gamma`/`exponent` (Murray asymmetry),
+  `jitter`, `seed`. `run_hybrid_3d` also returns `flux` + `tof` (masked faces carry
+  no flux). Organ shapes live in `perfusion/organs.py` (2-D outlines, 3-D masks);
+  every shape must stay **one connected region** (`tests/test_organs.py`).
+  `organs.roots(name, dim, domain, size)` gives each organ's **anatomical** artery
+  inlet / vein outlet + trunk aim (renal hilum, aortic root, porta hepatis, circle
+  of Willis, …); `/explore/grow` and the MCP tool use them whenever a root isn't
+  sent, and the explorer follows them until the user moves a root. A new organ
+  needs an outline/mask *and* a roots entry whose trunks lead into the tissue.
 
 ## Gotchas
 
