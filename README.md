@@ -1,0 +1,253 @@
+# perfusion
+
+[![CI](https://github.com/ulinaq/Fractal-artery/actions/workflows/ci.yml/badge.svg)](https://github.com/ulinaq/Fractal-artery/actions/workflows/ci.yml)
+
+A Python implementation of the multiscale blood-circulation and perfusion models
+from Ulin Nuha Abdul Qohar's PhD thesis, *Modeling and simulation of blood
+circulation and perfusion* (University of Bergen, 2023).
+
+The framework couples a **1D vascular network** (arteries + veins, Poiseuille
+flow) to a **microcirculation model** — either a **Darcy porous-medium**
+capillary bed (the *hybrid model*) or a **direct-connection** network — and adds
+tracer transport and tracer-kinetic model (TKM) analysis for DCE-MRI. It is a
+clean, consolidated port of the original MATLAB research code (now under
+[`legacy/`](legacy/)).
+
+## What's implemented
+
+| Thesis paper | Topic | Modules |
+|---|---|---|
+| **A** | Nonlinear hybrid model (network + dual Darcy), vessel elasticity & junction losses | `network`, `darcy`, `pipeline` |
+| **B** | Tracer flow in the hybrid model (single-compartment) | `transport` |
+| **C** | Direct-connection microcirculation + TKM validation (1CM/MS/2CXM/2CUM) | `direct`, `transport`, `tkm` |
+| **D** | Vascular-structure optimisation (flux vs. time-of-flight objectives) | `geometry`, `optimize`, `timeofflight` |
+
+Core numerics: Poiseuille resistance with the **Fåhræus–Lindqvist** apparent
+viscosity, a **TPFA** Darcy discretisation, a compactly supported **mollifier**
+for the 1D→3D point-source coupling, a **Schur-complement**-style hybrid solve,
+and a first-order **upwind time-of-flight** solver.
+
+## Install & run (uv)
+
+This project uses [uv](https://docs.astral.sh/uv/) for dependency management.
+
+```bash
+uv sync                      # core deps into .venv
+uv sync --extra image        # + imageio/scikit-image (for image segmentation)
+uv sync --extra api          # + fastapi/uvicorn/pydantic (for the web back-end)
+uv sync --extra mcp          # + the MCP SDK (to expose the engine as MCP tools)
+
+uv run pytest                # run the test suite
+uv run perfusion-tree        # Paper D: hybrid on a synthetic fractal tree
+uv run perfusion-frog        # Paper A: hybrid on the frog-tongue domain
+uv run python -m perfusion.examples.tkm_demo   # Paper C: TKM comparison
+uv run python scripts/generate_data.py         # regenerate bundled datasets
+uv run perfusion-api         # start the FastAPI back-end (http://127.0.0.1:8010)
+uv run --extra mcp perfusion-mcp   # start the MCP server (stdio)
+uv run perfusion-darcy3d     # 3-D Darcy source→sink slices
+uv run perfusion-hybrid3d    # Phase 4: full 3-D hybrid (3-D trees + 3-D Darcy)
+```
+
+### Web app
+
+`uv run perfusion-api` starts the FastAPI back-end **and** serves a zero-build
+2-D workspace (no Node/npm) at `http://127.0.0.1:8010/`. **🐸 Load frog example**
+gives you a real segmented frog-tongue system (arteries + veins + organ mask) in
+one click, ready to Run. Or create a project, draw
+vessels (or **segment them from an uploaded image**), **outline the tissue** (so
+the Darcy bed is organ-shaped), **place inlets/outlets** (any number, ▲/▼), grow
+the arterial tree into it, run the simulation, and view the
+pressure/flux/time-of-flight field as a heatmap with the network overlaid — or
+play a **flow video** of a contrast bolus washing through the tissue (with GIF
+download). Projects are shareable by URL (`/?project=<id>`) and **persist across restarts**
+(SQLite + a blob store under `$PERFUSION_DATA`). A **3-D viewer** (`/viewer3d.html`,
+linked from the header) renders the full 3-D hybrid result — vessel trees + a
+pressure voxel cloud — in a rotatable, dependency-free canvas. Interactive API
+docs are at `/docs`. See [`frontend/`](frontend/README.md) for the UI.
+
+### Back-end API
+
+The same service exposes the model as a hosted API — create a project, run a
+simulation as an async job, and fetch/export results, all under one origin as
+the UI above.
+
+```bash
+uv run perfusion-api
+curl -s localhost:8010/health
+# create a project, run it, poll the job, get the summary:
+pid=$(curl -s -XPOST localhost:8010/projects -H 'content-type: application/json' \
+      -d '{"name":"demo"}' | python -c 'import sys,json;print(json.load(sys.stdin)["id"])')
+jid=$(curl -s -XPOST localhost:8010/projects/$pid/run -d '{}' \
+      -H 'content-type: application/json' | python -c 'import sys,json;print(json.load(sys.stdin)["id"])')
+curl -s localhost:8010/jobs/$jid          # -> {"state":"done",...}
+curl -s localhost:8010/projects/$pid/results
+```
+
+Endpoints: `health`, `projects` (CRUD) + `projects/frog` (one-click example),
+`projects/{id}/vessels` (hand-drawn
+polylines → networks), `projects/{id}/image?kind=artery|vein` (segment an
+uploaded vessel image),
+`projects/{id}/mask` (tissue outline → `Grid.mask`),
+`projects/{id}/io` (inlet/outlet points → `p_in`/`p_out` boundary nodes),
+`projects/{id}/grow` (grow the arterial tree into the tissue),
+`projects/{id}/run` (job), `jobs` (durable registry) + `jobs/{id}`,
+`projects/{id}/results[/field/{name}]`,
+`projects/{id}/network` (overlay geometry), `projects/{id}/tracer` (flow-video
+frames, job) + `tracer.gif`, `projects/{id}/export?fmt=npz|csv|vtk`,
+`projects/{id}/bundle` (one zip: npz + CSV + VTK + summary/meta + GIF).
+
+### MCP server
+
+`uv run --extra mcp perfusion-mcp` starts a [Model Context
+Protocol](https://modelcontextprotocol.io) server (stdio) that exposes the engine
+as tools — `run_simulation`, `run_sweep` (probe how perfusion responds to a
+parameter), and `describe_model` — so any MCP client (Claude Desktop, Claude
+Code, an agent) can drive the model. The bundled
+[`.mcp.json`](.mcp.json) registers it for Claude Code automatically when working
+in this repo.
+
+Example figures are written to `outputs/`.
+
+## Bundled data
+
+- `data/frog_domain_low.png`, `data/frog_trees.mat` — the segmented frog-tongue
+  outline and vascular networks (loaders in `perfusion.io`).
+- `data/synthetic_perfusion.npz` — a small reusable DCE-MRI dataset (time grid,
+  AIF, tissue curves for known `(Fp, vp)`); load with
+  `perfusion.io.load_synthetic_perfusion()`.
+- `tests/data/reference_hybrid.npz` — a locked reference solution used to catch
+  numerical regressions.
+
+Both `.npz` files are regenerated by `scripts/generate_data.py`.
+
+## Quick start
+
+```python
+import numpy as np
+from perfusion import Parameters, Grid, run_hybrid
+
+prm = Parameters(p_in=10.0, p_out=0.0)     # blood/flow + fractal-tree geometry
+grid = Grid(nx=140, ny=160, lx=140, ly=160) # capillary bed
+res = run_hybrid(prm, grid)                 # build trees, couple to Darcy, solve
+
+res.pressure   # (nx, ny) capillary pressure field
+res.flux       # (nx, ny) Darcy flux magnitude
+res.tof        # (nx, ny) time-of-flight
+res.solution.q_a[0]   # arterial trunk inflow
+```
+
+Segment the real frog vasculature from images and solve the full organ system:
+
+```python
+from perfusion import Parameters, run_hybrid
+from perfusion import segmentation as seg
+
+system = seg.load_frog_system()          # segments artery + vein images + mask
+res = run_hybrid(Parameters(), system.grid, domain_limit=system.domain_limit,
+                 art=system.artery, ven=system.vein)   # couples them via Darcy
+# segment a single vessel image directly:
+net = seg.segment_network(image, root_xy=(x0, y0))     # -> a rooted Network
+```
+
+Grow a vascular tree into a tissue region (space colonisation) and solve it:
+
+```python
+import numpy as np
+from perfusion import Grid, Parameters, growth, run_hybrid
+from perfusion.core.geometry import network_from_polylines
+
+trunk = network_from_polylines([[(50, 2), (50, 40)]], radii=2.0, root_xy=(50, 2))
+grid = Grid(nx=40, ny=50, lx=100, ly=100)
+tree = growth.grow_in_mask(trunk, grid.mask, (0, 100, 0, 100), n_points=300)
+res = run_hybrid(Parameters(), grid, domain_limit=(0, 100, 0, 100), art=tree)
+```
+
+Direct-connection model + tracer-kinetic fitting:
+
+```python
+from perfusion import arterial_tree, venous_tree, direct, tkm
+import numpy as np
+
+art, ven = arterial_tree(prm), venous_tree(prm)
+conns = direct.connect_terminals(art, ven, rho_c=60.0)
+flow = direct.solve_direct(art, ven, conns, p_in=75.0, p_out=20.0)
+
+t = np.arange(0, 120, 0.5)
+ca = tkm.gamma_variate_aif(t, t0=5.0)
+C = tkm.one_compartment(t, ca, Fp=40.0, vp=8.0)   # synthetic tissue curve
+fit = tkm.fit(t, ca, C, model="2CXM")             # recover Fp, vp, PS, ve
+```
+
+## Documentation
+
+- **[`docs/MODEL_REFERENCE.pdf`](docs/MODEL_REFERENCE.pdf)** — a standalone
+  reference explaining the concepts, equations and numerical methods, with a
+  concept → equation → code map. Source: `docs/MODEL_REFERENCE.md` (rebuild the
+  PDF with the pandoc → Chrome recipe in `CLAUDE.md`).
+- **[`docs/DEVELOPING.md`](docs/DEVELOPING.md)** — how to extend the platform: a
+  feature → files → pattern → tests map, conventions, and how to run the pieces.
+- **[`docs/ROADMAP.md`](docs/ROADMAP.md)** — the development plan: target
+  architecture (FastAPI back-end + web front-end, hosted), feature roadmap
+  (2-D → 3-D, vessel growth, larger systems), and the source layout.
+- **`CLAUDE.md`** — implementation notes, invariants, and conventions for
+  contributors.
+
+## Repository layout
+
+```
+src/perfusion/          # the package
+  core/                 # pure compute engine (no I/O, viz, or web deps)
+    parameters.py       #   model parameters + Murray bifurcation geometry
+    viscosity.py        #   Fåhræus–Lindqvist apparent viscosity
+    geometry.py         #   Network dataclass + fractal-tree generation
+    darcy.py            #   TPFA Darcy bed, mollifier, terminal response, fields
+    network.py          #   hybrid solver (linear + nonlinear w/ junction losses)
+    direct.py           #   direct-connection microcirculation (Paper C)
+    transport.py        #   passive tracer advection (theta rule)
+    tkm.py              #   tracer-kinetic models + fitting
+    timeofflight.py     #   flux magnitude + upwind time-of-flight
+    pipeline.py         #   one-call end-to-end hybrid run
+    darcy3d.py          #   3-D Darcy grid/TPFA + terminal response (Phase 4)
+    pipeline3d.py       #   3-D hybrid: 3-D trees coupled to a 3-D Darcy bed
+  segmentation.py       # image → vascular Network (skeletonise + graph trace)
+  growth.py             # grow vessels into tissue (space colonisation)
+  optimize.py           # vascular-structure optimisation objectives (Paper D)
+  io.py, viz.py         # .mat/PNG loaders + result exporters, matplotlib helpers
+  api/                  # FastAPI back-end: projects, jobs, results (extra: api)
+  mcp_server.py         # MCP server exposing the engine as tools (extra: mcp)
+  examples/             # runnable drivers for Papers A/C/D
+tests/                  # pytest suite (physics sanity checks + API)
+data/                   # example assets (frog domain, segmented trees)
+frontend/               # zero-build 2-D web workspace, served at / by the API
+legacy/                 # original MATLAB source (reference only)
+```
+
+The public API is unchanged — `from perfusion import Grid, Parameters,
+run_hybrid, arterial_tree, venous_tree, Network` and the module handles
+(`perfusion.darcy`, `perfusion.geometry`, …) still work; deep imports live under
+`perfusion.core.*`. The FastAPI back-end (`api/`), vessel **growth**
+(`growth.py`), and a zero-build 2-D web workspace (`frontend/`) are in place; see
+[`docs/ROADMAP.md`](docs/ROADMAP.md) for the plan to add persistence, tissue-mask
+drawing, and flow video.
+
+## Notes & scope
+
+- This is an **idiomatic, consolidated** reimplementation, not a line-by-line
+  translation. The many duplicated MATLAB experiment folders
+  (`Optim/`, `Optim2/`, `OptimPaper/`, `Visit_UK/`, …) are collapsed into single
+  parametrised modules. The originals remain in `legacy/` for reference.
+- The hybrid solver uses **Dirichlet–Dirichlet** boundary conditions: `p_in` is
+  prescribed at the arterial inlet node(s) and `p_out` at the venous outlet
+  node(s) — any number of each (`Network.inlet_nodes`, default the root); the
+  Darcy datum is fixed by pinning one cell, and terminal fluxes are rebalanced so
+  the pin carries no net flux (as in the thesis).
+- The frog example runs synthetic trees over the real domain mask. Loading the
+  hand-segmented networks (`data/frog_trees.mat`) is supported via
+  `perfusion.io.load_frog_trees`; wiring them into `Network` is left as an
+  extension (see CLAUDE.md).
+
+## License
+
+See [`license.txt`](license.txt). Please cite the thesis and the associated
+papers (Royal Society Open Science, ENUMATH 2019, Magnetic Resonance in
+Medicine) if you use this code.

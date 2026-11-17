@@ -1,0 +1,54 @@
+"""Tests for the 3-D hybrid pipeline (3-D trees coupled to a 3-D Darcy bed)."""
+
+import numpy as np
+
+from perfusion import Parameters
+from perfusion.core.darcy3d import Grid3D
+from perfusion.core.geometry import grow_tree_3d
+from perfusion.core.pipeline3d import run_hybrid_3d
+
+
+def _system(max_gen=5):
+    art = grow_tree_3d((25, 25, 3), (0, 0, 1), root_radius=2.0, min_radius=0.9,
+                       length_to_radius=5, ratio=0.8, max_generations=max_gen)
+    ven = grow_tree_3d((25, 25, 47), (0, 0, -1), root_radius=2.0, min_radius=0.9,
+                       length_to_radius=5, ratio=0.8, max_generations=max_gen, mirror=True)
+    xs = np.concatenate([art.node_x, ven.node_x])
+    ys = np.concatenate([art.node_y, ven.node_y])
+    zs = np.concatenate([art.node_z, ven.node_z])
+    m = 4.0
+    dom = (xs.min() - m, xs.max() + m, ys.min() - m, ys.max() + m, zs.min() - m, zs.max() + m)
+    grid = Grid3D(nx=22, ny=22, nz=24,
+                  lx=dom[1] - dom[0], ly=dom[3] - dom[2], lz=dom[5] - dom[4])
+    return art, ven, grid, dom
+
+
+def test_3d_hybrid_conserves_mass():
+    art, ven, grid, dom = _system()
+    res = run_hybrid_3d(Parameters(p_in=10.0, p_out=0.0, mu=1.0), grid, art, ven, dom, eps=2.0)
+    sol = res.solution
+    n_art = res.art.terminal_nodes.size
+    inflow = float(sol.terminal_flux[:n_art].sum())
+    outflow = float(-sol.terminal_flux[n_art:].sum())
+    assert inflow > 0
+    assert np.isclose(inflow, outflow, rtol=1e-6)                  # inflow == outflow
+    assert np.isclose(sol.terminal_flux.sum(), 0.0, atol=1e-8)     # global mass balance
+    assert res.pressure.shape == (grid.nx, grid.ny, grid.nz)
+
+
+def test_3d_inlets_pinned_and_field_finite():
+    art, ven, grid, dom = _system()
+    res = run_hybrid_3d(Parameters(p_in=12.0, p_out=2.0, mu=1.0), grid, art, ven, dom, eps=2.0)
+    assert np.allclose(res.solution.p_a[art.inlet_nodes], 12.0)     # inlet at p_in
+    assert np.allclose(res.solution.p_v[ven.inlet_nodes], 2.0)      # outlet at p_out
+    assert np.all(np.isfinite(res.pressure))
+
+
+def test_multiple_3d_inlets():
+    art, ven, grid, dom = _system()
+    tips = art.terminal_nodes
+    inlets = [art.root_node, int(tips[0])]         # two arterial inlets
+    res = run_hybrid_3d(Parameters(p_in=10.0, p_out=0.0, mu=1.0), grid, art, ven, dom,
+                        eps=2.0, art_inlets=inlets)
+    assert np.allclose(res.solution.p_a[res.art.inlet_nodes], 10.0)
+    assert np.isclose(res.solution.terminal_flux.sum(), 0.0, atol=1e-8)

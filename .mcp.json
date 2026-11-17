@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "perfusion": {
+      "command": "uv",
+      "args": ["run", "--extra", "mcp", "perfusion-mcp"],
+      "env": {}
+    }
+  }
+}

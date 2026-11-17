@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>perfusion — tree explorer</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">🌳</span>
+      <div>
+        <h1>perfusion — tree explorer</h1>
+        <p class="sub">Fractal-tree parameter space vs. perfusion homogeneity (Paper D)</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <a class="link3d" href="/" title="back to the 2-D workspace">🔳 2-D workspace</a>
+      <a class="link3d" href="/viewer3d.html" title="3-D viewer">🧊 3-D viewer</a>
+      <span class="status" id="status">loading…</span>
+      <span class="build-badge" id="build-badge" title="frontend build">build …</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel">
+      <section class="card">
+        <h2>Tree parameters</h2>
+        <p class="muted">Tune the fractal arterial/venous tree; the field + objective
+          update live. No project needed — this explores the thesis' native frame.</p>
+        <label>arterial γ (asymmetry) <span class="rv" id="v-a_gamma"></span>
+          <input id="a_gamma" type="range" min="1.0" max="1.9" step="0.02" value="1.4" /></label>
+        <label>venous γ (asymmetry) <span class="rv" id="v-v_gamma"></span>
+          <input id="v_gamma" type="range" min="1.0" max="1.9" step="0.02" value="1.2" /></label>
+        <label>length : radius <span class="rv" id="v-length_to_radius"></span>
+          <input id="length_to_radius" type="range" min="4" max="18" step="0.5" value="10" /></label>
+        <label>Murray exponent <span class="rv" id="v-exponent"></span>
+          <input id="exponent" type="range" min="2.0" max="3.5" step="0.05" value="2.8" /></label>
+        <label>venous radius scale <span class="rv" id="v-rv_scale"></span>
+          <input id="rv_scale" type="range" min="0.8" max="1.8" step="0.05" value="1.2" /></label>
+      </section>
+
+      <section class="card">
+        <h2>Objective &amp; field</h2>
+        <label>homogeneity objective
+          <select id="kind">
+            <option value="tof_std">time-of-flight std</option>
+            <option value="tof_max">time-of-flight max</option>
+            <option value="flux_std">flux std</option>
+            <option value="flux_range">flux range</option>
+            <option value="flux_l2">flux L2</option>
+          </select>
+        </label>
+        <label>field
+          <select id="field">
+            <option value="flux">flux</option>
+            <option value="pressure">pressure</option>
+            <option value="tof">time-of-flight</option>
+          </select>
+        </label>
+        <p class="muted" id="obj-info">—</p>
+      </section>
+
+      <section class="card">
+        <h2>Optimise</h2>
+        <p class="muted">Search the branching asymmetries for the most homogeneous
+          perfusion, then load the best configuration.</p>
+        <label>method
+          <select id="method">
+            <option value="local">local (Nelder-Mead)</option>
+            <option value="global">global (differential evolution)</option>
+          </select>
+        </label>
+        <label>max iterations <input id="maxiter" type="number" value="15" min="1" max="60" /></label>
+        <button id="btn-opt" class="primary">Optimise tree</button>
+        <p class="muted" id="opt-info"></p>
+      </section>
+    </aside>
+
+    <section class="stage">
+      <div class="canvas-wrap">
+        <canvas id="view" width="420" height="480"></canvas>
+        <div class="colorbar" id="colorbar" hidden>
+          <span class="cb-max" id="cb-max">—</span>
+          <div class="cb-ramp" id="cb-ramp"></div>
+          <span class="cb-min" id="cb-min">—</span>
+          <span class="cb-title" id="cb-title"></span>
+        </div>
+      </div>
+      <div class="legend" aria-hidden="true">
+        <span><i class="ln art"></i> artery</span>
+        <span><i class="ln ven"></i> vein</span>
+        <span>field: viridis (low → high)</span>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="explorer.js"></script>
+  <script type="module" src="buildbadge.js"></script>
+</body>
+</html>

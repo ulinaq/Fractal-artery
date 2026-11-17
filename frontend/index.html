@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>perfusion — 2-D workspace</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">🩸</span>
+      <div>
+        <h1>perfusion</h1>
+        <p class="sub">Multiscale blood-flow &amp; perfusion — 2-D workspace</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="history">
+        <button id="btn-hist-undo" class="ghost" title="undo (⌘/Ctrl+Z)" disabled>↶ Undo</button>
+        <button id="btn-hist-redo" class="ghost" title="redo (⌘/Ctrl+⇧+Z)" disabled>↷ Redo</button>
+      </div>
+      <a class="link3d" href="/explorer.html" title="explore the fractal-tree parameter space">🌳 Tree explorer</a>
+      <a class="link3d" id="link-3d" href="/viewer3d.html" title="view this project's result in 3-D">🧊 3-D view</a>
+      <span class="status" id="status">connecting…</span>
+      <span class="build-badge" id="build-badge" title="frontend build">build …</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- ─── controls ─────────────────────────────────────────────── -->
+    <aside class="panel">
+      <details class="card" open>
+        <summary>Project</summary>
+        <label>Name <input id="proj-name" type="text" value="workspace" /></label>
+        <div class="btn-grid">
+          <button id="btn-new" class="primary" title="start a new project">New</button>
+          <button id="btn-frog" title="load the segmented frog-tongue example">🐸 Frog</button>
+          <button id="btn-save-file" title="download this project as a .json file to continue later">💾 Save</button>
+          <button id="btn-load-file" title="restore a project from a saved .json file">📂 Load</button>
+          <input id="file-load" type="file" accept=".json,application/json" hidden />
+        </div>
+        <p class="muted" id="proj-id">no project yet</p>
+      </details>
+
+      <details class="card">
+        <summary>Parameters</summary>
+        <div class="grid2">
+          <label>p_in <input id="p_in" type="number" value="10" step="1" /></label>
+          <label>p_out <input id="p_out" type="number" value="0" step="1" /></label>
+          <label>r_min_frac <input id="r_min_frac" type="number" value="0.15" step="0.05" min="0.05" max="0.9" /></label>
+          <label>seed <input id="seed" type="number" value="0" step="1" /></label>
+          <label>grid nx <input id="nx" type="number" value="120" step="10" /></label>
+          <label>grid ny <input id="ny" type="number" value="140" step="10" /></label>
+          <label title="capillary-bed permeability anisotropy: Ky relative to Kx=1 (1 = isotropic)">K aniso Ky/Kx <input id="perm_y" type="number" value="1" step="0.25" min="0.01" /></label>
+        </div>
+      </details>
+
+      <details class="card" data-mode="vessels" open>
+        <summary>Vessels</summary>
+        <p class="muted">Each stroke is one segment; shared endpoints snap into branches.</p>
+        <div class="row">
+          <label class="seg"><input type="radio" name="vtype" value="artery" checked /> <span class="dot art"></span>artery</label>
+          <label class="seg"><input type="radio" name="vtype" value="vein" /> <span class="dot ven"></span>vein</label>
+        </div>
+        <label>radius <input id="draw-radius" type="number" value="2" step="0.5" min="0.2" /></label>
+        <div class="row">
+          <button id="btn-endseg">End stroke</button>
+          <button id="btn-undo">Undo</button>
+          <button id="btn-clear">Clear</button>
+        </div>
+        <label class="check"><input id="use-vessels" type="checkbox" /> use hand-drawn vessels on Run</label>
+        <button id="btn-save-vessels">Save vessels</button>
+        <p class="muted">Keys: <b>Enter</b> end stroke · <b>A</b>/<b>V</b> artery/vein · <b>Esc</b> cancel · <b>Del</b> undo · <b>1–5</b> tabs · <b>R</b> run</p>
+        <hr class="soft" />
+        <label>Or segment a vessel image
+          <input id="img-file" type="file" accept="image/*" />
+        </label>
+        <p class="muted" id="img-info">Segments into the artery/vein selected above.</p>
+      </details>
+
+      <details class="card" data-mode="tissue" open>
+        <summary>Tissue</summary>
+        <p class="muted">Click to outline the organ; cells outside are inactive
+          (organ-shaped bed). Multiple regions add together.</p>
+        <label>Draw target
+          <select id="tissue-target">
+            <option value="organ">Organ outline (mask)</option>
+            <option value="lesion">Low-K lesion (permeability)</option>
+            <option value="hotspot">Growth hotspot (demand)</option>
+          </select>
+        </label>
+        <label id="lesion-k-row" style="display:none">permeability k
+          <input id="lesion-k" type="number" value="0.1" step="0.05" min="0.001" max="1" />
+        </label>
+        <label id="hotspot-w-row" style="display:none">demand weight
+          <input id="hotspot-w" type="number" value="4" step="1" min="1" />
+        </label>
+        <div class="row">
+          <button id="btn-endregion">End region</button>
+          <button id="btn-undo-region">Undo</button>
+          <button id="btn-clear-tissue">Clear</button>
+        </div>
+        <button id="btn-save-mask">Save tissue</button>
+      </details>
+
+      <details class="card" data-mode="io" open>
+        <summary>Inlets / Outlets</summary>
+        <p class="muted">Pick inlet or outlet, then click near a vessel end. Click a
+          marker to remove it. Add any number; unmarked trees are fed at their root.</p>
+        <div class="row">
+          <label class="seg"><input type="radio" name="iotype" value="inlet" checked /> <span class="tri-up art"></span>inlet (p_in)</label>
+          <label class="seg"><input type="radio" name="iotype" value="outlet" /> <span class="tri-dn ven"></span>outlet (p_out)</label>
+        </div>
+        <div class="row">
+          <button id="btn-clear-io">Clear</button>
+          <button id="btn-save-io">Save</button>
+        </div>
+        <p class="muted" id="io-info"></p>
+      </details>
+
+      <details class="card" data-mode="edit" open>
+        <summary>Edit vessels</summary>
+        <p class="muted">Vessels are a network: click a node to select it, drag to
+          move it, and use the slider to resize its edge. Works on hand-drawn,
+          segmented and grown vessels alike.</p>
+        <p class="muted" id="edit-sel">No vessels yet — draw, segment or grow a tree first.</p>
+        <label>radius
+          <input id="edit-radius" type="range" min="0.3" max="8" step="0.1" value="2" disabled />
+          <span id="edit-radius-val" class="muted"></span>
+        </label>
+        <div class="row">
+          <button id="btn-edit-add" title="click the canvas to branch a new edge from the selected node (click several times to fan out)">＋ Add branch</button>
+          <button id="btn-edit-del" title="delete the selected node" disabled>🗑 Delete node</button>
+        </div>
+        <div class="row">
+          <button id="btn-edit-save">Save edits</button>
+          <button id="btn-edit-revert">Revert</button>
+        </div>
+        <p class="muted">Keys: <b>Del</b> delete node · <b>A</b> add branch · <b>Esc</b> cancel · <b>⌘/Ctrl+Z</b> undo</p>
+      </details>
+
+      <details class="card" data-mode="vessels">
+        <summary>Grow</summary>
+        <p class="muted">Grow a tree into the tissue, extending the drawn/segmented
+          vessels of the chosen type (else the fractal trunk). Artery and vein grow
+          independently — pick a target and settings, grow, then try the other.</p>
+        <div class="row">
+          <label class="seg"><input type="radio" name="growtarget" value="artery" checked /> <span class="dot art"></span>artery</label>
+          <label class="seg"><input type="radio" name="growtarget" value="vein" /> <span class="dot ven"></span>vein</label>
+        </div>
+        <label>method
+          <select id="grow-method">
+            <option value="colonization">space colonisation</option>
+            <option value="cco">CCO (constructive)</option>
+          </select>
+        </label>
+        <div class="grid2">
+          <label>points <input id="grow-npts" type="number" value="400" step="50" /></label>
+          <label>step <input id="grow-step" type="number" value="4" step="1" /></label>
+        </div>
+        <button id="btn-grow">Grow tree</button>
+        <p class="muted" id="grow-info"></p>
+      </details>
+
+      <details class="card" data-mode="vessels">
+        <summary>Morphometry (Strahler)</summary>
+        <p class="muted">Horton–Strahler analysis of the current tree: bifurcation,
+          length and diameter ratios + per-order segment counts.</p>
+        <div class="row">
+          <button id="btn-morph-art">Artery</button>
+          <button id="btn-morph-ven">Vein</button>
+        </div>
+        <div id="morph-out" class="muted"></div>
+      </details>
+
+      <details class="card" data-mode="vessels">
+        <summary>Adapt (structural remodelling)</summary>
+        <p class="muted">Pries–Secomb: evolve the vessel radii under wall-shear
+          remodelling toward Murray's law (|Q| ∝ r³). Replaces the tree with the
+          adapted one; re-solve afterwards.</p>
+        <div class="grid2">
+          <label>target k <input id="adapt-target" type="number" value="3.0" step="0.1" min="1" max="5" /></label>
+          <label>rate <input id="adapt-rate" type="number" value="0.05" step="0.01" min="0.01" max="0.5" /></label>
+        </div>
+        <button id="btn-adapt">Adapt radii</button>
+        <p class="muted" id="adapt-info"></p>
+      </details>
+
+      <details class="card" data-mode="result" open>
+        <summary>Transit-time distribution</summary>
+        <p class="muted">h(τ): how long blood takes to cross the tissue. Wider
+          spread = more heterogeneous perfusion (higher CTH → less O₂ extraction).</p>
+        <canvas id="ttd" width="288" height="150"></canvas>
+        <p class="muted" id="ttd-info"></p>
+      </details>
+
+      <details class="card" data-mode="result">
+        <summary>Tracer kinetics (TKM)</summary>
+        <p class="muted">Fit a tracer-kinetic model to the contrast bolus (run
+          ▶ Tracer first) to recover plasma flow Fp / volume vp / PS / ve.</p>
+        <label>model
+          <select id="tkm-model">
+            <option value="1CM">1-compartment (Fp, vp)</option>
+            <option value="2CXM">2-compartment exchange (Fp, vp, PS, ve)</option>
+            <option value="2CUM">2-compartment uptake (Fp, vp, PS)</option>
+            <option value="MS">maximum slope (Fp)</option>
+          </select>
+        </label>
+        <button id="btn-tkm">Fit kinetics</button>
+        <canvas id="tkm-chart" width="288" height="120"></canvas>
+        <p class="muted" id="tkm-info"></p>
+        <p class="muted">Voxel-wise maps (shown on the main canvas):</p>
+        <label class="muted"><input type="checkbox" id="map-deconv" />
+          SVD deconvolution (residue-based rCBF/rCBV/rMTT)</label>
+        <div class="row">
+          <button id="btn-map-fp" title="plasma-flow map">Fp map</button>
+          <button id="btn-map-vp" title="blood-volume map">BV map</button>
+          <button id="btn-map-mtt" title="mean transit time (deconvolution)">MTT map</button>
+        </div>
+      </details>
+
+      <details class="card" data-mode="result">
+        <summary>Transient (pulsatile)</summary>
+        <p class="muted">Windkessel response: a pulsatile inlet, buffered by vessel
+          compliance, gives smoother tissue flow (needs a solved result).</p>
+        <div class="grid2">
+          <label>period <input id="tr-period" type="number" value="1.0" step="0.1" min="0.1" /></label>
+          <label>pulsatility <input id="tr-pulse" type="number" value="0.5" step="0.1" min="0" max="1" /></label>
+        </div>
+        <label>compliance <input id="tr-compliance" type="number" value="0.02" step="0.01" min="0" /></label>
+        <button id="btn-transient">Run pulsatile</button>
+        <canvas id="tr-chart" width="288" height="120"></canvas>
+        <p class="muted" id="tr-info"></p>
+      </details>
+
+      <details class="card" data-mode="result">
+        <summary>Multi-compartment bed</summary>
+        <p class="muted">Stack N Darcy compartments (arteriole → capillary → venule)
+          coupled by exchange β. Blood percolates down the stack; the exchange field
+          is the capillary perfusion. Shown on the main canvas.</p>
+        <div class="grid2">
+          <label>compartments N <input id="mc-n" type="number" value="3" step="1" min="2" max="5" /></label>
+          <label>exchange β <input id="mc-beta" type="number" value="1.0" step="0.25" min="0.01" /></label>
+        </div>
+        <div class="row">
+          <button id="btn-mc-perf" title="arteriole→next exchange = capillary perfusion">Perfusion</button>
+          <button id="btn-mc-comp0" title="arteriole compartment pressure">Arteriole p</button>
+          <button id="btn-mc-compN" title="venule compartment pressure">Venule p</button>
+        </div>
+        <p class="muted" id="mc-info"></p>
+      </details>
+
+      <details class="card" data-mode="result">
+        <summary>Uncertainty (Monte-Carlo)</summary>
+        <p class="muted">Sample uncertain inputs (Latin-hypercube), re-solve N times,
+          and report the output spread + which input drives each response.</p>
+        <label><input type="checkbox" id="uq-pin" checked /> inlet p_in
+          <input id="uq-pin-lo" type="number" value="5" step="1" class="mini" /> –
+          <input id="uq-pin-hi" type="number" value="20" step="1" class="mini" /></label>
+        <label><input type="checkbox" id="uq-mu" checked /> viscosity μ
+          <input id="uq-mu-lo" type="number" value="0.8" step="0.1" class="mini" /> –
+          <input id="uq-mu-hi" type="number" value="1.5" step="0.1" class="mini" /></label>
+        <label><input type="checkbox" id="uq-rmin" /> branch depth r_min_frac
+          <input id="uq-rmin-lo" type="number" value="0.3" step="0.05" class="mini" /> –
+          <input id="uq-rmin-hi" type="number" value="0.6" step="0.05" class="mini" /></label>
+        <label>samples N <input id="uq-n" type="number" value="24" step="4" min="2" max="128" /></label>
+        <label><input type="checkbox" id="uq-sobol" /> variance-based Sobol (S₁ / Sₜ)</label>
+        <button id="btn-uq">Run UQ</button>
+        <div id="uq-out" class="muted"></div>
+      </details>
+
+      <details class="card" data-mode="result">
+        <summary>Oxygen / solute extraction</summary>
+        <p class="muted">Steady advection–reaction transport of a blood-borne solute
+          (Krogh/Kety). Blood delivers it at the feeds; tissue consumes it at
+          Damköhler rate k. Shown on the main canvas.</p>
+        <div class="grid2">
+          <label>k (Damköhler) <input id="o2-k" type="number" value="1.0" step="0.25" min="0.05" /></label>
+          <label>diffusivity <input id="o2-diff" type="number" value="0" step="0.25" min="0" /></label>
+        </div>
+        <div class="row">
+          <button id="btn-o2-sat" title="C / c_art — fraction of arterial level remaining">O₂ saturation</button>
+          <button id="btn-o2-cons" title="k·C — local tissue uptake">O₂ uptake</button>
+        </div>
+        <p class="muted" id="o2-info"></p>
+      </details>
+
+      <section class="card run-card">
+        <label>model
+          <select id="run-model">
+            <option value="hybrid">hybrid — Darcy capillary bed</option>
+            <option value="direct">direct — terminal connections</option>
+          </select>
+        </label>
+        <label class="check" id="nonlinear-row"><input id="nonlinear" type="checkbox" /> nonlinear (junction losses)</label>
+        <label class="check" id="phasesep-row"><input id="phase-sep" type="checkbox" /> hematocrit phase separation (Pries)</label>
+        <label class="check" id="elastic-row"><input id="elasticity" type="checkbox" /> vessel-wall elasticity</label>
+        <label id="compliance-row" style="display:none">compliance (Δr per unit pressure)
+          <input id="compliance" type="number" value="0.01" step="0.005" min="0" /></label>
+        <label id="maxiter-row" style="display:none">max iterations (nonlinear fixed-point)
+          <input id="max-iter" type="number" value="100" min="1" step="10" />
+        </label>
+        <label id="rhoc-row" style="display:none">connection radius ρc (0 = nearest vein)
+          <input id="rho-c" type="number" value="0" min="0" step="5" />
+        </label>
+        <button id="btn-run" class="primary">▶ Run simulation</button>
+        <p class="muted" id="run-info"></p>
+      </section>
+    </aside>
+
+    <!-- ─── canvas + results ─────────────────────────────────────── -->
+    <section class="stage">
+      <div class="stage-head">
+        <div class="modes" role="tablist">
+          <button id="mode-vessels" class="mode active" role="tab">Vessels</button>
+          <button id="mode-tissue" class="mode" role="tab">Tissue</button>
+          <button id="mode-io" class="mode" role="tab">Inlets/Outlets</button>
+          <button id="mode-edit" class="mode" role="tab">Edit</button>
+          <button id="mode-result" class="mode" role="tab">Result</button>
+        </div>
+        <div class="fields" id="field-picker">
+          <button class="field active" data-field="pressure">pressure</button>
+          <button class="field" data-field="flux">flux</button>
+          <button class="field" data-field="tof">time-of-flight</button>
+        </div>
+        <div class="flowbar" id="flowbar">
+          <button id="btn-flow" class="ghost" title="tracer kinetics: animate a contrast bolus washing through the solved field">▶ Tracer (kinetic)</button>
+          <button id="flow-play" class="ghost" hidden>⏸</button>
+          <input id="flow-scrub" type="range" min="0" max="0" value="0" hidden />
+          <span id="flow-time" class="muted" hidden></span>
+          <a id="flow-gif" class="ghost" hidden>↓ GIF</a>
+        </div>
+        <span class="export">
+          <select id="export-fmt" title="export format">
+            <option value="npz">.npz</option>
+            <option value="csv">.csv</option>
+            <option value="vtk">.vti (ParaView)</option>
+          </select>
+          <button id="btn-export" class="ghost" disabled>Export</button>
+          <button id="btn-bundle" class="ghost" disabled title="download everything as a zip">⬇ All</button>
+          <button id="btn-png" class="ghost" title="save the current view as a PNG">📷 PNG</button>
+        </span>
+      </div>
+
+      <div class="canvas-wrap">
+        <canvas id="view" width="640" height="720"></canvas>
+        <div class="colorbar" id="colorbar" hidden>
+          <span class="cb-max" id="cb-max">—</span>
+          <div class="cb-ramp" id="cb-ramp"></div>
+          <span class="cb-min" id="cb-min">—</span>
+          <span class="cb-title" id="cb-title"></span>
+        </div>
+      </div>
+
+      <div class="legend" aria-hidden="true">
+        <span><i class="ln art"></i> artery</span>
+        <span><i class="ln ven"></i> vein</span>
+        <span><i class="tri up"></i> inlet (p_in)</span>
+        <span><i class="tri dn"></i> outlet (p_out)</span>
+        <span><i class="sw"></i> tissue</span>
+      </div>
+
+      <div class="summary" id="summary"></div>
+    </section>
+  </main>
+
+  <script type="module" src="app.js"></script>
+  <script type="module" src="buildbadge.js"></script>
+</body>
+</html>
