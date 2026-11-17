@@ -371,7 +371,8 @@ def generate_trees(dim: int = 2, shape: str = "ellipse", generations: int = 4,
                    fill: str = "colonization", fill_steps: int = 40, n_terminals: int = 60,
                    artery_root=None, vein_root=None, artery_direction=None,
                    vein_direction=None, artery_angle: float = 90.0, vein_angle: float = -90.0,
-                   solve: bool = True, seed: int = 0, extent: float = 1.0) -> dict:
+                   solve: bool = True, seed: int = 0, extent: float = 1.0,
+                   _return_model: bool = False) -> dict:
     """Grow an arterial + venous tree into a tissue shape (2-D or 3-D) and solve.
 
     A fractal skeleton of ``generations`` branching levels starts at each root
@@ -409,12 +410,79 @@ def generate_trees(dim: int = 2, shape: str = "ellipse", generations: int = 4,
     art, ven, mask, domain, _ = treegen.build(spec)
     out = {"dim": spec.dim, "shape": shape, "fill": fill, "active_cells": int(mask.sum()),
            "artery": treegen.tree_stats(art), "vein": treegen.tree_stats(ven)}
+    if _return_model:                 # internal: tissue_analysis reuses the built model
+        out["_model"] = (spec, art, ven, mask, domain)
     if solve:       # the same calculations in 2-D and 3-D: flow, flux, time-of-flight
         res = treegen.solve(spec, art, ven, mask, domain)
         q = res.solution.terminal_flux
         out["inflow"] = float(q[q > 0].sum())
         out["outflow"] = float(-q[q < 0].sum())
         out["homogeneity"] = treegen.homogeneity(res)
+    return out
+
+
+def tissue_analysis(dim: int = 3, shape: str = "kidney", generations: int = 4,
+                    fill: str = "cco", n_terminals: int = 40, extent: float = 1.0,
+                    k: float = 1.0, adapt: bool = False, n_frames: int = 30,
+                    model: str = "1CM", seed: int = 0) -> dict:
+    """Grow artery + vein trees into an organ (2-D or 3-D), solve the hybrid model and
+    run the downstream analyses on that tissue — the same chain in both dimensions:
+
+    - optional wall-shear **adaptation** of the radii toward Murray's law (``adapt``),
+    - **transit-time** metrics (MTT, CTH) of the Darcy time-of-flight,
+    - steady **oxygen** extraction (OEF) at Damköhler number ``k``,
+    - a contrast-**tracer** bolus advected through the bed (``n_frames`` snapshots) and a
+      tracer-kinetic fit (``model``: MS / 1CM / 2CUM / 2CXM) of its tissue curve.
+    """
+    from . import treegen
+    from .core import tkm, transport
+    from .core.oxygen import oxygen_from_result
+    from .core.parameters import Parameters
+    from .core.perfusion_metrics import transit_metrics
+    from .core.pipeline import run_adaptation
+
+    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
+                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
+                           _return_model=True)
+    spec, art, ven, mask, domain = grown["_model"]
+    res = treegen.solve(spec, art, ven, mask, domain)
+    out = {"dim": spec.dim, "shape": shape, "active_cells": int(mask.sum()),
+           "n_terminals": {"artery": int(art.terminal_nodes.size),
+                           "vein": int(ven.terminal_nodes.size)}}
+    if adapt:
+        ad = run_adaptation(Parameters(p_in=10.0, p_out=0.0), res.grid,
+                            domain_limit=domain, art=art, ven=ven, n_iter=40)
+        res = ad.result
+        out["adaptation"] = {"murray_start": ad.murray_start,
+                             "murray_final": ad.murray_exponent, "n_iter": ad.n_iter}
+    q = res.solution.terminal_flux
+    out["inflow"] = float(q[q > 0].sum())
+    tm = transit_metrics(np.where(mask, res.tof, np.nan), weights=res.flux)
+    out["transit"] = {"mtt": tm.mtt, "cth": tm.cth, "rd": tm.rd}
+    ox = oxygen_from_result(res, k=float(k))
+    out["oxygen"] = {"k": float(k), "oef": ox.oef}
+
+    finite = res.tof[np.isfinite(res.tof)]
+    duration = 5.0 * max(float(np.percentile(finite, 80)) if finite.size else 5.0, 1e-3)
+    n_frames = int(np.clip(n_frames, 8, 120))
+    n_steps = max(n_frames, 400)
+    t = np.arange(n_steps) * duration / n_steps
+    aif = tkm.gamma_variate_aif(t, t0=0.08 * duration, A=3.0, B=0.06 * duration)
+    aif = aif / aif.max()
+    frames = transport.transport_forward(res.grid, res.fx, res.fy, res.sources, q, aif,
+                                         t[1] - t[0], theta=1.0, fz=getattr(res, "fz", None))
+    stride = max(1, n_steps // n_frames)
+    fr, tt, ca = frames[::stride][:n_frames], t[::stride][:n_frames], aif[::stride][:n_frames]
+    conc = np.array([float(f[mask].mean()) for f in fr])
+    fit = tkm.fit(tt, ca, conc, model=model)
+
+    def num(x):
+        return float(x) if x is not None and np.isfinite(x) else None
+
+    out["tracer"] = {"model": model.upper(), "Fp": num(fit.Fp), "vp": num(fit.vp),
+                     "PS": num(fit.PS), "ve": num(fit.ve),
+                     "peak_time": float(tt[int(np.argmax(conc))]),
+                     "peak_concentration": float(conc.max())}
     return out
 
 
@@ -722,6 +790,21 @@ def build_server():
                               artery_direction=artery_direction,
                               vein_direction=vein_direction, artery_angle=artery_angle,
                               vein_angle=vein_angle, solve=solve, seed=seed, extent=extent)
+
+    @server.tool()
+    def tissue_perfusion_analysis(dim: int = 3, shape: str = "kidney", generations: int = 4,
+                                  fill: str = "cco", n_terminals: int = 40,
+                                  extent: float = 1.0, k: float = 1.0, adapt: bool = False,
+                                  n_frames: int = 30, model: str = "1CM",
+                                  seed: int = 0) -> dict:
+        """Grow artery + vein trees into an organ (2-D or 3-D, see
+        grow_trees_in_tissue for shapes), solve, then analyse that tissue: optional
+        Murray adaptation of radii (`adapt`), transit-time MTT/CTH, oxygen extraction
+        (OEF at Damköhler `k`), and a contrast-tracer bolus with a tracer-kinetic fit
+        (`model` MS/1CM/2CUM/2CXM → Fp, vp, PS, ve). Works identically in 3-D."""
+        return tissue_analysis(dim=dim, shape=shape, generations=generations, fill=fill,
+                               n_terminals=n_terminals, extent=extent, k=k, adapt=adapt,
+                               n_frames=n_frames, model=model, seed=seed)
 
     @server.tool()
     def data_constrained_tree_growth(hotspot_weight: float = 8.0, radius_frac: float = 0.22,

@@ -37,7 +37,7 @@ from .transport import build_advection
 class OxygenSolution:
     """Steady oxygen/solute field and the derived extraction budget."""
 
-    concentration: np.ndarray     # (nx, ny) tissue solute concentration (NaN off-mask)
+    concentration: np.ndarray     # (nx, ny[, nz]) tissue solute concentration (NaN off-mask)
     oef: float                    # global extraction fraction = consumption / delivery
     delivery: float               # total arterial solute delivery rate
     consumption: float            # total tissue consumption rate
@@ -58,25 +58,33 @@ class OxygenSolution:
 
 def solve_oxygen(grid: Grid, fx: np.ndarray, fy: np.ndarray, sources,
                  terminal_flux: np.ndarray, c_art: float = 1.0, k: float = 1.0,
-                 diffusivity: float = 0.0) -> OxygenSolution:
+                 diffusivity: float = 0.0, fz: np.ndarray | None = None) -> OxygenSolution:
     """Solve the steady advection–reaction(–diffusion) solute balance.
 
     ``k`` is the first-order metabolic extraction rate; ``diffusivity`` scales the
     (geometric/transmissibility) TPFA diffusion Laplacian — a relative smoothing
     strength, not an absolute D. One of them must be positive for a well-posed solve.
+    Pass ``fz`` (with a ``Grid3D``) for the 3-D field.
     """
     if k <= 0.0 and diffusivity <= 0.0:
         raise ValueError("need k>0 or diffusivity>0 for a well-posed steady solve")
-    A, inject, extract, pore_volume = build_advection(grid, fx, fy, sources, terminal_flux)
+    A, inject, extract, pore_volume = build_advection(grid, fx, fy, sources, terminal_flux, fz)
     # ``k`` is a dimensionless Damköhler number: the extraction rate relative to the
     # bulk perfusion rate f = inflow/volume = 1/MTT, so k·MTT = k and the well-mixed
     # limit gives OEF ≈ 1 − e^{−k} (matches perfusion_metrics' auto-scaled Kety rate).
-    f_ref = float(inject.sum()) / max(float(pore_volume.sum()), 1e-30)
+    # (tissue volume = the *active* cells: an organ mask must not dilute the rate)
+    active = np.asarray(grid.mask, bool).ravel(order="F")
+    f_ref = float(inject.sum()) / max(float(pore_volume[active].sum()), 1e-30)
     k_eff = float(k) * f_ref
     m = A - sp.diags(extract) - k_eff * sp.diags(pore_volume)
     if diffusivity > 0.0:
-        from .darcy import tpfa_operator
-        m = m - diffusivity * tpfa_operator(grid)[0]
+        if fz is None:
+            from .darcy import tpfa_operator
+            lap = tpfa_operator(grid)[0]
+        else:
+            from .darcy3d import tpfa_operator_3d
+            lap = tpfa_operator_3d(grid)
+        m = m - diffusivity * lap
     conc = spla.spsolve(m.tocsr(), -inject * float(c_art))
     conc = np.clip(conc, 0.0, None)
 
@@ -84,14 +92,15 @@ def solve_oxygen(grid: Grid, fx: np.ndarray, fy: np.ndarray, sources,
     consumption = k_eff * float((pore_volume * conc).sum())
     oef = consumption / delivery if delivery > 0.0 else 0.0
 
-    field = np.where(grid.mask, conc.reshape(grid.nx, grid.ny, order="F"), np.nan)
+    field = np.where(grid.mask, conc.reshape(grid.mask.shape, order="F"), np.nan)
     return OxygenSolution(field, float(oef), float(delivery), float(consumption),
                           float(c_art), float(k), float(k_eff))
 
 
 def oxygen_from_result(result, c_art: float = 1.0, k: float = 1.0,
                        diffusivity: float = 0.0) -> OxygenSolution:
-    """Convenience wrapper: solve the oxygen field for a :class:`HybridResult`."""
+    """Convenience wrapper: solve the oxygen field for a :class:`HybridResult`
+    (2-D) or :class:`~perfusion.core.pipeline3d.HybridResult3D` (3-D)."""
     return solve_oxygen(result.grid, result.fx, result.fy, result.sources,
                         result.solution.terminal_flux, c_art=c_art, k=k,
-                        diffusivity=diffusivity)
+                        diffusivity=diffusivity, fz=getattr(result, "fz", None))

@@ -276,9 +276,14 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   `test_monolithic_coupling_matches_schur` green. TOF treats inflow `< 1e-12·max` as
   stagnant (`timeofflight._dead_cells`), else round-off makes it ill-posed.
 - **3-D projects**: `GridIn.nz` set ⇒ 3-D (6-value `domain_limit`, raster `(nx,ny,nz)`
-  mask, `node_z` trees); `runner.solve` → `run_hybrid_3d`. 2-D-only routes use the
-  `deps.get_project_2d` dependency (409). New project features must either work in
-  3-D or be guarded.
+  mask, `node_z` trees); `runner.solve` → `run_hybrid_3d`. Grow / prune / adapt,
+  tracer (+ kinetics, kinetic maps) and oxygen work on 3-D projects: `HybridResult3D`
+  carries `fx/fy/fz` + `sources`, and `transport`/`oxygen` take `fz=`; the viewer shows
+  them via `GET /projects/{id}/view3d?field=` (incl. `tracer` per-frame voxels).
+  Still 2-D-only (`deps.get_project_2d` → 409): hand editing, masks/lesions/hotspots,
+  the direct model, UQ/calibration, multicompartment, GIF/MP4 and field CSV/VTK. New
+  project features must either work in 3-D or be guarded. Oxygen's Damköhler rate is
+  scaled by the *active* tissue volume (`oxygen.solve_oxygen`) — keep it that way.
 - **Default trees** (no vessels drawn): `runner.default_trees` fits the thesis trees
   jointly into the project domain; every solve path uses
   `build_networks(defaults=True)`; sweeps rebuild them per sample via

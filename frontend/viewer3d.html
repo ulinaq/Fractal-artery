@@ -49,14 +49,58 @@
         <p class="muted" id="proj-desc"></p>
         <label>field
           <select id="v3-field">
-            <option value="pressure">pressure</option>
-            <option value="flux">Darcy flux</option>
-            <option value="tof">time-of-flight</option>
+            <optgroup label="solve">
+              <option value="pressure">pressure</option>
+              <option value="flux">Darcy flux</option>
+              <option value="tof">time-of-flight</option>
+            </optgroup>
+            <optgroup label="oxygen">
+              <option value="saturation">O₂ saturation</option>
+              <option value="consumption">O₂ consumption</option>
+            </optgroup>
+            <optgroup label="tracer (needs 🌊 flow)">
+              <option value="tracer">flow video (bolus)</option>
+              <option value="Fp">Fp — max-slope flow</option>
+              <option value="vp">vp — blood volume</option>
+              <option value="CBV">CBV — deconvolution</option>
+              <option value="MTT">MTT — deconvolution</option>
+            </optgroup>
           </select>
+        </label>
+        <label id="v3-k-row" hidden>O₂ extraction k (Damköhler)
+          <input id="v3-k" type="number" min="0.05" max="20" step="0.25" value="1" />
         </label>
         <button id="v3-run" class="primary">▶ Run 3-D simulation</button>
         <p class="muted" id="v3-run-info"></p>
         <div class="summary v3sum" id="v3-summary"></div>
+      </section>
+      <section class="card" id="v3-flow-card" hidden>
+        <h2>Flow &amp; kinetics</h2>
+        <p class="muted">Advect a contrast bolus through the 3-D bed, then play it or map its kinetics.</p>
+        <button id="v3-flow">🌊 Compute flow</button>
+        <div class="row" id="v3-play-row" hidden>
+          <button id="v3-play" class="ghost">⏸</button>
+          <input id="v3-scrub" type="range" min="0" max="0" value="0" />
+          <span class="muted" id="v3-time"></span>
+        </div>
+        <p class="muted" id="v3-kin"></p>
+      </section>
+      <section class="card" id="v3-tree-card" hidden>
+        <h2>Vessels</h2>
+        <label>tree
+          <select id="v3-target"><option value="artery">artery</option><option value="vein">vein</option></select>
+        </label>
+        <label>growth
+          <select id="v3-method"><option value="cco">CCO (one terminal at a time)</option>
+            <option value="colonization">space colonisation</option></select>
+        </label>
+        <label>points / terminals <input id="v3-npts" type="number" min="5" max="2000" value="60" /></label>
+        <div class="row">
+          <button id="v3-grow">🌱 Grow</button>
+          <button id="v3-prune" class="ghost" title="remove the outermost branch generation">✂ Prune 1</button>
+          <button id="v3-adapt" class="ghost" title="wall-shear remodelling toward Murray's law">⚖ Adapt</button>
+        </div>
+        <p class="muted" id="v3-tree-info"></p>
       </section>
       <section class="card">
         <h2>Legend</h2>
@@ -64,7 +108,7 @@
           <span><i class="ln art"></i> artery</span>
           <span><i class="ln ven"></i> vein</span>
         </div>
-        <p class="muted">Voxels coloured by the field (viridis: low → high) — pressure for the demos; pick pressure / flux / time-of-flight for a 3-D project.</p>
+        <p class="muted">Voxels coloured by the field (viridis: low → high) — pressure for the demos; for a 3-D project pick any solve, oxygen or tracer field.</p>
       </section>
     </aside>
 

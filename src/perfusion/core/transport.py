@@ -18,8 +18,17 @@ import scipy.sparse.linalg as spla
 from .darcy import Grid, upwind_operator
 
 
+def _upwind(grid, fx, fy, fz=None):
+    """The upwind operator for a 2-D grid, or a 3-D grid when ``fz`` is given."""
+    if fz is None:
+        return upwind_operator(grid, fx, fy)
+    from .darcy3d import upwind_operator_3d
+
+    return upwind_operator_3d(grid, fx, fy, fz)
+
+
 def build_advection(grid: Grid, fx: np.ndarray, fy: np.ndarray, sources,
-                    terminal_flux: np.ndarray):
+                    terminal_flux: np.ndarray, fz: np.ndarray | None = None):
     """Assemble the linear advection operator and the source/sink split.
 
     Returns ``(A, inject, extract, pore_volume)`` such that the semi-discrete
@@ -29,9 +38,10 @@ def build_advection(grid: Grid, fx: np.ndarray, fy: np.ndarray, sources,
 
     where ``A`` gathers net inter-cell upwind fluxes (inflow minus outflow),
     ``inject`` is the arterial injection weight per cell, and ``extract`` the
-    venous extraction weight.
+    venous extraction weight. Passing ``fz`` (and a ``Grid3D``) assembles the
+    3-D operator over the interior faces of ``darcy3d.face_fluxes_3d``.
     """
-    inflow_op, outflow = upwind_operator(grid, fx, fy)
+    inflow_op, outflow = _upwind(grid, fx, fy, fz)
     A = inflow_op - sp.diags(outflow)
 
     inject = np.zeros(grid.n_cells)
@@ -46,9 +56,9 @@ def build_advection(grid: Grid, fx: np.ndarray, fy: np.ndarray, sources,
     return A.tocsr(), inject, extract, pore_volume
 
 
-def cfl_limit(grid: Grid, fx, fy, sources, terminal_flux) -> float:
+def cfl_limit(grid: Grid, fx, fy, sources, terminal_flux, fz=None) -> float:
     """Largest stable explicit-Euler time step (min cell volume / total outflux)."""
-    A, _, extract, pore_volume = build_advection(grid, fx, fy, sources, terminal_flux)
+    A, _, extract, pore_volume = build_advection(grid, fx, fy, sources, terminal_flux, fz)
     outflux = -A.diagonal() + extract           # diag(A) = -face outflow
     active = outflux > 0
     return float(np.min(pore_volume[active] / outflux[active])) if active.any() else np.inf
@@ -56,7 +66,7 @@ def cfl_limit(grid: Grid, fx, fy, sources, terminal_flux) -> float:
 
 def transport_forward(grid: Grid, fx, fy, sources, terminal_flux,
                       aif: np.ndarray, dt: float, theta: float = 0.5,
-                      clip_negative: bool = True) -> np.ndarray:
+                      clip_negative: bool = True, fz=None) -> np.ndarray:
     """Tracer transport via the theta rule, returning concentration snapshots.
 
     Parameters
@@ -69,13 +79,14 @@ def transport_forward(grid: Grid, fx, fy, sources, terminal_flux,
         (unconditionally stable). For ``theta > 0`` a single LU factorisation of
         ``I - theta*dt*L`` is reused across all steps.
     clip_negative : clamp tiny negative concentrations to zero.
+    fz : z-face fluxes — pass them (with a ``Grid3D``) for 3-D transport.
 
     Returns
     -------
-    ``(n_steps, nx, ny)`` array of tissue concentration fields.
+    ``(n_steps, nx, ny)`` (or ``(n_steps, nx, ny, nz)``) tissue concentration fields.
     """
     A, inject, extract, pore_volume = build_advection(grid, fx, fy, sources,
-                                                      terminal_flux)
+                                                      terminal_flux, fz)
     n = grid.n_cells
     inv_volume = 1.0 / pore_volume
     # semi-discrete: dC/dt = L @ C + inv_volume * inject * ca(t)
@@ -83,7 +94,7 @@ def transport_forward(grid: Grid, fx, fy, sources, terminal_flux,
     source = inv_volume * inject
 
     if theta == 0.0:
-        limit = cfl_limit(grid, fx, fy, sources, terminal_flux)
+        limit = cfl_limit(grid, fx, fy, sources, terminal_flux, fz)
         if dt > limit:
             warnings.warn(
                 f"transport_forward: explicit dt={dt:g} exceeds the CFL limit "
@@ -96,7 +107,8 @@ def transport_forward(grid: Grid, fx, fy, sources, terminal_flux,
         rhs_op = identity + (1.0 - theta) * dt * L
 
     concentration = np.zeros(n)
-    frames = np.empty((len(aif), grid.nx, grid.ny))
+    shape = grid.mask.shape
+    frames = np.empty((len(aif), *shape))
     for step, ca in enumerate(aif):
         ca_next = aif[step + 1] if step + 1 < len(aif) else ca
         ca_eff = theta * ca_next + (1.0 - theta) * ca
@@ -104,5 +116,5 @@ def transport_forward(grid: Grid, fx, fy, sources, terminal_flux,
         concentration = rhs if lhs_solve is None else lhs_solve(rhs)
         if clip_negative:
             concentration = np.clip(concentration, 0.0, None)
-        frames[step] = concentration.reshape(grid.nx, grid.ny, order="F")
+        frames[step] = concentration.reshape(shape, order="F")
     return frames

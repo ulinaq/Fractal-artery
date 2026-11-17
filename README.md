@@ -98,8 +98,11 @@ Strahler orders, inflow and a homogeneity objective, or *Animate growth*.
 (outline + trees editable), 3-D opens in the 3-D viewer to run and inspect.
 
 **🧊 3-D viewer** (`/viewer3d.html`) renders a 3-D hybrid result (trees + voxel
-field) in a rotatable, dependency-free canvas; for a **3-D project** it runs the 3-D
-solve and shows pressure / flux / time-of-flight. Interactive API docs are at `/docs`.
+field) in a rotatable, dependency-free canvas. For a **3-D project** it is a full
+workbench: run the 3-D solve; grow (CCO / colonisation), prune or Murray-adapt the 3-D
+trees; compute the **🌊 flow** (a contrast bolus advected through the voxel bed, played
+back in 3-D) with a tracer-kinetic fit; and map pressure / flux / time-of-flight,
+O₂ saturation / consumption, or the Fp / vp / CBV / MTT kinetic maps. Interactive API docs are at `/docs`.
 See [`frontend/`](frontend/README.md) for the UI in detail.
 
 ### Back-end API

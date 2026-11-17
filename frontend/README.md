@@ -83,7 +83,8 @@ no separate dev server.
   CCO (terminals) — then see the solved field, Strahler orders and inflow.
   *Animate growth* replays it generation by generation, then step by step.
   **📤 Open as project** saves the setup as a project (`POST /explore/project`):
-  2-D → this workspace (editable), 3-D → the 3-D viewer (Run + field picker).
+  2-D → this workspace (editable), 3-D → the 3-D viewer (run, grow / prune / adapt,
+  🌊 flow playback + kinetics, oxygen and kinetic-map fields).
 - **Default trees** — with no vessels drawn, the fractal trees a run would use are
   shown dashed in the Vessels tab (fitted to the project's domain).
 - **3-D viewer** (`viewer3d.html`) — a separate page (linked from the header)
@@ -117,6 +118,5 @@ are vectorised into the network and points snap onto the nearest end nodes.
 ## Roadmap
 
 The zero-build stack stays deliberately small. Still open for the UI (see
-`docs/ROADMAP.md` §11): a 3-D project path (store/edit 3-D trees in projects),
-automated browser tests in CI, a run-comparison view, 3-D flow video, and an
+`docs/ROADMAP.md` §11): hand-editing 3-D trees, a run-comparison view, and an
 optional React/Vite + vtk.js rebuild against the same API.

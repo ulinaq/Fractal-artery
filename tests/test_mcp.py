@@ -78,7 +78,7 @@ def test_server_registers_expected_tools():
             "multicompartment_perfusion",
             "adapt_vessel_network", "uncertainty_quantification",
             "sobol_sensitivity_indices", "calibrate_parameter_to_flow",
-            "describe_model"} <= tools
+            "tissue_perfusion_analysis", "describe_model"} <= tools
 
 
 def test_calibrate_to_flow_recovers_value():
@@ -247,3 +247,18 @@ def test_generate_trees_uses_anatomical_roots_and_solves():
                                   n_terminals=15)
     assert r["inflow"] > 0
     assert r["inflow"] == pytest.approx(r["outflow"], rel=1e-6)
+
+
+@pytest.mark.parametrize("dim", [2, 3])
+def test_tissue_analysis_runs_the_same_chain_in_2d_and_3d(dim):
+    r = mcp_server.tissue_analysis(dim=dim, shape="kidney", generations=3, n_terminals=15,
+                                   n_frames=12, adapt=dim == 3)
+    assert r["dim"] == dim
+    assert r["inflow"] > 0
+    assert r["transit"]["mtt"] > 0
+    assert 0.2 < r["oxygen"]["oef"] < 0.8           # organ-volume-scaled Damköhler rate
+    assert r["tracer"]["Fp"] > 0
+    assert r["tracer"]["peak_concentration"] > 0
+    if dim == 3:
+        a = r["adaptation"]
+        assert abs(a["murray_final"] - 3) <= abs(a["murray_start"] - 3)

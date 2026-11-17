@@ -653,8 +653,15 @@ Effort: **S** ≲ a day, **M** a few days, **L** a week+, **XL** research.
 | 4 | ✅ **Default trees follow the project domain** — `runner.default_trees` (joint fit, `geometry.transform_network`), shown dashed in Vessels and on the result, rebuilt per sample in sweeps | done | | |
 | 5 | ✅ **Automated UI tests** — `tests/ui/` (Playwright, real server + Chromium), CI `ui` job | done | | |
 
-Still open from this tier: grow / adapt / tracer / kinetics / oxygen **on 3-D projects**
-(they answer 409 today), and editing 3-D trees by hand.
+- ✅ **Analyses on 3-D projects** — grow (CCO / colonisation in the 3-D mask), prune,
+  Murray adaptation (`run_adaptation` takes a `Grid3D`; `pipeline3d.darcy_coupling_3d`
+  is reused across iterations), tracer transport (`transport_forward(fz=)`), kinetics
+  + Fp/vp/CBV/MTT maps (N-D `tkm`), oxygen (`solve_oxygen(fz=)`); all in the 3-D viewer
+  (`view3d?field=`), and the MCP tool `tissue_perfusion_analysis` (2-D or 3-D). Also
+  fixed: oxygen's Damköhler rate now uses the *active* tissue volume (a masked organ
+  had a diluted rate → OEF ≈ 0.07 instead of ≈ 0.5 at k = 1).
+
+Still open from this tier: editing 3-D trees by hand.
 
 ## 11.2 Modelling & numerics
 
@@ -686,8 +693,10 @@ Still open from this tier: grow / adapt / tracer / kinetics / oxygen **on 3-D pr
   result-comparison view (needs a multi-result-per-project data model) — §9.5. *M–L.*
 - ✅ ~~**Server-side MP4** export of the flow video~~ — `GET …/tracer.mp4` (`video` extra:
   imageio-ffmpeg bundles ffmpeg), ↓ MP4 next to ↓ GIF, also in the export bundle.
-- **3-D flow video** (tracer transport on the voxel bed + viewer playback) — §4. *M.*
-- **Workspace result analyses for 3-D** (tracer, kinetics, oxygen are 2-D only). *L.*
+- ✅ ~~**3-D flow video**~~ — tracer transport on the voxel bed, played back in the
+  3-D viewer (`view3d?field=tracer`). An MP4 of the 3-D view is not exported yet.
+- ✅ ~~**Workspace result analyses for 3-D**~~ — tracer, kinetics, oxygen, grow, adapt.
+  Still 2-D-only: UQ / calibration, multicompartment, the direct model. *M.*
 - Optional **React/Vite** rebuild and **vtk.js/WebGL** volume rendering behind the same
   API data — §5, §8. *L.*
 

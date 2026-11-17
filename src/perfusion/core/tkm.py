@@ -195,17 +195,18 @@ def deconvolution_maps(frames: np.ndarray, times: np.ndarray, aif: np.ndarray,
     - ``CBV`` — blood volume, ``∫k dt`` (== ``Fp·MTT``),
     - ``MTT`` — mean transit time, ``CBV / Fp``.
 
-    All ``(nx, ny)``; inactive voxels (``mask`` False) are NaN.
+    All frame-shaped (``(nx, ny)`` or ``(nx, ny, nz)``); inactive voxels NaN.
     """
     frames = np.asarray(frames, dtype=float)
     times = np.asarray(times, dtype=float)
     aif = np.asarray(aif, dtype=float)
-    n_t, nx, ny = frames.shape
-    flat = frames.reshape(n_t, nx * ny)
-    m = np.ones(nx * ny, dtype=bool) if mask is None else np.asarray(mask, dtype=bool).ravel()
-    fp = np.full(nx * ny, np.nan)
-    cbv = np.full(nx * ny, np.nan)
-    mtt = np.full(nx * ny, np.nan)
+    n_t, shape = frames.shape[0], frames.shape[1:]       # 2-D or 3-D voxels
+    n_vox = int(np.prod(shape))
+    flat = frames.reshape(n_t, n_vox)
+    m = np.ones(n_vox, dtype=bool) if mask is None else np.asarray(mask, dtype=bool).ravel()
+    fp = np.full(n_vox, np.nan)
+    cbv = np.full(n_vox, np.nan)
+    mtt = np.full(n_vox, np.nan)
     if m.any():
         k = deconvolve(times, aif, flat[:, m], oi=oi, circulant=circulant)   # (n_t, n_active)
         fp_a = k.max(axis=0)
@@ -213,4 +214,4 @@ def deconvolution_maps(frames: np.ndarray, times: np.ndarray, aif: np.ndarray,
         with np.errstate(divide="ignore", invalid="ignore"):
             mtt_a = np.where(fp_a > 0, cbv_a / fp_a, np.nan)
         fp[m], cbv[m], mtt[m] = fp_a, cbv_a, mtt_a
-    return {"Fp": fp.reshape(nx, ny), "CBV": cbv.reshape(nx, ny), "MTT": mtt.reshape(nx, ny)}
+    return {"Fp": fp.reshape(shape), "CBV": cbv.reshape(shape), "MTT": mtt.reshape(shape)}

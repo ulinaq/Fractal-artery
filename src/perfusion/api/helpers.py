@@ -216,6 +216,31 @@ def rebuild_network(template, node_x, node_y, seg_start, seg_end, seg_radius,
     )
 
 
+def tracer_aif(d: dict) -> np.ndarray:
+    """The tracer's stored arterial input (old blobs: rebuild the bolus shape)."""
+    from ..core import tkm
+
+    if "aif" in d:
+        return np.asarray(d["aif"], float)
+    times = d["times"]
+    dur = float(times[-1]) if len(times) else 1.0
+    ca = tkm.gamma_variate_aif(times, t0=0.08 * dur, A=3.0, B=max(0.06 * dur, 1e-6))
+    return ca / ca.max() if ca.max() > 0 else ca
+
+
+def tracer_map(d: dict, field: str, method: str = "semi", oi: float = 0.1,
+               circulant: bool = False) -> np.ndarray:
+    """A voxel-wise kinetic map (2-D or 3-D) from a stored tracer: ``semi``
+    (max-slope ``Fp`` / AUC ``vp``) or ``deconv`` (SVD ``Fp`` / ``CBV`` / ``MTT``)."""
+    from ..core import tkm
+
+    times, frames, mask, ca = d["times"], d["frames"], d["mask"], tracer_aif(d)
+    if method == "deconv":
+        return tkm.deconvolution_maps(frames, times, ca, mask=mask, oi=float(oi),
+                                      circulant=bool(circulant))[field]
+    return tkm.kinetic_maps(frames, times, ca, mask=mask)[field]
+
+
 def _tracer_images(tracer: dict) -> list:
     """Tracer frames colour-mapped (viridis) to upright RGB images (row = y down)."""
     from matplotlib import colormaps
