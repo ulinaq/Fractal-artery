@@ -22,17 +22,31 @@ no separate dev server.
   domain and the tongue as the organ mask — so the whole pipeline is instantly
   testable on real data.
 - **Project** — create a project (name, parameters, grid).
-- **Draw vessels** — sketch arteries/veins on the canvas; each stroke is one
-  segment, shared endpoints snap into branches (`PUT /projects/{id}/vessels`).
+- **Vessels tab — edit the network directly.** Vessels are a node/edge network
+  (each edge has its own radius), edited on the canvas: click empty space to
+  start a vessel and keep clicking to extend it; click a node, then empty space,
+  to branch from it; drag a node to move it; **click a vessel to select that
+  segment** and set its radius (slider or number) at any time; double-click a
+  vessel (or *＋ Insert node*) to split it; ⇧ Shift+click a node/vessel to join
+  to it; Del deletes the selected node or segment; Esc finishes. With nothing
+  selected the radius control sets the radius of new segments.
+  **Inlets/outlets are nodes**: select one and press *Set as inlet* (artery,
+  `p_in`) / *Set as outlet* (vein, `p_out`) or `I` — stored as the network's
+  `inlet_nodes`; a new vessel's first node is its feed by default. Save with
+  *Save vessels* (`PUT /projects/{id}/editable`, which also creates/removes
+  trees); Run/Grow/Adapt save pending edits automatically.
 - **Segment an image** — upload a vessel image; it is skeletonised into the
   artery or vein network (per the artery/vein selector) placed in the domain
   (`POST /projects/{id}/image?kind=…`, `image` extra).
-- **Draw tissue** — outline the organ in Tissue mode; the polygons become
-  `Grid.mask`, so the Darcy bed and growth are organ-shaped
-  (`PUT /projects/{id}/mask`).
-- **Inlets / Outlets** — in I/O mode, click near a vessel end to mark an inlet
-  (▲, artery, `p_in`) or outlet (▼, vein, `p_out`); any number of each
-  (`PUT /projects/{id}/io`). Empty = the single root inlet/outlet.
+- **Tissue tab — the same node editing for polygons.** Pick a layer (organ
+  outline → `Grid.mask`, low-K lesion, growth hotspot); click to add points,
+  click the first point / Enter to close; drag a point, click an outline to
+  insert one, drag inside to move a region, Del deletes. Only the chosen layer
+  is editable, so lesions/hotspots can be drawn inside the organ
+  (`PUT /projects/{id}/mask|lesions|hotspots`).
+- **Prune** — the inverse of Grow: remove the outermost `steps` generations of
+  the artery or vein (each step cuts every free-end branch back to its junction;
+  the trunk to the inlet/outlet is kept) — `POST /projects/{id}/prune`; undoable.
 - **Grow** — grow the arterial tree into the tissue (space colonisation or CCO,
   via the method picker; `POST /projects/{id}/grow`); the grown tree is overlaid.
 - **Run** — solve the hybrid model as an async job (`POST …/run` + poll
@@ -55,8 +69,10 @@ no separate dev server.
   surface with the vasculature at its base. Deep-linkable (`?model=frog`).
 
 The left-panel **tools are contextual**: picking a tab above the canvas
-(Vessels · Tissue · Inlets/Outlets · Result) shows just that tool card; Project,
-Parameters and Run stay put — so there's far less to scroll.
+(Vessels · Tissue · Result, keys 1–3) shows just that tool card; Project,
+Parameters and Run stay put — so there's far less to scroll. Legacy projects
+(hand-drawn polylines, inlet/outlet *points*) are converted on open: strokes
+are vectorised into the network and points snap onto the nearest end nodes.
 
 ## Files
 
@@ -64,7 +80,12 @@ Parameters and Run stay put — so there's far less to scroll.
 |---|---|
 | `index.html` | layout & controls |
 | `style.css`  | styling (no framework) |
-| `app.js`     | API client, canvas drawing, field rendering, job polling |
+| `core.js`    | domain/canvas geometry, API client, shared state |
+| `app.js`     | project lifecycle, history (undo/redo), tabs, keyboard, wiring |
+| `edit.js`    | Vessels tab: node/edge network editor + inlet/outlet nodes |
+| `tissue.js`  | Tissue tab: polygon (organ / lesion / hotspot) editor |
+| `render.js`  | all canvas drawing |
+| `run.js`     | solve, results, tracer, analyses |
 | `viewer3d.html` / `viewer3d.js` | standalone rotatable 3-D result viewer |
 
 ## Roadmap

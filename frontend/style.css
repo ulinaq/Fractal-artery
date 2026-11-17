@@ -163,3 +163,18 @@ input.mini { width: 3.6em; }
 #uq-out .bar { height: 9px; background: var(--accent); border-radius: 2px; display: inline-block; vertical-align: middle; }
 #uq-out table { border-collapse: collapse; margin-top: 6px; }
 #uq-out td { padding: 1px 6px 1px 0; white-space: nowrap; }
+
+/* node / polygon editor panels */
+.how { margin: 0 0 10px; }
+.how b { color: var(--ink-2); font-weight: 600; }
+.node-box { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 8px 0; margin-bottom: 8px; }
+.node-info { margin: 0 0 8px; font-size: 12px; color: var(--ink-2); line-height: 1.4; min-height: 1.4em; }
+.node-info b { color: var(--ink); }
+button.primary-soft { background: #eff6ff; border-color: #bfdbfe; color: var(--accent); font-weight: 600; }
+button.link-danger { border: none; background: none; padding: 2px 0; font-size: 12px; color: var(--muted); }
+button.link-danger:hover:not(:disabled) { color: #b91c1c; }
+.radius-row { display: flex; gap: 8px; align-items: center; margin-top: 3px; }
+.radius-row input[type=range] { flex: 1; min-width: 0; }
+.radius-row input[type=number] { width: 5.5em; margin-top: 0; }
+.prune-row { align-items: flex-end; }
+.prune-row label { margin: 0; width: 6em; }

@@ -184,6 +184,22 @@ class GrowInfo(BaseModel):
     n_terminals: int
 
 
+class PruneRequest(BaseModel):
+    """Prune the outermost generations of the arterial *or* venous tree (the
+    inverse of growing): each step removes every terminal branch (free end back
+    to its nearest junction); the trunk to the inlet/outlet is never removed."""
+
+    target: str = "artery"                       # "artery" | "vein"
+    steps: int = Field(1, ge=1, le=50)
+
+
+class PruneInfo(BaseModel):
+    id: str
+    n_segments: int
+    n_terminals: int
+    n_removed: int                                # segments removed
+
+
 class AdaptRequest(BaseModel):
     """Structurally adapt vessel radii toward Murray's law (wall-shear remodelling)."""
 
