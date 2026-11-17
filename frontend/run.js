@@ -450,7 +450,7 @@ export async function computeFlow() {
     }
   }
   state.flow.active = true;
-  ["flow-play", "flow-scrub", "flow-time", "flow-gif"].forEach((id) => ($(id).hidden = false));
+  ["flow-play", "flow-scrub", "flow-time", "flow-gif", "flow-mp4"].forEach((id) => ($(id).hidden = false));
   playFlow();
   fitKinetics().catch(() => {});    // also fit a TKM to the bolus (best-effort)
 }
@@ -461,6 +461,7 @@ async function loadTracer() {
   state.flow.idx = 0;
   $("flow-scrub").max = t.n_frames - 1;
   $("flow-gif").href = `/projects/${state.project}/tracer.gif`;
+  $("flow-mp4").href = `/projects/${state.project}/tracer.mp4`;
 }
 
 // direct model: animate the bolus along the vascular network (transit-time based)
@@ -485,7 +486,7 @@ async function computeNetworkFlow() {
   }
   state.flow.active = true;
   ["flow-play", "flow-scrub", "flow-time"].forEach((id) => ($(id).hidden = false));
-  $("flow-gif").hidden = true;                 // no GIF for the network animation
+  $("flow-gif").hidden = $("flow-mp4").hidden = true;   // no GIF/MP4 for the network animation
   playFlow();
 }
 

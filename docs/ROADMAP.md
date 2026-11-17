@@ -107,7 +107,7 @@ Every requested capability, and where it lives.
 | 2-D result views | ✅ canvas heatmap, zoom/pan, HiDPI | ✅ `GET /projects/{id}/results/field/{name}` | `core` fields → JSON |
 | 3-D result views | ✅ dependency-free canvas (rotate/zoom/pan); vtk.js optional | ✅ `GET /projects/{id}/view3d`, `/demo3d`, `POST /explore/grow` (dim=3) | ✅ `pipeline3d` (pressure + flux + TOF); `.vtp` export |
 | Grow trees into an organ (2-D/3-D) | ✅ Tree explorer: organ, roots, generations, fill, size | ✅ `POST /explore/grow`, `GET /shapes` | ✅ `treegen`, `organs`, `growth` (2-D/3-D) |
-| Flow video (2-D/3-D) | ✅ player + scrubber | ✅ `POST/GET /projects/{id}/tracer`, `…/tracer.gif` | `core.transport` (bolus advection) + GIF |
+| Flow video (2-D/3-D) | ✅ player + scrubber | ✅ `POST/GET /projects/{id}/tracer`, `…/tracer.gif`, `…/tracer.mp4` | `core.transport` (bolus advection) + GIF / MP4 |
 | Export results | ✅ download + format picker | ✅ `GET /projects/{id}/export?fmt=npz\|csv\|vtk` | ✅ `io` exporters (npz/CSV/VTK); MP4 pending |
 | Parameter sweeps / experiments | forms | `POST /experiments` (batch jobs) | `optimize`, batch runner |
 
@@ -254,7 +254,8 @@ imports move to `perfusion.core.*`.
   (`core.transport`, timed off the time-of-flight); the UI plays/scrubs the
   frames as a 2-D flow animation with a robust (99th-pct) colour scale, and an
   animated GIF can be downloaded. `POST/GET /projects/{id}/tracer` (job) +
-  `GET /projects/{id}/tracer.gif` (needs the `image` extra).
+  `GET /projects/{id}/tracer.gif` (needs the `image` extra) / `tracer.mp4`
+  (H.264 via the `video` extra's bundled ffmpeg).
 - ✅ **Image upload + segmentation (artery & vein)** — `POST /projects/{id}/image?kind=artery|vein`
   segments an uploaded vessel image (`segmentation.segment_network`) and places
   it in the project's domain (`segmentation.network_in_domain`) as the arterial
@@ -683,7 +684,8 @@ Still open from this tier: grow / adapt / tracer / kinetics / oxygen **on 3-D pr
 
 - **Batch experiments / run comparison** — `POST /experiments` (§3), an A/B
   result-comparison view (needs a multi-result-per-project data model) — §9.5. *M–L.*
-- **Server-side MP4** export of the flow video (ffmpeg) — §3. *S.*
+- ✅ ~~**Server-side MP4** export of the flow video~~ — `GET …/tracer.mp4` (`video` extra:
+  imageio-ffmpeg bundles ffmpeg), ↓ MP4 next to ↓ GIF, also in the export bundle.
 - **3-D flow video** (tracer transport on the voxel bed + viewer playback) — §4. *M.*
 - **Workspace result analyses for 3-D** (tracer, kinetics, oxygen are 2-D only). *L.*
 - Optional **React/Vite** rebuild and **vtk.js/WebGL** volume rendering behind the same
@@ -692,8 +694,14 @@ Still open from this tier: grow / adapt / tracer / kinetics / oxygen **on 3-D pr
 ## 11.5 Performance (from §10.2, measured, not yet applied)
 
 - ✅ ~~Avoid the `.tolil()` pin round-trip~~ in `darcy.terminal_response` and `darcy3d`
-  (`darcy.pin_row`); `multicompartment` still uses it. *S.*
-- KD-tree the 2-D terminal snapping (`pipeline._snap_to_active` is `O(T·n_active)`; the 3-D
-  path already uses `cKDTree`) and the coincident-cell spreading. *S.*
-- Maintain CCO node/child arrays incrementally (`growth.cco_grow` is `O(n²)`). *S–M.*
-- Vectorise `network_transit.arrival_times` edge construction. *S.*
+  (`darcy.pin_row`) — now also in `multicompartment`, `darcy3d.solve_pressure_3d` and
+  the monolithic `W_src` (no LIL left in `core`).
+- ✅ ~~KD-tree the 2-D terminal snapping~~ — `pipeline._snap_to_active` uses `cKDTree`
+  (ties → lowest active index, bit-identical to the brute argmin; ~5× on 3 000 terminals).
+  The coincident-cell spiral search (`_spread_coincident`) only runs for duplicates and
+  is left as is.
+- ✅ ~~Maintain CCO node/child arrays incrementally~~ — `growth.cco_grow` keeps
+  preallocated position/parent arrays (no per-step list→array rebuild); identical trees,
+  ~3× faster. Each step is still one vectorised `O(n)` nearest-segment scan.
+- ✅ ~~Vectorise `network_transit.arrival_times` edge construction~~ — edges are built as
+  arrays and relaxed through a CSR adjacency with `np.minimum.at`; identical arrival times.

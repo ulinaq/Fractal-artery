@@ -77,13 +77,21 @@ def _snap_to_active(grid: Grid, cells: np.ndarray) -> np.ndarray:
     active = grid.mask.ravel(order="F")
     if active.all():
         return cells
+    off = np.flatnonzero(~active[cells])
+    if not off.size:
+        return cells
+    from scipy.spatial import cKDTree
+
     active_idx = np.flatnonzero(active)
-    ax, ay = active_idx % grid.nx, active_idx // grid.nx
+    pts = np.column_stack([active_idx % grid.nx, active_idx // grid.nx])
+    q = np.column_stack([cells[off] % grid.nx, cells[off] // grid.nx])
+    k = min(8, len(active_idx))
+    dist, nbr = cKDTree(pts).query(q, k=k)
+    dist, nbr = dist.reshape(len(off), k), nbr.reshape(len(off), k)
+    # ties (equal integer distances) -> lowest active index, as a brute argmin would pick
+    tie = np.where(np.isclose(dist, dist[:, :1]), nbr, np.iinfo(np.int64).max)
     cells = cells.copy()
-    for i, c in enumerate(cells):
-        if not active[c]:
-            cx, cy = c % grid.nx, c // grid.nx
-            cells[i] = int(active_idx[np.argmin((ax - cx) ** 2 + (ay - cy) ** 2)])
+    cells[off] = active_idx[tie.min(axis=1)]
     return cells
 
 

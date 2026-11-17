@@ -151,11 +151,12 @@ def solve_pressure_3d(grid: Grid3D, source: np.ndarray, *, solver: str = "direct
     from .linsolve import solve_spd
 
     active = grid.mask.ravel(order="F")
-    A = tpfa_operator_3d(grid).tolil()
+    from .darcy import pin_row
+
     b = np.asarray(source, dtype=float).copy()
     pin = int(np.flatnonzero(active)[0])
-    A.rows[pin], A.data[pin], b[pin] = [pin], [1.0], 0.0     # datum: p_pin = 0
-    p = solve_spd(A.tocsr(), b, method=solver)
+    b[pin] = 0.0                                              # datum: p_pin = 0
+    p = solve_spd(pin_row(tpfa_operator_3d(grid), pin).tocsr(), b, method=solver)
     return p.reshape(grid.nx, grid.ny, grid.nz, order="F")
 
 

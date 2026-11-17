@@ -26,7 +26,7 @@ jobs:
       - name: Test (full suite, all extras)
         run: >-
           uv run --python ${{ matrix.python-version }}
-          --extra api --extra image --extra mcp
+          --extra api --extra image --extra mcp --extra video
           pytest -q
 
   frontend:

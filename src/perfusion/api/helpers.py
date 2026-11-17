@@ -2,7 +2,7 @@
 
 Kept out of the routers so the request handlers stay thin and these stay unit-
 testable: the frog/demo 3-D scene builders, the edited-network rebuild, and the
-tracer-GIF renderer.
+tracer GIF / MP4 renderers.
 """
 
 from __future__ import annotations
@@ -216,11 +216,8 @@ def rebuild_network(template, node_x, node_y, seg_start, seg_end, seg_radius,
     )
 
 
-def render_gif(tracer: dict, fps: int = 12) -> bytes:
-    """Colour-map tracer frames (viridis) into an animated GIF (needs imageio)."""
-    import io as _io
-
-    import imageio.v2 as imageio
+def _tracer_images(tracer: dict) -> list:
+    """Tracer frames colour-mapped (viridis) to upright RGB images (row = y down)."""
     from matplotlib import colormaps
 
     frames, mask, vmax = tracer["frames"], tracer["mask"], float(tracer["vmax"]) or 1.0
@@ -230,6 +227,51 @@ def render_gif(tracer: dict, fps: int = 12) -> bytes:
         rgb = (cmap(np.clip(f / vmax, 0.0, 1.0))[..., :3] * 255).astype(np.uint8)
         rgb[~mask] = 245                        # inactive tissue -> light grey
         images.append(np.transpose(rgb, (1, 0, 2))[::-1])   # (nx,ny)->image (row=y down)
+    return images
+
+
+def render_gif(tracer: dict, fps: int = 12) -> bytes:
+    """Colour-map tracer frames (viridis) into an animated GIF (needs imageio)."""
+    import io as _io
+
+    import imageio.v2 as imageio
+
     buf = _io.BytesIO()
-    imageio.mimsave(buf, images, format="GIF", fps=fps, loop=0)
+    imageio.mimsave(buf, _tracer_images(tracer), format="GIF", fps=fps, loop=0)
     return buf.getvalue()
+
+
+def render_mp4(tracer: dict, fps: int = 12, min_size: int = 480) -> bytes:
+    """Encode the tracer frames as an H.264 MP4 (needs the ``video`` extra:
+    imageio + imageio-ffmpeg, which ships its own ffmpeg binary).
+
+    Frames are upscaled by an integer factor (nearest, so cells stay crisp) to at
+    least ``min_size`` px and padded to a multiple of 16 for yuv420p / players.
+    """
+    import os
+    import tempfile
+
+    import imageio.v2 as imageio
+    import imageio_ffmpeg  # noqa: F401 — fail early (ImportError) without the extra
+
+    images = _tracer_images(tracer)
+    h, w = images[0].shape[:2]
+    k = max(1, -(-min_size // max(1, min(h, w))))       # ceil(min_size / short side)
+    H, W = -(-h * k // 16) * 16, -(-w * k // 16) * 16
+
+    def frame(img):
+        big = np.repeat(np.repeat(img, k, axis=0), k, axis=1)
+        out = np.full((H, W, 3), 245, np.uint8)
+        out[:big.shape[0], :big.shape[1]] = big
+        return out
+
+    fd, path = tempfile.mkstemp(suffix=".mp4")
+    os.close(fd)
+    try:
+        imageio.mimwrite(path, [frame(i) for i in images], fps=fps, codec="libx264",
+                         pixelformat="yuv420p", macro_block_size=1,
+                         ffmpeg_log_level="error")
+        with open(path, "rb") as f:
+            return f.read()
+    finally:
+        os.unlink(path)
