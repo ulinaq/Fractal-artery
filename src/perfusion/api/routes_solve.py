@@ -459,7 +459,7 @@ def export(pid: str, fmt: str = "npz", project: Project = Depends(get_project),
 def export_bundle(pid: str, project: Project = Depends(get_project_2d),
                   store: ProjectStore = Depends(get_store)):
     """One zip with everything: npz + CSV + VTK fields, summary/meta JSON, and
-    the tracer GIF if one exists."""
+    the tracer GIF / MP4 if one exists."""
     import contextlib
     import json
     import zipfile
@@ -489,8 +489,11 @@ def export_bundle(pid: str, project: Project = Depends(get_project_2d),
         z.writestr("summary.json", json.dumps(project.summary, indent=2))
         z.writestr("meta.json", json.dumps(meta, indent=2))
         if project.has_tracer:
+            tracer = store.load_tracer(pid)
             with contextlib.suppress(ImportError):   # GIF needs the image extra
-                z.writestr("tracer.gif", helpers.render_gif(store.load_tracer(pid)))
+                z.writestr("tracer.gif", helpers.render_gif(tracer))
+            with contextlib.suppress(ImportError):   # MP4 needs the video extra
+                z.writestr("tracer.mp4", helpers.render_mp4(tracer))
     return FileResponse(out, media_type="application/zip", filename=f"{name}.zip")
 
 
@@ -537,3 +540,20 @@ def demo3d(gen: int = 6, model: str = "synthetic") -> dict:
             raise HTTPException(501, "the frog model needs the 'image' extra: "
                                      "uv sync --extra image") from None
     return helpers.demo3d_payload(gen)
+
+
+@router.get("/projects/{pid}/tracer.mp4")
+def tracer_mp4(pid: str, fps: int = 12, project: Project = Depends(get_project_2d),
+               store: ProjectStore = Depends(get_store)):
+    """The tracer flow video as an H.264 MP4 (server-side ffmpeg)."""
+    from fastapi.responses import Response
+
+    if not project.has_tracer:
+        raise HTTPException(409, "no tracer yet; POST to /tracer first")
+    try:
+        mp4 = helpers.render_mp4(store.load_tracer(pid), fps=int(np.clip(fps, 1, 60)))
+    except ImportError:
+        raise HTTPException(501, "MP4 export needs the 'video' extra: "
+                                 "uv sync --extra video") from None
+    return Response(mp4, media_type="video/mp4",
+                    headers={"content-disposition": f'attachment; filename="{pid}.mp4"'})

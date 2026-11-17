@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 image = ["imageio>=2.30", "scikit-image>=0.21"]
+video = ["imageio>=2.30", "imageio-ffmpeg>=0.5"]   # server-side MP4 export
 api = ["fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2.5"]
 mcp = ["mcp>=1.0"]
 amg = ["pyamg>=5.0"]

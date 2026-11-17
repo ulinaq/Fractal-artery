@@ -243,9 +243,9 @@ def _weight_matrices(n_cells: int, sources, pin_cell: int):
         if sources else np.zeros(0, int)
     vals = np.concatenate([w for _, w in sources]) if sources else np.zeros(0)
     W_avg = sp.csr_matrix((vals, (rows, cols)), shape=(n_cells, len(sources)))
-    W_src = W_avg.tolil()
-    W_src[pin_cell, :] = 0.0
-    return W_src.tocsr(), W_avg
+    keep = np.ones(n_cells)
+    keep[pin_cell] = 0.0
+    return (sp.diags(keep) @ W_avg).tocsr(), W_avg
 
 
 def terminal_response(grid: Grid, terminal_cells: np.ndarray, eps: float,

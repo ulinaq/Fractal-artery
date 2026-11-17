@@ -45,30 +45,31 @@ def arrival_times(art: Network, ven: Network, connections: list[Connection],
     # so stagnant branches stay dark rather than acquiring absurd V/|q| transit times.
     q_all = np.concatenate([np.abs(sol.q_a), np.abs(sol.q_v), np.abs(sol.q_c)])
     q_tol = 1e-9 * (float(q_all.max()) if q_all.size else 0.0)
-    edges: list[tuple[int, int, float]] = []       # (upstream, downstream, weight)
 
-    def tree_edges(net: Network, q: np.ndarray, p: np.ndarray, offset: int) -> None:
-        vol = _segment_volumes(net)
-        for s in range(net.n_segments):
-            if abs(q[s]) <= q_tol:
-                continue
-            u, v = int(net.seg_start[s]), int(net.seg_end[s])
-            if p[v] > p[u]:                          # orient high → low pressure
-                u, v = v, u
-            edges.append((offset + u, offset + v, float(vol[s] / abs(q[s]))))
+    def tree_edges(net: Network, q: np.ndarray, p: np.ndarray, offset: int):
+        q = np.abs(np.asarray(q, float))
+        ok = q > q_tol
+        u, v = net.seg_start[ok].astype(int), net.seg_end[ok].astype(int)
+        flip = p[v] > p[u]                           # orient high → low pressure
+        u, v = np.where(flip, v, u), np.where(flip, u, v)
+        return offset + u, offset + v, _segment_volumes(net)[ok] / q[ok]
 
-    tree_edges(art, sol.q_a, sol.p_a, 0)
-    tree_edges(ven, sol.q_v, sol.p_v, na)
-    for c, qc in zip(connections, sol.q_c, strict=True):
-        if abs(float(qc)) <= q_tol:
-            continue
-        vol = np.pi * c.radius**2 * c.length
-        edges.append((c.arterial_terminal, na + c.venous_terminal, vol / abs(float(qc))))
+    parts = [tree_edges(art, sol.q_a, sol.p_a, 0), tree_edges(ven, sol.q_v, sol.p_v, na)]
+    if connections:
+        qc = np.abs(np.asarray(sol.q_c, float))
+        ok = qc > q_tol
+        ca = np.array([c.arterial_terminal for c in connections], int)[ok]
+        cv = np.array([c.venous_terminal for c in connections], int)[ok]
+        cvol = np.array([np.pi * c.radius**2 * c.length for c in connections])[ok]
+        parts.append((ca, na + cv, cvol / qc[ok]))
+    eu = np.concatenate([e[0] for e in parts])
+    ev = np.concatenate([e[1] for e in parts])
+    ew = np.concatenate([e[2] for e in parts])
 
     n = na + nv
-    out: list[list[tuple[int, float]]] = [[] for _ in range(n)]
-    for u, v, w in edges:
-        out[u].append((v, w))
+    order = np.argsort(eu, kind="stable")           # CSR-style adjacency by upstream node
+    eu, ev, ew = eu[order], ev[order], ew[order]
+    start = np.searchsorted(eu, np.arange(n + 1))
 
     arrival = np.full(n, np.inf)
     for r in art.inlet_nodes:
@@ -77,9 +78,10 @@ def arrival_times(art: Network, ven: Network, connections: list[Connection],
         au = arrival[u]
         if not np.isfinite(au):
             continue
-        for v, w in out[u]:
-            if au + w < arrival[v]:
-                arrival[v] = au + w
+        lo, hi = start[u], start[u + 1]
+        if lo == hi:
+            continue
+        np.minimum.at(arrival, ev[lo:hi], au + ew[lo:hi])
     return arrival[:na], arrival[na:]
 
 
