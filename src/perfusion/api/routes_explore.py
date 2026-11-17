@@ -135,7 +135,7 @@ def grow_spec(req: ExploreGrowRequest):
         return treegen.TreeSpec(root=tuple(root), angle=angle, direction=tuple(d),
                                 radius=t.radius, gamma=t.gamma)
 
-    nx = min(req.nx, 36) if req.dim == 3 else req.nx
+    nx = min(req.nx, 48) if req.dim == 3 else req.nx   # sparse monolithic solve
     return treegen.GenSpec(
         dim=req.dim, shape=req.shape, polygon=req.polygon, size=req.size,
         extent=req.extent, twist=req.twist, jitter=req.jitter,

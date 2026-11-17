@@ -206,6 +206,48 @@ def mollifier(grid: Grid, center: int, eps: float) -> tuple[np.ndarray, np.ndarr
     return np.flatnonzero(support), weights
 
 
+def pin_row(A, pin_cell: int) -> sp.csc_matrix:
+    """``A`` with row ``pin_cell`` replaced by the identity row (a Dirichlet pin that
+    removes the Neumann nullspace) — done sparsely, without a LIL round-trip."""
+    A = sp.csr_matrix(A)
+    keep = np.ones(A.shape[0])
+    keep[pin_cell] = 0.0
+    e = sp.csr_matrix(([1.0], ([pin_cell], [pin_cell])), shape=A.shape)
+    return (sp.diags(keep) @ A + e).tocsc()
+
+
+def coupling_operator(grid: Grid, terminal_cells: np.ndarray, eps: float,
+                      pin_cell: int | None = None):
+    """Sparse Darcy coupling for the monolithic hybrid solve.
+
+    Returns ``(MonolithicDarcy, sources)``: the pinned TPFA operator and the
+    mollified terminal weights (as sparse ``(n_cells, T)`` matrices), plus the
+    per-terminal ``(cells, weights)`` (reused by time-of-flight / transport). Same
+    model as :func:`terminal_response` — eliminating the bed pressures gives back
+    its dense response — but ``O(nnz)`` memory instead of ``O(n_cells · T)``.
+    """
+    from .network import MonolithicDarcy
+
+    if pin_cell is None:
+        pin_cell = int(np.flatnonzero(grid.mask.ravel(order="F"))[0])
+    A = pin_row(tpfa_operator(grid)[0], pin_cell).tocsr()
+    sources = [mollifier(grid, int(c), eps) for c in terminal_cells]
+    return MonolithicDarcy(A, *_weight_matrices(grid.n_cells, sources, pin_cell)), sources
+
+
+def _weight_matrices(n_cells: int, sources, pin_cell: int):
+    """``(W_src, W_avg)``: terminal weights as sparse ``(n_cells, T)`` columns; the
+    source copy has the pin row zeroed (as the Schur right-hand side does)."""
+    rows = np.concatenate([c for c, _ in sources]) if sources else np.zeros(0, int)
+    cols = np.concatenate([np.full(len(c), j) for j, (c, _) in enumerate(sources)]) \
+        if sources else np.zeros(0, int)
+    vals = np.concatenate([w for _, w in sources]) if sources else np.zeros(0)
+    W_avg = sp.csr_matrix((vals, (rows, cols)), shape=(n_cells, len(sources)))
+    W_src = W_avg.tolil()
+    W_src[pin_cell, :] = 0.0
+    return W_src.tocsr(), W_avg
+
+
 def terminal_response(grid: Grid, terminal_cells: np.ndarray, eps: float,
                       pin_cell: int | None = None):
     """Darcy pressure response of the capillary bed to unit terminal fluxes.
@@ -222,10 +264,7 @@ def terminal_response(grid: Grid, terminal_cells: np.ndarray, eps: float,
     n_terminals = len(terminal_cells)
     if pin_cell is None:
         pin_cell = int(np.flatnonzero(grid.mask.ravel(order="F"))[0])  # first active cell
-    A = tpfa_operator(grid)[0].tolil()
-    A[pin_cell, :] = 0.0
-    A[pin_cell, pin_cell] = 1.0            # Dirichlet pin removes the nullspace
-    lu = spla.splu(A.tocsc())
+    lu = spla.splu(pin_row(tpfa_operator(grid)[0], pin_cell))   # Dirichlet pin
 
     sources = [mollifier(grid, int(c), eps) for c in terminal_cells]
     rhs = np.zeros((grid.n_cells, n_terminals))

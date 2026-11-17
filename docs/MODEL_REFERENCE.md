@@ -253,6 +253,14 @@ superposition, $P(\mathbf x)=\sum_j f_j\,\mathbf{pvec}_j$.
 > **Code.** `darcy.terminal_response` (batched LU back-substitution over all
 > terminals) and `darcy.reconstruct_field`.
 
+**Monolithic alternative.** Instead of pre-eliminating the bed, its pressures can be
+kept as unknowns: $A_D\mathbf P = \sum_j f_j\mathbf s_j$ and the terminal pressures
+$\mathbf w_i^{\top}\mathbf P$ enter the coupling rows directly. Eliminating
+$\mathbf P$ recovers $\mathcal P$ exactly, but the system stays sparse — memory scales
+with the number of nonzeros instead of (cells × terminals), which is what fine 3-D
+grids with thousands of terminals need. **Code.** `run_hybrid(coupling=…)`,
+`darcy.coupling_operator`, `network.MonolithicDarcy`.
+
 ## 5.2 Coupling equations and the closed loop
 
 Pressure continuity between the 1-D terminals and the 3-D bed reads

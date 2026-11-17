@@ -216,7 +216,7 @@ class ExploreGrowRequest(BaseModel):
     solve: bool = True
     field: str = "flux"                       # 2-D field to render (pressure/flux/tof)
     kind: str = "tof_std"                     # 2-D homogeneity objective
-    nx: int = Field(60, ge=12, le=200)        # 2-D grid (3-D uses n³ with n = nx, ≤ 36)
+    nx: int = Field(60, ge=12, le=200)        # 2-D grid (3-D uses n³ with n = nx, ≤ 48)
     ny: int = Field(70, ge=12, le=230)
 
 
