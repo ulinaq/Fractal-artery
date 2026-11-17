@@ -43,6 +43,7 @@ uv sync                      # core deps into .venv
 uv sync --extra image        # + imageio/scikit-image (for image segmentation)
 uv sync --extra api          # + fastapi/uvicorn/pydantic (for the web back-end)
 uv sync --extra mcp          # + the MCP SDK (to expose the engine as MCP tools)
+uv sync --extra video        # + imageio-ffmpeg (server-side MP4 of the flow video; bundles ffmpeg)
 
 uv run pytest                # run the test suite
 uv run --extra api --extra image --extra ui pytest tests/ui   # browser tests (Playwright)
@@ -76,7 +77,7 @@ right-drag / Space+drag = pan, ＋ − ⤢ buttons).
   vertex by vertex (drag, insert, delete, move), or drop in an **organ preset**
   (heart, kidney, brain, liver, lung, …) and adjust it.
 - **Result** — pressure / flux / time-of-flight heatmaps, a contrast-bolus **flow
-  video** (+ GIF), transit-time distribution, tracer-kinetic fits and maps,
+  video** (+ GIF / MP4), transit-time distribution, tracer-kinetic fits and maps,
   pulsatile, multi-compartment, oxygen and uncertainty analyses, and export.
 
 🐸 **Frog** loads a real segmented frog-tongue system in one click. Set a New
@@ -125,7 +126,7 @@ Main endpoints (full OpenAPI at `/docs`):
 |---|---|
 | Projects | `projects` (CRUD), `projects/frog`, `projects/import`, `projects/{id}/document` (portable `.json`) |
 | Geometry | `projects/{id}/editable` (GET/PUT the artery/vein networks — create, edit, remove; `inlet_nodes` = inlets/outlets), `…/image?kind=artery\|vein` (segment), `…/grow`, `…/prune`, `…/adapt`, `…/morphometry`, `…/mask`, `…/lesions`, `…/hotspots`, `…/network`, legacy `…/vessels` + `…/io` |
-| Solve & results | `…/run` (job), `jobs/{id}`, `…/results[/field/{name}]`, `…/tracer` (+ `tracer.gif`), `…/transit`, `…/kinetics[/maps]`, `…/oxygen`, `…/multicompartment`, `…/transient`, `…/uq`, `…/calibrate`, `…/export?fmt=npz\|csv\|vtk\|vtp`, `…/bundle`, `…/view3d` |
+| Solve & results | `…/run` (job), `jobs/{id}`, `…/results[/field/{name}]`, `…/tracer` (+ `tracer.gif`, `tracer.mp4`), `…/transit`, `…/kinetics[/maps]`, `…/oxygen`, `…/multicompartment`, `…/transient`, `…/uq`, `…/calibrate`, `…/export?fmt=npz\|csv\|vtk\|vtp`, `…/bundle`, `…/view3d` |
 | Explorer | `explore/grow` (roots + organ + generations + fill, 2-D/3-D, solve), `explore`, `explore/optimize`, `shapes`, `shapes/polygon` |
 
 ### MCP server

@@ -281,10 +281,20 @@ def cco_grow(base: Network, candidates, *, n_terminals=200, d_min=None,
     cand = _check_points(base, candidates, "candidates")
     dim = cand.shape[1]
 
-    pos = _positions(base).tolist()
-    parent = _parent_nodes(base).tolist()
-    term = [pos[i] for i in base.terminal_nodes.tolist()] or [pos[base.root_node]]
-    terminals = np.asarray(term, dtype=float)
+    base_pos = _positions(base)
+    base_par = _parent_nodes(base)
+    n = len(base_pos)
+    # Preallocated arrays (each added terminal adds at most two nodes), maintained
+    # incrementally — no per-step list -> array rebuilds.
+    cap = n + 2 * int(n_terminals)
+    P = np.zeros((cap, dim))
+    P[:n] = base_pos
+    par = np.full(cap, -1, dtype=int)
+    par[:n] = base_par
+    term_idx = base.terminal_nodes
+    terminals = np.zeros((max(len(term_idx), 1) + int(n_terminals), dim))
+    n_term = len(term_idx) or 1
+    terminals[:n_term] = base_pos[term_idx] if len(term_idx) else base_pos[base.root_node]
 
     if d_min is None:          # half the characteristic spacing (area or volume)^(1/dim)
         size = max(float(np.prod(np.ptp(cand, axis=0))), 1.0)
@@ -296,36 +306,37 @@ def cco_grow(base: Network, candidates, *, n_terminals=200, d_min=None,
         if added >= n_terminals:
             break
         p = cand[idx]
-        if np.min(np.linalg.norm(terminals - p, axis=1)) < d_min:
+        if np.min(np.linalg.norm(terminals[:n_term] - p, axis=1)) < d_min:
             continue                                   # too close to a terminal
 
-        arr = np.asarray(pos)
-        child = np.array([v for v in range(len(pos)) if parent[v] >= 0])
+        child = np.flatnonzero(par[:n] >= 0)
         if child.size == 0:                            # base is a lone node
             new_parent = base.root_node
         else:
-            a, b = arr[[parent[v] for v in child]], arr[child]
+            a, b = P[par[child]], P[child]
             ab = b - a
             denom = np.einsum("ij,ij->i", ab, ab)
             s = np.clip(np.einsum("ij,ij->i", p - a, ab) / np.where(denom > 0, denom, 1), 0, 1)
             m = a + s[:, None] * ab
             j = int(np.argmin(np.linalg.norm(m - p, axis=1)))
-            v, pu, sj = int(child[j]), int(parent[child[j]]), float(s[j])
+            v, pu, sj = int(child[j]), int(par[child[j]]), float(s[j])
             if sj <= 1e-6:
                 new_parent = pu
             elif sj >= 1 - 1e-6:
                 new_parent = v
             else:                                       # split pu->v at the foot m_j
-                new_parent = len(pos)
-                pos.append([float(c) for c in m[j]])
-                parent.append(pu)
-                parent[v] = new_parent
-        pos.append([float(c) for c in p])
-        parent.append(new_parent)
-        terminals = np.vstack([terminals, p])
+                new_parent = n
+                P[n], par[n] = m[j], pu
+                par[v] = new_parent
+                n += 1
+        P[n], par[n] = p, new_parent
+        n += 1
+        terminals[n_term] = p
+        n_term += 1
         added += 1
 
-    return _assemble(base, pos, parent, exponent=exponent, leaf_radius=leaf_radius)
+    return _assemble(base, P[:n].tolist(), par[:n].tolist(), exponent=exponent,
+                     leaf_radius=leaf_radius)
 
 
 def cco_grow_in_mask(base: Network, mask, domain_limit, *, n_terminals=200,

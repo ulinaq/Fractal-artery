@@ -74,11 +74,10 @@ def terminal_response_multi(grid: Grid, art_cells: np.ndarray, ven_cells: np.nda
     response for reconstructing every compartment.
     """
     n_comp, n = len(permeabilities), grid.n_cells
-    m = multicompartment_operator(grid, permeabilities, betas).tolil()
+    from .darcy import pin_row
+
     pin = int(np.flatnonzero(grid.mask.ravel(order="F"))[0])   # first active cell, comp 0
-    m[pin, :] = 0.0
-    m[pin, pin] = 1.0
-    lu = spla.splu(m.tocsc())
+    lu = spla.splu(pin_row(multicompartment_operator(grid, permeabilities, betas), pin))
 
     all_cells = np.concatenate([np.asarray(art_cells, int), np.asarray(ven_cells, int)])
     read = np.array([0] * len(art_cells) + [n_comp - 1] * len(ven_cells))
