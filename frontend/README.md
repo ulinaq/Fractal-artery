@@ -62,6 +62,16 @@ no separate dev server.
   GIF (`tracer.gif`, needs the `image` extra).
 - **Share** — `?project=<id>` opens an existing project (and its result) by id.
 
+- **Tree explorer** (`explorer.html`) — grow an artery + vein into a tissue, in
+  **2-D or 3-D**, with no project needed (`POST /explore/grow`, logic in
+  `perfusion.treegen`). Set the **initial condition** (drag the ▲/▼ roots and their
+  aim handles in 2-D; x/y/z + trunk direction in 3-D), the **tissue shape**
+  (2-D presets or drag/insert/delete outline points for a custom shape; 3-D box /
+  ellipsoid / cylinder / hemisphere), the fractal skeleton's **generations** (−/＋
+  adds a level of branches), and a **space-filling** algorithm — space
+  colonisation (growth steps, attraction points, step length, influence radius) or
+  CCO (terminals) — then see the solved field, Strahler orders and inflow.
+  *Animate growth* replays it generation by generation, then step by step.
 - **3-D viewer** (`viewer3d.html`) — a separate page (linked from the header)
   that renders results in a rotatable, **dependency-free canvas** projection (no
   WebGL/vtk.js, works offline). Two models via `GET /demo3d?model=`: a synthetic
@@ -87,6 +97,7 @@ are vectorised into the network and points snap onto the nearest end nodes.
 | `render.js`  | all canvas drawing |
 | `run.js`     | solve, results, tracer, analyses |
 | `viewer3d.html` / `viewer3d.js` | standalone rotatable 3-D result viewer |
+| `explorer.html` / `explorer.js` | tree explorer: roots, tissue shape, 2-D/3-D growth |
 
 ## Roadmap
 

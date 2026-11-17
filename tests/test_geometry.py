@@ -219,3 +219,12 @@ def test_prune_keeps_radii_and_inverts_growth_generations():
     assert 0 < pruned.n_segments < net.n_segments
     assert set(np.round(pruned.seg_radius, 9)) <= set(np.round(net.seg_radius, 9))
     assert pruned.inlet_nodes.size == net.inlet_nodes.size
+
+
+def test_grow_tree_max_generations_caps_depth():
+    from perfusion.core.parameters import bifurcation_geometry
+    phi, ratio = bifurcation_geometry(1.0, 3.0)
+    tab = lambda v: np.tile(v, (8, 1))             # noqa: E731
+    counts = [grow_tree((0, 0), np.pi / 2, 2.0, 0.0, 8.0, tab(phi), tab(ratio),
+                        max_generations=g).n_segments for g in range(4)]
+    assert counts == [1, 3, 7, 15]                  # 2^(g+1) - 1: each step adds a level

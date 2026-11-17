@@ -145,7 +145,8 @@ class Network:
 def grow_tree(root_xy: tuple[float, float], root_angle: float, root_radius: float,
               min_radius: float, length_to_radius: float,
               angles: np.ndarray, radius_ratios: np.ndarray,
-              mirror_children: bool = False) -> Network:
+              mirror_children: bool = False,
+              max_generations: int | None = None) -> Network:
     """Grow a self-similar binary fractal tree.
 
     Starting from a trunk, every segment whose radius exceeds ``min_radius``
@@ -162,6 +163,8 @@ def grow_tree(root_xy: tuple[float, float], root_angle: float, root_radius: floa
         child/parent radius ratios (from Murray's law).
     mirror_children : swap the child ordering (arterial vs. venous convention in
         ``Tree_artery.m`` / ``Tree_vein.m``).
+    max_generations : optional cap on the branching depth (the trunk is depth 0;
+        each bifurcation adds one). ``None`` keeps the radius-only stop rule.
 
     Returns
     -------
@@ -185,12 +188,14 @@ def grow_tree(root_xy: tuple[float, float], root_angle: float, root_radius: floa
     ys.append(ys[0] + seg_length[0] * np.sin(root_angle))
     roles.append(NodeRole.TERMINAL)        # provisional; set when the node is visited
     node_incoming.append(0)
+    depth = [0, 0]                         # bifurcation depth of each node
+    depth_cap = np.inf if max_generations is None else int(max_generations)
 
     n_bifurcations = 0
     node = 1
     while node < len(xs):
         parent_seg = node_incoming[node]
-        if seg_radius[parent_seg] > min_radius:
+        if seg_radius[parent_seg] > min_radius and depth[node] < depth_cap:
             roles[node] = NodeRole.BIFURCATION
             n_bifurcations += 1
             generation = min(n_bifurcations, n_generations) - 1
@@ -213,6 +218,7 @@ def grow_tree(root_xy: tuple[float, float], root_angle: float, root_radius: floa
                 ys.append(ys[node] + length * np.sin(angle))
                 roles.append(NodeRole.TERMINAL)
                 node_incoming.append(len(seg_start) - 1)
+                depth.append(depth[node] + 1)
         else:
             roles[node] = NodeRole.TERMINAL
         node += 1

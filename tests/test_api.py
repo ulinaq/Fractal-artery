@@ -1110,3 +1110,47 @@ def test_missing_project_and_result(client):
     assert client.get("/jobs/nope").status_code == 404
     pid = client.post("/projects", json={"name": "empty", "grid": SMALL_GRID}).json()["id"]
     assert client.get(f"/projects/{pid}/results").status_code == 409  # not run yet
+
+
+@pytest.mark.parametrize(("dim", "shape", "fill"), [
+    (2, "ellipse", "colonization"), (2, "kidney", "cco"), (2, "wedge", "none"),
+    (3, "ellipsoid", "colonization"), (3, "cylinder", "cco"),
+])
+def test_explore_grow_shapes_fills_and_dims(client, dim, shape, fill):
+    body = {"dim": dim, "shape": shape, "fill": fill, "generations": 3,
+            "n_points": 200, "n_terminals": 20, "nx": 20 if dim == 3 else 40, "ny": 46}
+    r = client.post("/explore/grow", json=body)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["dim"] == dim
+    assert d["stats"]["artery"]["segments"] >= 7          # 3 fractal generations at least
+    assert d["inflow"] > 0
+    seg_len = 8 if dim == 3 else 6
+    assert all(len(s) == seg_len for s in d["segments"])
+    if dim == 2:
+        assert len(d["outline"]) >= 3
+        assert d["field"]["shape"] == [40, 46]
+    else:
+        assert d["field"]["voxels"]
+
+
+def test_explore_grow_generations_add_branches_and_roots_move(client):
+    def n_art(**kw):
+        body = {"fill": "none", "solve": False, **kw}
+        return client.post("/explore/grow", json=body).json()["stats"]["artery"]["segments"]
+    assert n_art(generations=2) < n_art(generations=3) < n_art(generations=4)
+    d = client.post("/explore/grow", json={"fill": "none", "solve": False,
+                                           "artery": {"root": [-30, 20], "angle": 60}}).json()
+    assert d["roots"]["artery"] == [-30, 20]
+    assert d["segments"][0][:2] == [-30, 20]                 # the trunk starts at the root
+
+
+def test_explore_grow_custom_polygon_and_fill_steps(client):
+    poly = [[-50, 10], [50, 10], [40, 150], [-40, 150]]
+    base = {"shape": "custom", "polygon": poly, "fill": "colonization", "solve": False}
+    few = client.post("/explore/grow", json={**base, "fill_steps": 3}).json()
+    many = client.post("/explore/grow", json={**base, "fill_steps": 30}).json()
+    assert few["outline"] == poly
+    assert few["stats"]["artery"]["segments"] < many["stats"]["artery"]["segments"]
+    bad = client.post("/explore/grow", json={"shape": "custom", "polygon": [[0, 0], [1, 1]]})
+    assert bad.status_code == 422

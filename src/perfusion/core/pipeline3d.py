@@ -76,7 +76,28 @@ def _terminal_cells_3d(grid, art, ven, domain_limit):
         return grid.sub2ind(ix, iy, iz)
 
     cells = np.concatenate([cells_of(art), cells_of(ven)])
-    return _spread_coincident_3d(grid, cells)
+    return _spread_coincident_3d(grid, _snap_to_active_3d(grid, cells))
+
+
+def _snap_to_active_3d(grid: Grid3D, cells: np.ndarray) -> np.ndarray:
+    """Move terminals that land outside the mask to the nearest active cell (the
+    3-D twin of ``pipeline._snap_to_active``): a terminal on an inactive cell has
+    an empty mollifier support and would make the coupling singular."""
+    active = grid.mask.ravel(order="F")
+    if active.all():
+        return cells
+    from scipy.spatial import cKDTree
+
+    nx, ny = grid.nx, grid.ny
+    def ijk(c):
+        return np.column_stack([c % nx, (c // nx) % ny, c // (nx * ny)])
+    active_idx = np.flatnonzero(active)
+    cells = cells.copy()
+    off = ~active[cells]
+    if off.any():
+        _, j = cKDTree(ijk(active_idx)).query(ijk(cells[off]))
+        cells[off] = active_idx[j]
+    return cells
 
 
 def run_hybrid_3d(prm: Parameters, grid: Grid3D, art: Network, ven: Network,

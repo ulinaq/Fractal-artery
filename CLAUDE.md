@@ -246,6 +246,13 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   tabs (Vessels · Tissue · Result), and a 2-D/3-D view toggle that keeps the project
   (`GET /projects/{id}/view3d`).
 
+- **Tree explorer growth** (`perfusion/treegen.py`, `POST /explore/grow`, MCP
+  `grow_trees_in_tissue`): a fractal skeleton (`grow_tree(max_generations=)` /
+  `grow_tree_3d`) from placed roots, then optional space filling. `growth`'s
+  colonisation/CCO/sampling are **dimension-agnostic** (2-D or 3-D by the base
+  network / mask), and `pipeline3d` now snaps terminals outside a 3-D mask to the
+  nearest active cell (`_snap_to_active_3d`), like 2-D — keep both invariants.
+
 ## Gotchas
 
 - The mollifier uses the thesis power-1 bump `exp(-1/(1-r²))` (not `^8`), restricts

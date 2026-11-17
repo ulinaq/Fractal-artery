@@ -178,3 +178,15 @@ button.link-danger:hover:not(:disabled) { color: #b91c1c; }
 .radius-row input[type=number] { width: 5.5em; margin-top: 0; }
 .prune-row { align-items: flex-end; }
 .prune-row label { margin: 0; width: 6em; }
+
+/* tree explorer */
+.dimtabs { display: flex; margin-bottom: 10px; }
+.dimtabs .mode { flex: 1; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 8px; }
+.rootbox { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px 2px; margin-bottom: 8px; background: var(--bg); }
+.roothead { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--ink-2); margin-bottom: 6px; }
+.stepper { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.stepper input[type=range] { flex: 1; min-width: 0; }
+.stepper button { padding: 3px 10px; font-size: 14px; line-height: 1.2; }
+.stepper b { min-width: 2.2em; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
+.seedlbl { margin: 0; width: 7em; }
