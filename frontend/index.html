@@ -50,28 +50,50 @@
           <label>p_out <input id="p_out" type="number" value="0" step="1" /></label>
           <label>r_min_frac <input id="r_min_frac" type="number" value="0.15" step="0.05" min="0.05" max="0.9" /></label>
           <label>seed <input id="seed" type="number" value="0" step="1" /></label>
-          <label>grid nx <input id="nx" type="number" value="120" step="10" /></label>
-          <label>grid ny <input id="ny" type="number" value="140" step="10" /></label>
+          <label title="physical width of the domain (a bigger object = larger numbers)">domain width <input id="dom-w" type="number" value="100" step="10" min="10" /></label>
+          <label title="physical height of the domain">domain height <input id="dom-h" type="number" value="120" step="10" min="10" /></label>
+          <label title="grid cells across (more = finer, slower)">grid nx <input id="nx" type="number" value="120" step="10" min="10" /></label>
+          <label title="grid cells up (kept to the domain aspect)">grid ny <input id="ny" type="number" value="140" step="10" min="10" /></label>
           <label title="capillary-bed permeability anisotropy: Ky relative to Kx=1 (1 = isotropic)">K aniso Ky/Kx <input id="perm_y" type="number" value="1" step="0.25" min="0.01" /></label>
         </div>
+        <p class="muted" id="grid-info"></p>
+        <p class="muted">Domain size and grid apply to <b>New</b> projects; an open
+          project keeps its own.</p>
       </details>
 
       <details class="card" data-mode="vessels" open>
         <summary>Vessels</summary>
-        <p class="muted">Each stroke is one segment; shared endpoints snap into branches.</p>
+        <p class="muted how">
+          <b>Click</b> empty canvas to start a vessel, keep clicking to extend it ·
+          <b>click a node</b>, then empty space, to branch from it ·
+          <b>drag</b> a node to move it · <b>click a vessel</b> to select the segment and
+          change its radius · <b>double-click a vessel</b> to insert a node ·
+          <b>⇧ Shift+click</b> a node/vessel to join to it · <b>Esc</b> to finish.</p>
         <div class="row">
           <label class="seg"><input type="radio" name="vtype" value="artery" checked /> <span class="dot art"></span>artery</label>
           <label class="seg"><input type="radio" name="vtype" value="vein" /> <span class="dot ven"></span>vein</label>
         </div>
-        <label>radius <input id="draw-radius" type="number" value="2" step="0.5" min="0.2" /></label>
-        <div class="row">
-          <button id="btn-endseg">End stroke</button>
-          <button id="btn-undo">Undo</button>
-          <button id="btn-clear">Clear</button>
+        <label title="radius of new segments; with a segment (or node) selected, edits that segment's radius">
+          <span id="radius-label">radius (new segments)</span>
+          <span class="radius-row">
+            <input id="radius-slider" type="range" min="0.2" max="10" step="0.05" value="2" />
+            <input id="draw-radius" type="number" value="2" step="0.25" min="0.05" />
+          </span>
+        </label>
+        <div class="node-box">
+          <p class="node-info" id="node-info">No project yet.</p>
+          <div class="btn-grid">
+            <button id="btn-node-io" title="make the selected node a prescribed-pressure node: inlet (p_in) on an artery, outlet (p_out) on a vein  [I]" disabled>▲▼ Set inlet/outlet</button>
+            <button id="btn-node-del" title="delete the selected node and its edges, or the selected segment  [Del]" disabled>🗑 Delete node</button>
+            <button id="btn-seg-split" title="insert a node at the selected segment's midpoint (or double-click a vessel)" disabled>＋ Insert node</button>
+          </div>
         </div>
-        <label class="check"><input id="use-vessels" type="checkbox" /> use hand-drawn vessels on Run</label>
-        <button id="btn-save-vessels">Save vessels</button>
-        <p class="muted">Keys: <b>Enter</b> end stroke · <b>A</b>/<b>V</b> artery/vein · <b>Esc</b> cancel · <b>Del</b> undo · <b>1–5</b> tabs · <b>R</b> run</p>
+        <div class="btn-grid">
+          <button id="btn-save-vessels" class="primary-soft">Save vessels</button>
+          <button id="btn-edit-revert" title="discard unsaved vessel edits">Revert</button>
+        </div>
+        <button id="btn-clear-kind" class="link-danger" title="delete the whole tree of the selected type">Clear selected tree…</button>
+        <p class="muted">Keys: <b>Del</b> delete node · <b>I</b> inlet/outlet · <b>Esc</b> finish · <b>A</b>/<b>V</b> artery/vein · <b>1–3</b> tabs · <b>R</b> run</p>
         <hr class="soft" />
         <label>Or segment a vessel image
           <input id="img-file" type="file" accept="image/*" />
@@ -81,67 +103,46 @@
 
       <details class="card" data-mode="tissue" open>
         <summary>Tissue</summary>
-        <p class="muted">Click to outline the organ; cells outside are inactive
-          (organ-shaped bed). Multiple regions add together.</p>
-        <label>Draw target
+        <p class="muted how">
+          <b>Click</b> empty canvas to start a region, keep clicking to add points,
+          <b>click the first point</b> (or Enter) to close · <b>drag</b> a point to move it ·
+          <b>click an outline</b> to insert a point · <b>drag inside</b> to move a region ·
+          <b>Del</b> deletes the selected point/region. Only the layer picked in
+          <b>Draw</b> is editable.</p>
+        <label>Draw / edit layer
           <select id="tissue-target">
             <option value="organ">Organ outline (mask)</option>
             <option value="lesion">Low-K lesion (permeability)</option>
             <option value="hotspot">Growth hotspot (demand)</option>
           </select>
         </label>
+        <div class="row organ-row">
+          <label>organ preset <select id="organ-preset"></select></label>
+          <button id="btn-organ" title="drop this organ outline into the domain as the tissue (then edit its points)">Insert</button>
+        </div>
         <label id="lesion-k-row" style="display:none">permeability k
           <input id="lesion-k" type="number" value="0.1" step="0.05" min="0.001" max="1" />
         </label>
         <label id="hotspot-w-row" style="display:none">demand weight
           <input id="hotspot-w" type="number" value="4" step="1" min="1" />
         </label>
-        <div class="row">
-          <button id="btn-endregion">End region</button>
-          <button id="btn-undo-region">Undo</button>
-          <button id="btn-clear-tissue">Clear</button>
+        <div class="node-box">
+          <p class="node-info" id="tissue-info"></p>
+          <div class="btn-grid">
+            <button id="btn-tissue-close" title="close the polygon being drawn  [Enter]">✓ Close region</button>
+            <button id="btn-tissue-del" title="delete the selected point or region  [Del]" disabled>🗑 Delete</button>
+          </div>
         </div>
-        <button id="btn-save-mask">Save tissue</button>
-      </details>
-
-      <details class="card" data-mode="io" open>
-        <summary>Inlets / Outlets</summary>
-        <p class="muted">Pick inlet or outlet, then click near a vessel end. Click a
-          marker to remove it. Add any number; unmarked trees are fed at their root.</p>
-        <div class="row">
-          <label class="seg"><input type="radio" name="iotype" value="inlet" checked /> <span class="tri-up art"></span>inlet (p_in)</label>
-          <label class="seg"><input type="radio" name="iotype" value="outlet" /> <span class="tri-dn ven"></span>outlet (p_out)</label>
+        <div class="btn-grid">
+          <button id="btn-save-mask" class="primary-soft">Save tissue</button>
+          <button id="btn-tissue-revert" title="discard unsaved tissue edits">Revert</button>
         </div>
-        <div class="row">
-          <button id="btn-clear-io">Clear</button>
-          <button id="btn-save-io">Save</button>
-        </div>
-        <p class="muted" id="io-info"></p>
-      </details>
-
-      <details class="card" data-mode="edit" open>
-        <summary>Edit vessels</summary>
-        <p class="muted">Vessels are a network: click a node to select it, drag to
-          move it, and use the slider to resize its edge. Works on hand-drawn,
-          segmented and grown vessels alike.</p>
-        <p class="muted" id="edit-sel">No vessels yet — draw, segment or grow a tree first.</p>
-        <label>radius
-          <input id="edit-radius" type="range" min="0.3" max="8" step="0.1" value="2" disabled />
-          <span id="edit-radius-val" class="muted"></span>
-        </label>
-        <div class="row">
-          <button id="btn-edit-add" title="click the canvas to branch a new edge from the selected node (click several times to fan out)">＋ Add branch</button>
-          <button id="btn-edit-del" title="delete the selected node" disabled>🗑 Delete node</button>
-        </div>
-        <div class="row">
-          <button id="btn-edit-save">Save edits</button>
-          <button id="btn-edit-revert">Revert</button>
-        </div>
-        <p class="muted">Keys: <b>Del</b> delete node · <b>A</b> add branch · <b>Esc</b> cancel · <b>⌘/Ctrl+Z</b> undo</p>
+        <button id="btn-clear-tissue" class="link-danger" title="delete every region of the chosen type">Clear all of this type…</button>
+        <p class="muted">Keys: <b>Enter</b> close · <b>Del</b> delete · <b>Esc</b> cancel/deselect</p>
       </details>
 
       <details class="card" data-mode="vessels">
-        <summary>Grow</summary>
+        <summary>Grow / prune</summary>
         <p class="muted">Grow a tree into the tissue, extending the drawn/segmented
           vessels of the chosen type (else the fractal trunk). Artery and vein grow
           independently — pick a target and settings, grow, then try the other.</p>
@@ -161,6 +162,15 @@
         </div>
         <button id="btn-grow">Grow tree</button>
         <p class="muted" id="grow-info"></p>
+        <hr class="soft" />
+        <p class="muted how">Prune: remove the outermost generations of the chosen
+          tree — each step cuts every end branch back to its junction (the trunk to
+          the inlet/outlet is kept). Undo with ⌘/Ctrl+Z.</p>
+        <div class="row prune-row">
+          <label>steps <input id="prune-steps" type="number" value="1" step="1" min="1" max="50" /></label>
+          <button id="btn-prune">✂ Prune ends</button>
+        </div>
+        <p class="muted" id="prune-info"></p>
       </details>
 
       <details class="card" data-mode="vessels">
@@ -315,8 +325,6 @@
         <div class="modes" role="tablist">
           <button id="mode-vessels" class="mode active" role="tab">Vessels</button>
           <button id="mode-tissue" class="mode" role="tab">Tissue</button>
-          <button id="mode-io" class="mode" role="tab">Inlets/Outlets</button>
-          <button id="mode-edit" class="mode" role="tab">Edit</button>
           <button id="mode-result" class="mode" role="tab">Result</button>
         </div>
         <div class="fields" id="field-picker">
@@ -345,6 +353,7 @@
 
       <div class="canvas-wrap">
         <canvas id="view" width="640" height="720"></canvas>
+        <div class="viewhint">scroll = zoom · right-drag / Space+drag = pan (drag in Result)</div>
         <div class="colorbar" id="colorbar" hidden>
           <span class="cb-max" id="cb-max">—</span>
           <div class="cb-ramp" id="cb-ramp"></div>

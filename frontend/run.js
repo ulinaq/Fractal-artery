@@ -7,15 +7,12 @@
 import { $, api, getCss, numOf, state, status } from "./core.js";
 import { redraw } from "./render.js";
 import { loadEditable } from "./edit.js";
-import {
-  recordHistory, requireProject, saveIO, saveMask, saveVessels, setMode,
-} from "./app.js";
+import { flushAll, recordHistory, requireProject, setMode } from "./app.js";
 
 export async function grow() {
   requireProject();
   const target = document.querySelector("input[name=growtarget]:checked").value;
-  if (state.vessels.arteries.length || state.vessels.veins.length) await saveVessels();
-  if (state.regions.length || state.regionStroke.length >= 3) await saveMask();
+  await flushAll();                          // persist unsaved vessel/tissue edits
   status(`growing ${target}…`);
   const info = await api("POST", `/projects/${state.project}/grow`,
     { target, method: $("grow-method").value, n_points: numOf("grow-npts"),
@@ -26,6 +23,24 @@ export async function grow() {
   await Promise.all([loadNetwork(), loadEditable()]);
   recordHistory();
   status(`${target} tree grown`, "ok");
+  redraw();
+}
+
+// Prune the outermost generations of the chosen tree (the inverse of Grow).
+export async function prune() {
+  requireProject();
+  const target = document.querySelector("input[name=growtarget]:checked").value;
+  await flushAll();                          // prune what's on screen, not the stale copy
+  const steps = Math.max(1, Math.round(numOf("prune-steps")));
+  const info = await api("POST", `/projects/${state.project}/prune`, { target, steps });
+  $("prune-info").textContent = info.n_removed
+    ? `pruned ${info.n_removed} ${target} segments → ${info.n_segments} left, ${info.n_terminals} ends`
+    : `nothing to prune — only the ${target} trunk is left`;
+  state.hasResult = false;
+  stopFlow(); state.tracer = null; state.fieldData = null;
+  await Promise.all([loadNetwork(), loadEditable()]);
+  recordHistory();
+  status(`${target} pruned by ${steps} step${steps > 1 ? "s" : ""}`, "ok");
   redraw();
 }
 
@@ -88,6 +103,7 @@ function drawUQ(d) {
 // Horton–Strahler morphometry of the current tree, shown as ratios + a per-order table
 export async function loadMorphometry(target) {
   requireProject();
+  await flushAll();                          // analyse the edited tree, not the stale one
   $("morph-out").textContent = "analysing…";
   let d;
   try { d = await api("GET", `/projects/${state.project}/morphometry?target=${target}`); }
@@ -107,8 +123,7 @@ export async function loadMorphometry(target) {
 
 export async function adapt() {
   requireProject();
-  if (state.vessels.arteries.length || state.vessels.veins.length) await saveVessels();
-  if (state.regions.length || state.regionStroke.length >= 3) await saveMask();
+  await flushAll();                          // persist unsaved vessel/tissue edits
   status("adapting radii (wall-shear remodelling)…");
   let info;
   try {
@@ -128,12 +143,10 @@ export async function adapt() {
 
 export async function run() {
   requireProject();
-  if (state.vessels.arteries.length || state.vessels.veins.length) await saveVessels();
-  if (state.regions.length || state.regionStroke.length >= 3) await saveMask();
-  if (state.inlets.length || state.outlets.length) await saveIO();
+  await flushAll();                          // persist unsaved vessel/tissue edits
   const job = await api("POST", `/projects/${state.project}/run`,
     { model: $("run-model").value, nonlinear: $("nonlinear").checked,
-      use_vessels: $("use-vessels").checked, max_iter: numOf("max-iter"),
+      use_vessels: true, max_iter: numOf("max-iter"),
       rho_c: numOf("rho-c"), phase_separation: $("phase-sep").checked,
       elasticity: $("elasticity").checked, compliance: numOf("compliance") });
   status("running…");

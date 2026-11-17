@@ -153,6 +153,8 @@ def rebuild_network(template, node_x, node_y, seg_start, seg_end, seg_radius,
     deletions, reindexes, re-derives ``node_role`` by degree and recomputes
     ``seg_length``/``seg_angle``. Connected fragments *without* an inlet are kept
     — their leaves couple to the Darcy bed, so they stay solvable.
+    ``template`` (the tree being edited) may be ``None`` for a tree drawn from
+    scratch; without ``inlet_nodes`` it is then fed at ``root_node`` (else node 0).
     """
     from ..core.geometry import Network, NodeRole
 
@@ -171,6 +173,8 @@ def rebuild_network(template, node_x, node_y, seg_start, seg_end, seg_radius,
 
     if inlet_nodes is not None:
         inl = np.array(sorted({int(i) for i in inlet_nodes if 0 <= int(i) < n}), int)
+    elif template is None:                # a brand-new tree: fed at its root (or node 0)
+        inl = np.array([root_node if root_node is not None and 0 <= root_node < n else 0], int)
     else:
         prev = template.inlet_nodes if template.inlet_nodes is not None else [template.root_node]
         inl = np.array(sorted({int(i) for i in prev if 0 <= int(i) < n}), int)

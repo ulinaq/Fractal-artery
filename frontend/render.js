@@ -2,13 +2,13 @@
 // the vessel-network overlay, edit handles, the direct-connection view and the
 // drawing/tissue/IO overlays. Depends only on core.js + palette.js (no feature
 // logic), so the rest of the app just calls redraw().
-import {
-  ctx, W, H, toCanvas, getCss, state, $, numOf, vtype, hasEditable, editKinds,
-} from "./core.js";
+import { ctx, DOMAIN, W, H, toCanvas, getCss, state, $, editKinds, vp, zoomPx } from "./core.js";
 import { VIRIDIS, viridis } from "./palette.js";
 
 export function redraw() {
-  ctx.clearRect(0, 0, W, H);
+  vp.begin();                    // HiDPI transform + clear
+  drawBackdrop();
+  if (state.mode !== "result") $("colorbar").hidden = true;   // fields only show in Result
   if (state.mode === "result" && state.resultModel === "direct") {
     if (state.flow.active && state.tracer && state.tracer.network) {
       drawNetworkTracerFrame(state.flow.idx);   // bolus swept along the vessels
@@ -23,12 +23,22 @@ export function redraw() {
     else if (state.fieldData) drawField();
   }
   drawRegions();
-  drawNetworkOverlay();
-  drawEdit();
-  drawVessels();
-  drawStroke();
+  if (state.mode === "result") drawNetworkOverlay();
+  else drawEditNetwork();
+  drawTissueStroke();
   drawIO();
 }
+
+// the physical domain as a white sheet on a soft backdrop, so zoom/pan reads clearly
+function drawBackdrop() {
+  ctx.fillStyle = "#f1f5f9"; ctx.fillRect(0, 0, W, H);
+  const [x0, y0] = toCanvas(DOMAIN.xmin, DOMAIN.ymax), [x1, y1] = toCanvas(DOMAIN.xmax, DOMAIN.ymin);
+  ctx.fillStyle = "#fff"; ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+  ctx.strokeStyle = "#cbd5e1"; ctx.lineWidth = 1; ctx.strokeRect(x0 + 0.5, y0 + 0.5, x1 - x0, y1 - y0);
+}
+
+// radius (domain units) → on-screen line width, thickening as you zoom in
+const rw = (r, k = 1, min = 1) => Math.max(min, r * k * zoomPx());
 
 // tracer frames are addressed by index, so the flow animation reaches in directly
 export function drawTracerFrame(idx) {
@@ -80,7 +90,7 @@ function drawDirect() {
       const [ax, ay] = toCanvas(x0, y0), [bx, by] = toCanvas(x1, y1);
       const t = Math.min(1, f / fmax);
       ctx.globalAlpha = 0.4 + 0.6 * t; ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(1, 5 * t); ctx.lineCap = "round";
+      ctx.lineWidth = Math.max(1, 5 * t * Math.sqrt(zoomPx())); ctx.lineCap = "round";
       ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
     }
   };
@@ -89,20 +99,24 @@ function drawDirect() {
   $("colorbar").hidden = true;            // static direct view has no scalar scale
 }
 
+// inlets ▲ (artery, p_in) and outlets ▼ (vein, p_out) are the networks'
+// prescribed-pressure nodes (`inlet_nodes`), drawn in every view.
 function drawIO() {
-  // inlets ▲ (arterial, red), outlets ▼ (venous, blue); shown in I/O and Result
-  if (state.mode !== "io" && state.mode !== "result") return;
   const marker = (x, y, up, color) => {
     const [px, py] = toCanvas(x, y), s = 7;
     ctx.beginPath();
-    if (up) { ctx.moveTo(px, py - s); ctx.lineTo(px - s, py + s); ctx.lineTo(px + s, py + s); }
-    else { ctx.moveTo(px, py + s); ctx.lineTo(px - s, py - s); ctx.lineTo(px + s, py - s); }
+    if (up) { ctx.moveTo(px, py - s - 2); ctx.lineTo(px - s, py + s - 2); ctx.lineTo(px + s, py + s - 2); }
+    else { ctx.moveTo(px, py + s + 2); ctx.lineTo(px - s, py - s + 2); ctx.lineTo(px + s, py - s + 2); }
     ctx.closePath();
     ctx.fillStyle = color; ctx.fill();
     ctx.lineWidth = 1.5; ctx.strokeStyle = "#fff"; ctx.stroke();
   };
-  state.inlets.forEach(([x, y]) => marker(x, y, true, getCss("--art")));
-  state.outlets.forEach(([x, y]) => marker(x, y, false, getCss("--ven")));
+  for (const kind of editKinds()) {
+    const n = state.editable[kind];
+    for (const i of n.inlet_nodes || []) {
+      if (i < n.node_x.length) marker(n.node_x[i], n.node_y[i], kind === "artery", getCss(kind === "vein" ? "--ven" : "--art"));
+    }
+  }
 }
 
 function tracePath(points) {
@@ -122,6 +136,34 @@ function drawRegions() {
   }
   drawLesions();
   drawHotspots();
+  drawTissueHandles();
+}
+
+// Tissue tab: vertex handles on every polygon, the selected one emphasised.
+function drawTissueHandles() {
+  if (state.mode !== "tissue") return;
+  const sel = state.tissueSel, layer = $("tissue-target").value;
+  const groups = [["organ", state.regions.map((p) => p), "#047857"],
+                  ["lesion", state.lesions.map((l) => l.polygon), "#b45309"],
+                  ["hotspot", state.hotspots.map((h) => h.polygon), "#0f766e"]];
+  for (const [type, polys, color] of groups) {
+    if (type !== layer) continue;                 // handles only on the editable layer
+    polys.forEach((poly, idx) => {
+      const isSel = sel && sel.type === type && sel.idx === idx;
+      if (isSel) {
+        ctx.beginPath(); tracePath(poly); ctx.closePath();
+        ctx.strokeStyle = getCss("--accent"); ctx.lineWidth = 2.5;
+        ctx.setLineDash([6, 4]); ctx.stroke(); ctx.setLineDash([]);
+      }
+      poly.forEach(([x, y], v) => {
+        const [px, py] = toCanvas(x, y);
+        const vSel = isSel && sel.vertex === v, s = vSel ? 5 : isSel ? 4 : 3;
+        ctx.fillStyle = vSel ? getCss("--accent") : "#fff";
+        ctx.strokeStyle = isSel ? getCss("--accent") : color; ctx.lineWidth = 1.5;
+        ctx.fillRect(px - s, py - s, 2 * s, 2 * s); ctx.strokeRect(px - s, py - s, 2 * s, 2 * s);
+      });
+    });
+  }
 }
 
 // growth-demand hotspots: teal outline + fill, opacity growing with the demand weight;
@@ -186,8 +228,9 @@ function paintHeatmap(data, nx, ny, vmin, vmax) {
     }
   }
   octx.putImageData(img, 0, 0);
-  ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(off, 0, 0, W, H);
+  const [x0, y0] = toCanvas(DOMAIN.xmin, DOMAIN.ymax), [x1, y1] = toCanvas(DOMAIN.xmax, DOMAIN.ymin);
+  ctx.imageSmoothingEnabled = vp.zoom < 3;            // zoomed in: show the grid cells
+  ctx.drawImage(off, x0, y0, x1 - x0, y1 - y0);
 }
 
 function drawField() {
@@ -196,83 +239,86 @@ function drawField() {
   updateColorbar(vmin, vmax, state.field);
 }
 
-function drawEdit() {
-  if (state.mode !== "edit" || !hasEditable()) return;
+// Vessels tab: the editable networks with node handles, the selection and a
+// rubber-band preview of the next edge. Tissue tab: the same vessels, faint.
+function drawEditNetwork() {
+  const editing = state.mode === "vessels";
+  const sel = state.editSel;
   for (const kind of editKinds()) {
     const n = state.editable[kind];
-    const color = kind === "vein" ? getCss("--ven") : getCss("--art");
-    ctx.globalAlpha = 0.55;
+    const color = getCss(kind === "vein" ? "--ven" : "--art");
+    ctx.globalAlpha = editing ? 0.75 : 0.3; ctx.lineCap = "round";
+    ctx.strokeStyle = color;
     for (let s = 0; s < n.seg_start.length; s++) {
       const [x0, y0] = toCanvas(n.node_x[n.seg_start[s]], n.node_y[n.seg_start[s]]);
       const [x1, y1] = toCanvas(n.node_x[n.seg_end[s]], n.node_y[n.seg_end[s]]);
-      ctx.strokeStyle = color; ctx.lineWidth = Math.max(1, n.seg_radius[s] * 0.6);
+      ctx.lineWidth = rw(n.seg_radius[s], 1, 1.2);
       ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
     }
     ctx.globalAlpha = 1;
-    for (let i = 0; i < n.node_x.length; i++) {
-      const [cx, cy] = toCanvas(n.node_x[i], n.node_y[i]);
-      const sel = state.editSel && state.editSel.kind === kind && state.editSel.node === i;
-      ctx.beginPath(); ctx.arc(cx, cy, sel ? 6 : 3.2, 0, 7);
-      ctx.fillStyle = sel ? getCss("--accent") : "#fff";
-      ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = color; ctx.stroke();
+    if (!editing) continue;
+    if (sel && sel.kind === kind && sel.seg >= 0 && sel.seg < n.seg_start.length) {
+      // the selected segment (or the selected node's edge): a halo at its true width
+      const s = sel.seg, segSel = sel.node < 0;
+      const [x0, y0] = toCanvas(n.node_x[n.seg_start[s]], n.node_y[n.seg_start[s]]);
+      const [x1, y1] = toCanvas(n.node_x[n.seg_end[s]], n.node_y[n.seg_end[s]]);
+      ctx.strokeStyle = getCss("--accent");
+      if (segSel) {
+        ctx.globalAlpha = 0.25; ctx.lineWidth = rw(n.seg_radius[s], 1, 1.2) + 10;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+        ctx.globalAlpha = 1; ctx.lineWidth = rw(n.seg_radius[s], 1, 2);
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+      } else {
+        ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); ctx.setLineDash([]);
+      }
     }
+    const dense = n.node_x.length > 400;
+    for (let i = 0; i < n.node_x.length; i++) {
+      const isSel = sel && sel.kind === kind && sel.node === i;
+      const [cx, cy] = toCanvas(n.node_x[i], n.node_y[i]);
+      ctx.beginPath(); ctx.arc(cx, cy, isSel ? 6 : dense ? 2 : 3, 0, 7);
+      ctx.fillStyle = isSel ? getCss("--accent") : "#fff";
+      ctx.fill(); ctx.lineWidth = isSel ? 2 : 1.3; ctx.strokeStyle = isSel ? "#fff" : color; ctx.stroke();
+      if (isSel) { ctx.beginPath(); ctx.arc(cx, cy, 9, 0, 7); ctx.strokeStyle = getCss("--accent"); ctx.lineWidth = 1.5; ctx.stroke(); }
+    }
+  }
+  if (editing && sel && sel.node >= 0 && state.hover && state.editable[sel.kind]) {   // where the next click lands
+    const n = state.editable[sel.kind];
+    const [ax, ay] = toCanvas(n.node_x[sel.node], n.node_y[sel.node]);
+    const [bx, by] = toCanvas(...state.hover);
+    ctx.strokeStyle = getCss(sel.kind === "vein" ? "--ven" : "--art");
+    ctx.globalAlpha = 0.45; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
   }
 }
 
 function drawNetworkOverlay() {
-  if (!state.network || state.mode === "edit") return;    // edit mode draws the editable tree instead
+  if (!state.network) return;          // result view: the saved (solved) geometry
   for (const s of state.network.segments) {
     const [x0, y0] = toCanvas(s.x0, s.y0), [x1, y1] = toCanvas(s.x1, s.y1);
     ctx.strokeStyle = s.kind === "vein" ? "rgba(191,219,254,.95)" : "rgba(254,202,202,.95)";
-    ctx.lineWidth = Math.max(0.6, s.r * 0.5);
+    ctx.lineWidth = rw(s.r, 0.5, 0.6);
     ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
   }
 }
 
-function drawVessels() {
-  if (state.mode === "edit") return;      // edit mode draws the editable copy instead
-  const paint = (list, color) => {
-    ctx.strokeStyle = color; ctx.lineJoin = "round"; ctx.lineCap = "round";
-    for (const v of list) {
-      ctx.lineWidth = Math.max(1.5, v.radius * 1.2);
-      ctx.beginPath();
-      v.points.forEach(([x, y], i) => { const [px, py] = toCanvas(x, y); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
-      ctx.stroke();
-    }
-  };
-  paint(state.vessels.arteries, getCss("--art"));
-  paint(state.vessels.veins, getCss("--ven"));
-}
-
-function markVertices(points) {
-  for (const [x, y] of points) {
-    const [px, py] = toCanvas(x, y);
-    ctx.beginPath(); ctx.arc(px, py, 3, 0, 7); ctx.fill();
-  }
-}
-
-function drawStroke() {
-  if (state.mode === "vessels" && state.stroke.length) {
-    ctx.strokeStyle = vtype() === "artery" ? getCss("--art") : getCss("--ven");
-    ctx.fillStyle = ctx.strokeStyle;
-    ctx.lineWidth = Math.max(1.5, numOf("draw-radius") * 1.2);
-    ctx.beginPath(); tracePath(state.stroke); ctx.stroke();
-    markVertices(state.stroke);
-  } else if (state.mode === "tissue" && state.regionStroke.length) {
-    ctx.strokeStyle = "rgba(5,150,105,.9)"; ctx.fillStyle = ctx.strokeStyle;
-    ctx.lineWidth = 1.8;
-    ctx.beginPath(); tracePath(state.regionStroke); ctx.stroke();
-    markVertices(state.regionStroke);
-  } else if (state.mode === "tissue" && state.lesionStroke.length) {
-    ctx.strokeStyle = "rgba(180,83,9,.95)"; ctx.fillStyle = ctx.strokeStyle;
-    ctx.lineWidth = 1.8;
-    ctx.beginPath(); tracePath(state.lesionStroke); ctx.stroke();
-    markVertices(state.lesionStroke);
-  } else if (state.mode === "tissue" && state.hotspotStroke.length) {
-    ctx.strokeStyle = "rgba(15,118,110,.95)"; ctx.fillStyle = ctx.strokeStyle;
-    ctx.lineWidth = 1.8;
-    ctx.beginPath(); tracePath(state.hotspotStroke); ctx.stroke();
-    markVertices(state.hotspotStroke);
+// the tissue polygon being drawn, with a rubber band to the pointer and a ring
+// on the first point (click it to close)
+function drawTissueStroke() {
+  const pts = state.tissueStroke;
+  if (state.mode !== "tissue" || !pts.length) return;
+  const t = $("tissue-target").value;
+  const color = t === "lesion" ? "rgba(180,83,9,.95)" : t === "hotspot" ? "rgba(15,118,110,.95)" : "rgba(5,150,105,.95)";
+  ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 1.8;
+  ctx.beginPath(); tracePath(pts);
+  if (state.hover) { const [hx, hy] = toCanvas(...state.hover); ctx.lineTo(hx, hy); }
+  ctx.stroke();
+  for (const [x, y] of pts) { const [px, py] = toCanvas(x, y); ctx.beginPath(); ctx.arc(px, py, 3, 0, 7); ctx.fill(); }
+  if (pts.length >= 3) {
+    const [fx, fy] = toCanvas(...pts[0]);
+    ctx.beginPath(); ctx.arc(fx, fy, 8, 0, 7); ctx.lineWidth = 1.5; ctx.stroke();
   }
 }
 

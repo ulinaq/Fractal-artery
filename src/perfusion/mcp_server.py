@@ -335,6 +335,78 @@ def tree_morphometry(kind: str = "artery", r_min_frac: float = 0.15, seed: int =
             "diameter_ratio": s["diameter_ratio"]}
 
 
+def prune_tree(kind: str = "artery", steps: int = 1, r_min_frac: float = 0.15,
+               seed: int = 0) -> dict:
+    """Prune ``steps`` generations of terminal branches off a fractal tree (the
+    inverse of growth): each step removes every free-end branch back to its nearest
+    junction, never the trunk to the inlet. Reports segments/terminals and the max
+    Strahler order before vs after."""
+    from .core.geometry import arterial_tree, prune_terminal_branches, venous_tree
+    from .core.morphometry import strahler_summary
+
+    prm = Parameters(r_min_frac=r_min_frac, seed=seed)
+    net = venous_tree(prm) if kind == "vein" else arterial_tree(prm)
+    pruned = prune_terminal_branches(net, int(np.clip(steps, 0, 50)))
+
+    def stats(n):
+        return {"segments": int(n.n_segments), "terminals": int(n.terminal_nodes.size),
+                "max_order": int(strahler_summary(n)["max_order"]) if n.n_segments else 0}
+
+    return {"kind": kind, "steps": int(steps), "before": stats(net), "after": stats(pruned),
+            "removed_segments": int(net.n_segments - pruned.n_segments)}
+
+
+def generate_trees(dim: int = 2, shape: str = "ellipse", generations: int = 4,
+                   fill: str = "colonization", fill_steps: int = 40, n_terminals: int = 60,
+                   artery_root=None, vein_root=None, artery_direction=None,
+                   vein_direction=None, artery_angle: float = 90.0, vein_angle: float = -90.0,
+                   solve: bool = True, seed: int = 0, extent: float = 1.0) -> dict:
+    """Grow an arterial + venous tree into a tissue shape (2-D or 3-D) and solve.
+
+    A fractal skeleton of ``generations`` branching levels starts at each root
+    (``*_root`` = [x, y] or [x, y, z]; 2-D trunk angle in degrees, 3-D direction
+    vector), then ``fill`` ("none" | "colonization" | "cco") grows it on to fill the
+    ``shape`` — any organ in :mod:`perfusion.organs` (2-D: heart, kidney, brain,
+    liver, lung, tongue, tumour, placenta, ellipse, …; 3-D: heart, kidney, brain,
+    liver, lung, tumour, ellipsoid, box, …). ``extent`` scales the domain (>1 = a
+    bigger object). 3-D trees branch in twisting planes (truly volumetric).
+    Returns per-tree stats and, with ``solve``, the perfused inflow."""
+    from . import organs, treegen
+
+    d3 = int(dim) == 3
+    e = float(np.clip(extent, 0.25, 16.0))
+    dim_ = 3 if d3 else 2
+    # unspecified roots/aims attach where the organ's vessels do anatomically
+    anat = organs.roots(shape, dim_, treegen.domain_for(dim_, e))
+
+    def aim(kind, given_dir, given_angle, default_angle):
+        a = anat[kind]
+        if d3:
+            return tuple(given_dir or a["direction"]), 90.0
+        return (0, 0, 1), (given_angle if given_angle != default_angle else a["angle"])
+
+    a_dir, a_ang = aim("artery", artery_direction, artery_angle, 90.0)
+    v_dir, v_ang = aim("vein", vein_direction, vein_angle, -90.0)
+    spec = treegen.GenSpec(
+        dim=dim_, shape=shape, generations=int(np.clip(generations, 1, 10)),
+        fill=fill, fill_steps=int(np.clip(fill_steps, 0, 400)),
+        n_terminals=int(np.clip(n_terminals, 1, 600)), seed=seed, nx=20 if d3 else 60,
+        extent=e,
+        artery=treegen.TreeSpec(tuple(artery_root or anat["artery"]["root"]), a_ang, a_dir),
+        vein=treegen.TreeSpec(tuple(vein_root or anat["vein"]["root"]), v_ang, v_dir,
+                              radius=2.4, gamma=1.2))
+    art, ven, mask, domain, _ = treegen.build(spec)
+    out = {"dim": spec.dim, "shape": shape, "fill": fill, "active_cells": int(mask.sum()),
+           "artery": treegen.tree_stats(art), "vein": treegen.tree_stats(ven)}
+    if solve:       # the same calculations in 2-D and 3-D: flow, flux, time-of-flight
+        res = treegen.solve(spec, art, ven, mask, domain)
+        q = res.solution.terminal_flux
+        out["inflow"] = float(q[q > 0].sum())
+        out["outflow"] = float(-q[q < 0].sum())
+        out["homogeneity"] = treegen.homogeneity(res)
+    return out
+
+
 def data_constrained_growth(hotspot_weight: float = 8.0, radius_frac: float = 0.22,
                             n_points: int = 500, seed: int = 0) -> dict:
     """Data-constrained vascular growth toward a target perfusion-density map.
@@ -608,6 +680,37 @@ def build_server():
         and diameter R_D ratios + max Strahler order and per-order segment counts —
         the standard morphometric fingerprint used to validate a vascular tree."""
         return tree_morphometry(kind=kind, r_min_frac=r_min_frac, seed=seed)
+
+    @server.tool()
+    def prune_vessel_tree(kind: str = "artery", steps: int = 1, r_min_frac: float = 0.15,
+                          seed: int = 0) -> dict:
+        """Prune the outermost `steps` generations of terminal branches off a fractal
+        artery/vein tree — the inverse of growth (the trunk to the inlet is kept).
+        Returns segment/terminal counts and max Strahler order before vs after."""
+        return prune_tree(kind=kind, steps=steps, r_min_frac=r_min_frac, seed=seed)
+
+    @server.tool()
+    def grow_trees_in_tissue(dim: int = 2, shape: str = "ellipse", generations: int = 4,
+                             fill: str = "colonization", fill_steps: int = 40,
+                             n_terminals: int = 60, artery_root: list[float] | None = None,
+                             vein_root: list[float] | None = None,
+                             artery_direction: list[float] | None = None,
+                             vein_direction: list[float] | None = None,
+                             artery_angle: float = 90.0, vein_angle: float = -90.0,
+                             solve: bool = True, seed: int = 0, extent: float = 1.0) -> dict:
+        """Grow artery + vein trees into a tissue shape in 2-D or 3-D: a fractal
+        skeleton (`generations` levels) from placed roots, then a space-filling
+        `fill` (colonization steps / CCO terminals). Shapes are organs — 2-D: heart,
+        kidney, brain, liver, lung, tongue, tumour, placenta, ellipse, rectangle,
+        wedge; 3-D: heart, kidney, brain, liver, lung, tumour, ellipsoid, box,
+        cylinder, hemisphere. `extent` scales the domain (>1 = bigger object). Returns
+        segment/terminal/Strahler stats per tree and the perfused inflow/outflow."""
+        return generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
+                              fill_steps=fill_steps, n_terminals=n_terminals,
+                              artery_root=artery_root, vein_root=vein_root,
+                              artery_direction=artery_direction,
+                              vein_direction=vein_direction, artery_angle=artery_angle,
+                              vein_angle=vein_angle, solve=solve, seed=seed, extent=extent)
 
     @server.tool()
     def data_constrained_tree_growth(hotspot_weight: float = 8.0, radius_frac: float = 0.22,

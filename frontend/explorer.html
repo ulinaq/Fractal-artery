@@ -12,7 +12,7 @@
       <span class="logo" aria-hidden="true">🌳</span>
       <div>
         <h1>perfusion — tree explorer</h1>
-        <p class="sub">Fractal-tree parameter space vs. perfusion homogeneity (Paper D)</p>
+        <p class="sub">Grow artery + vein trees into a tissue, in 2-D or 3-D, and see the perfusion</p>
       </div>
     </div>
     <div class="topbar-right">
@@ -26,23 +26,169 @@
   <main class="layout">
     <aside class="panel">
       <section class="card">
-        <h2>Tree parameters</h2>
-        <p class="muted">Tune the fractal arterial/venous tree; the field + objective
-          update live. No project needed — this explores the thesis' native frame.</p>
-        <label>arterial γ (asymmetry) <span class="rv" id="v-a_gamma"></span>
-          <input id="a_gamma" type="range" min="1.0" max="1.9" step="0.02" value="1.4" /></label>
-        <label>venous γ (asymmetry) <span class="rv" id="v-v_gamma"></span>
-          <input id="v_gamma" type="range" min="1.0" max="1.9" step="0.02" value="1.2" /></label>
-        <label>length : radius <span class="rv" id="v-length_to_radius"></span>
-          <input id="length_to_radius" type="range" min="4" max="18" step="0.5" value="10" /></label>
-        <label>Murray exponent <span class="rv" id="v-exponent"></span>
-          <input id="exponent" type="range" min="2.0" max="3.5" step="0.05" value="2.8" /></label>
-        <label>venous radius scale <span class="rv" id="v-rv_scale"></span>
-          <input id="rv_scale" type="range" min="0.8" max="1.8" step="0.05" value="1.2" /></label>
+        <div class="modes dimtabs" role="tablist">
+          <button class="mode active" id="dim-2" role="tab">2-D</button>
+          <button class="mode" id="dim-3" role="tab">3-D</button>
+        </div>
+        <label class="check"><input id="solve" type="checkbox" checked /> solve perfusion on every change</label>
+        <div class="btn-grid">
+          <button id="btn-animate" title="replay the growth one step at a time">▶ Animate growth</button>
+          <button id="btn-reset" title="restore all defaults">↺ Defaults</button>
+        </div>
       </section>
 
-      <section class="card">
-        <h2>Objective &amp; field</h2>
+      <details class="card" open>
+        <summary>Tissue shape</summary>
+        <label class="d2">organ / shape <select id="shape2"></select></label>
+        <label class="d3">organ / shape <select id="shape3"></select></label>
+        <label>size <span class="rv" id="v-size"></span>
+          <input id="size" type="range" min="0.3" max="1" step="0.05" value="0.85" /></label>
+        <p class="muted d2"><b>Drag</b> an outline point to reshape the tissue (it
+          becomes <i>custom</i>) · <b>double-click</b> the outline to add a point ·
+          click a point + <b>Del</b> to remove it.</p>
+        <p class="muted d3">Drag to rotate · scroll to zoom · right-drag or Space+drag to pan.</p>
+      </details>
+
+      <details class="card" open>
+        <summary>Domain &amp; resolution</summary>
+        <label>object size (domain scale) <span class="rv" id="v-extent"></span>
+          <span class="stepper">
+            <button id="ext-dec" title="halve the object">÷2</button>
+            <input id="extent" type="range" min="0.5" max="16" step="0.5" value="4" />
+            <button id="ext-inc" title="double the object">×2</button>
+          </span></label>
+        <label>grid resolution <span class="rv" id="v-res"></span>
+          <input id="res" type="range" min="30" max="200" step="2" value="60" /></label>
+        <p class="muted" id="res-info"></p>
+        <p class="muted">Resizing scales the roots and trunk calibre with the object;
+          then add generations, growth steps, attraction points or resolution for more
+          detail. Finer grids solve more slowly (3-D cost grows with n³). Zoom the view
+          to inspect any part.</p>
+      </details>
+
+      <details class="card" open>
+        <summary>Roots (initial condition)</summary>
+        <p class="muted">Each organ starts with its <b>anatomical</b> artery and vein
+          entry (renal hilum, aortic root, porta hepatis, circle of Willis…).
+          <span class="d2"><b>Drag</b> ▲ / ▼ to move a root and its ● handle to aim it.</span></p>
+        <div class="row rootmode">
+          <span class="muted" id="root-mode">roots: organ default</span>
+          <button id="btn-root-default" title="put the roots back where this organ's vessels attach">⟲ Organ default</button>
+        </div>
+        <div class="rootbox">
+          <div class="roothead"><span class="dot art"></span> artery</div>
+          <div class="grid3">
+            <label>x <input id="a-x" type="number" step="1" /></label>
+            <label>y <input id="a-y" type="number" step="1" /></label>
+            <label class="d3">z <input id="a-z" type="number" step="1" /></label>
+          </div>
+          <label class="d2">trunk angle (°) <input id="a-angle" type="number" step="5" /></label>
+          <label class="d3">trunk direction
+            <select id="a-dir" class="dirsel"></select></label>
+          <div class="grid2">
+            <label>root radius <input id="a-radius" type="number" value="2" step="0.25" min="0.2" /></label>
+            <label title="branching asymmetry (1 = symmetric)">asymmetry γ <input id="a-gamma" type="number" value="1.4" step="0.05" min="1" max="1.9" /></label>
+          </div>
+        </div>
+        <div class="rootbox">
+          <div class="roothead"><span class="dot ven"></span> vein</div>
+          <div class="grid3">
+            <label>x <input id="v-x" type="number" step="1" /></label>
+            <label>y <input id="v-y" type="number" step="1" /></label>
+            <label class="d3">z <input id="v-z" type="number" step="1" /></label>
+          </div>
+          <label class="d2">trunk angle (°) <input id="v-angle" type="number" step="5" /></label>
+          <label class="d3">trunk direction
+            <select id="v-dir" class="dirsel"></select></label>
+          <div class="grid2">
+            <label>root radius <input id="v-radius" type="number" value="2.4" step="0.25" min="0.2" /></label>
+            <label title="branching asymmetry (1 = symmetric)">asymmetry γ <input id="v-gamma" type="number" value="1.2" step="0.05" min="1" max="1.9" /></label>
+          </div>
+        </div>
+      </details>
+
+      <details class="card" open>
+        <summary>Branching (fractal skeleton)</summary>
+        <label>generations — each step adds a level of branches
+          <span class="stepper">
+            <button id="gen-dec" title="remove a generation">−</button>
+            <input id="generations" type="range" min="1" max="10" step="1" value="4" />
+            <button id="gen-inc" title="add a generation">＋</button>
+            <b id="v-generations"></b>
+          </span>
+        </label>
+        <label>length : radius <span class="rv" id="v-ltr"></span>
+          <input id="ltr" type="range" min="3" max="20" step="0.5" value="10" /></label>
+        <label>Murray exponent <span class="rv" id="v-exponent"></span>
+          <input id="exponent" type="range" min="2" max="3.5" step="0.05" value="2.8" /></label>
+        <label class="d3" title="rotation of each bifurcation's plane relative to its parent's (90° = alternating, like real trees)">branch-plane twist (°) <span class="rv" id="v-twist"></span>
+          <input id="twist" type="range" min="0" max="180" step="5" value="90" /></label>
+        <label class="d3" title="seeded random variation of branching angles, twist and segment lengths">randomness <span class="rv" id="v-jitter"></span>
+          <input id="jitter" type="range" min="0" max="1" step="0.05" value="0.3" /></label>
+        <p class="muted d3">Asymmetry γ and the Murray exponent set the child calibres
+          and angles in 3-D as in 2-D; each split turns its plane by the twist so the
+          tree fills the volume from the first generations.</p>
+      </details>
+
+      <details class="card" open>
+        <summary>Space filling</summary>
+        <p class="muted">Grow the skeleton's tips on until the tree fills the tissue.</p>
+        <label>algorithm
+          <select id="fill">
+            <option value="colonization">space colonisation (iterative)</option>
+            <option value="cco">CCO — constrained constructive optimisation</option>
+            <option value="none">none (fractal only)</option>
+          </select>
+        </label>
+        <label>apply to
+          <select id="fill-target">
+            <option value="both">artery + vein</option>
+            <option value="artery">artery only</option>
+            <option value="vein">vein only</option>
+          </select>
+        </label>
+        <div class="fill-col">
+          <label>growth steps — each step extends every growing tip
+            <span class="stepper">
+              <button id="steps-dec" title="10 fewer steps">−</button>
+              <input id="fill-steps" type="range" min="0" max="200" step="1" value="40" />
+              <button id="steps-inc" title="10 more steps">＋</button>
+              <b id="v-fill-steps"></b>
+            </span>
+          </label>
+          <div class="grid2">
+            <label>attraction points <input id="n-points" type="number" value="400" step="50" min="10" max="4000" /></label>
+            <label title="segment length per step (blank = auto)">step length <input id="step-len" type="number" placeholder="auto" step="0.5" min="0.2" /></label>
+          </div>
+          <label title="how far an attraction point reaches (blank = auto)">influence radius <input id="influence" type="number" placeholder="auto" step="1" min="1" /></label>
+        </div>
+        <div class="fill-cco">
+          <label>terminals per tree
+            <span class="stepper">
+              <button id="term-dec" title="10 fewer terminals">−</button>
+              <input id="n-terminals" type="range" min="1" max="400" step="1" value="60" />
+              <button id="term-inc" title="10 more terminals">＋</button>
+              <b id="v-n-terminals"></b>
+            </span>
+          </label>
+        </div>
+        <div class="row">
+          <label class="seedlbl">seed <input id="seed" type="number" value="0" step="1" /></label>
+          <button id="btn-reseed" title="new random attraction points / terminal sites">🎲 Reseed</button>
+        </div>
+      </details>
+
+      <details class="card" open>
+        <summary>Field &amp; objective</summary>
+        <p class="muted d3">Computed in 3-D: pressure, Darcy flux and time-of-flight
+          on the voxel bed (colour range clipped to the 2–98 % percentiles).</p>
+        <label>field
+          <select id="field">
+            <option value="flux">flux</option>
+            <option value="pressure">pressure</option>
+            <option value="tof">time-of-flight</option>
+          </select>
+        </label>
         <label>homogeneity objective
           <select id="kind">
             <option value="tof_std">time-of-flight std</option>
@@ -52,20 +198,14 @@
             <option value="flux_l2">flux L2</option>
           </select>
         </label>
-        <label>field
-          <select id="field">
-            <option value="flux">flux</option>
-            <option value="pressure">pressure</option>
-            <option value="tof">time-of-flight</option>
-          </select>
-        </label>
         <p class="muted" id="obj-info">—</p>
-      </section>
+      </details>
 
-      <section class="card">
-        <h2>Optimise</h2>
-        <p class="muted">Search the branching asymmetries for the most homogeneous
-          perfusion, then load the best configuration.</p>
+      <details class="card d2">
+        <summary>Optimise asymmetry</summary>
+        <p class="muted">Search the branching asymmetries γ, length:radius and
+          Murray exponent for the most homogeneous perfusion (in the thesis' default
+          fractal frame), then load the best values.</p>
         <label>method
           <select id="method">
             <option value="local">local (Nelder-Mead)</option>
@@ -75,12 +215,13 @@
         <label>max iterations <input id="maxiter" type="number" value="15" min="1" max="60" /></label>
         <button id="btn-opt" class="primary">Optimise tree</button>
         <p class="muted" id="opt-info"></p>
-      </section>
+      </details>
     </aside>
 
     <section class="stage">
       <div class="canvas-wrap">
-        <canvas id="view" width="420" height="480"></canvas>
+        <canvas id="view" width="490" height="560"></canvas>
+        <div class="viewhint">scroll = zoom · drag empty space / right-drag = pan · ⤢ = fit</div>
         <div class="colorbar" id="colorbar" hidden>
           <span class="cb-max" id="cb-max">—</span>
           <div class="cb-ramp" id="cb-ramp"></div>
@@ -91,8 +232,12 @@
       <div class="legend" aria-hidden="true">
         <span><i class="ln art"></i> artery</span>
         <span><i class="ln ven"></i> vein</span>
+        <span><i class="tri up"></i> artery root</span>
+        <span><i class="tri dn"></i> vein root</span>
+        <span><i class="sw"></i> tissue</span>
         <span>field: viridis (low → high)</span>
       </div>
+      <div class="summary" id="summary"></div>
     </section>
   </main>
 

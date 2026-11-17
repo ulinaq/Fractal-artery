@@ -27,6 +27,13 @@ viscosity, a **TPFA** Darcy discretisation, a compactly supported **mollifier**
 for the 1D→3D point-source coupling, a **Schur-complement**-style hybrid solve,
 and a first-order **upwind time-of-flight** solver.
 
+Beyond the thesis: a full **3-D hybrid** (3-D trees + 3-D Darcy bed with pressure,
+flux and time-of-flight), vessel **growth** (space colonisation, CCO — 2-D and 3-D),
+**pruning**, truly volumetric 3-D fractal trees, a library of **organ tissue domains**
+with anatomical vessel entry points, hematocrit phase separation, multi-compartment
+beds, oxygen extraction, structural adaptation, Windkessel transients, UQ/Sobol and
+calibration — all reachable from the web app, the API and MCP.
+
 ## Install & run (uv)
 
 This project uses [uv](https://docs.astral.sh/uv/) for dependency management.
@@ -50,20 +57,45 @@ uv run perfusion-hybrid3d    # Phase 4: full 3-D hybrid (3-D trees + 3-D Darcy)
 
 ### Web app
 
-`uv run perfusion-api` starts the FastAPI back-end **and** serves a zero-build
-2-D workspace (no Node/npm) at `http://127.0.0.1:8010/`. **🐸 Load frog example**
-gives you a real segmented frog-tongue system (arteries + veins + organ mask) in
-one click, ready to Run. Or create a project, draw
-vessels (or **segment them from an uploaded image**), **outline the tissue** (so
-the Darcy bed is organ-shaped), **place inlets/outlets** (any number, ▲/▼), grow
-the arterial tree into it, run the simulation, and view the
-pressure/flux/time-of-flight field as a heatmap with the network overlaid — or
-play a **flow video** of a contrast bolus washing through the tissue (with GIF
-download). Projects are shareable by URL (`/?project=<id>`) and **persist across restarts**
-(SQLite + a blob store under `$PERFUSION_DATA`). A **3-D viewer** (`/viewer3d.html`,
-linked from the header) renders the full 3-D hybrid result — vessel trees + a
-pressure voxel cloud — in a rotatable, dependency-free canvas. Interactive API
-docs are at `/docs`. See [`frontend/`](frontend/README.md) for the UI.
+`uv run perfusion-api` starts the FastAPI back-end **and** serves a zero-build web
+app (no Node/npm) at `http://127.0.0.1:8010/`. Every canvas fills the window, stays
+sharp on HiDPI screens and **zooms/pans** (scroll = zoom about the cursor,
+right-drag / Space+drag = pan, ＋ − ⤢ buttons).
+
+**2-D workspace** (`/`) — three tabs:
+
+- **Vessels** — edit the artery/vein **networks** directly: click to start a vessel
+  and keep clicking to extend it, click a node then empty space to branch, drag
+  nodes, **click a segment to change its radius** at any time, double-click to insert
+  a node, Shift+click to join, Del to delete. **Inlets/outlets are nodes** — select
+  one and press *Set as inlet/outlet* (`I`). Also: segment a vessel image, **grow**
+  (space colonisation / CCO) or **prune** (remove the outermost generations), Strahler
+  morphometry and Pries–Secomb radius adaptation.
+- **Tissue** — draw/edit the organ outline, low-K lesions and growth hotspots
+  vertex by vertex (drag, insert, delete, move), or drop in an **organ preset**
+  (heart, kidney, brain, liver, lung, …) and adjust it.
+- **Result** — pressure / flux / time-of-flight heatmaps, a contrast-bolus **flow
+  video** (+ GIF), transit-time distribution, tracer-kinetic fits and maps,
+  pulsatile, multi-compartment, oxygen and uncertainty analyses, and export.
+
+🐸 **Frog** loads a real segmented frog-tongue system in one click. Set a New
+project's **domain size** and grid in Parameters. Projects are shareable by URL
+(`/?project=<id>`), save/load as one `.json` file, have global undo/redo, and
+**persist across restarts** (SQLite + a blob store under `$PERFUSION_DATA`).
+
+**🌳 Tree explorer** (`/explorer.html`) — grow an artery + vein into a tissue in
+**2-D or 3-D** with no project: pick an **organ** (each with its *anatomical* artery
+and vein entry — renal hilum, aortic root, porta hepatis, circle of Willis, …),
+move the roots, set the **generations** (each step adds a level of branches),
+branching asymmetry / Murray exponent, 3-D **branch-plane twist** and randomness,
+and a **space-filling** algorithm (colonisation steps or CCO terminals); scale the
+**object size** (opens at ×4, up to ×16) and grid resolution; see the solved
+pressure / flux / time-of-flight field — computed in 3-D for 3-D trees — plus
+Strahler orders, inflow and a homogeneity objective, or *Animate growth*.
+
+**🧊 3-D viewer** (`/viewer3d.html`) renders a 3-D hybrid result (trees + voxel
+field) in a rotatable, dependency-free canvas. Interactive API docs are at `/docs`.
+See [`frontend/`](frontend/README.md) for the UI in detail.
 
 ### Back-end API
 
@@ -83,28 +115,29 @@ curl -s localhost:8010/jobs/$jid          # -> {"state":"done",...}
 curl -s localhost:8010/projects/$pid/results
 ```
 
-Endpoints: `health`, `projects` (CRUD) + `projects/frog` (one-click example),
-`projects/{id}/vessels` (hand-drawn
-polylines → networks), `projects/{id}/image?kind=artery|vein` (segment an
-uploaded vessel image),
-`projects/{id}/mask` (tissue outline → `Grid.mask`),
-`projects/{id}/io` (inlet/outlet points → `p_in`/`p_out` boundary nodes),
-`projects/{id}/grow` (grow the arterial tree into the tissue),
-`projects/{id}/run` (job), `jobs` (durable registry) + `jobs/{id}`,
-`projects/{id}/results[/field/{name}]`,
-`projects/{id}/network` (overlay geometry), `projects/{id}/tracer` (flow-video
-frames, job) + `tracer.gif`, `projects/{id}/export?fmt=npz|csv|vtk`,
-`projects/{id}/bundle` (one zip: npz + CSV + VTK + summary/meta + GIF).
+Main endpoints (full OpenAPI at `/docs`):
+
+| Area | Endpoints |
+|---|---|
+| Projects | `projects` (CRUD), `projects/frog`, `projects/import`, `projects/{id}/document` (portable `.json`) |
+| Geometry | `projects/{id}/editable` (GET/PUT the artery/vein networks — create, edit, remove; `inlet_nodes` = inlets/outlets), `…/image?kind=artery\|vein` (segment), `…/grow`, `…/prune`, `…/adapt`, `…/morphometry`, `…/mask`, `…/lesions`, `…/hotspots`, `…/network`, legacy `…/vessels` + `…/io` |
+| Solve & results | `…/run` (job), `jobs/{id}`, `…/results[/field/{name}]`, `…/tracer` (+ `tracer.gif`), `…/transit`, `…/kinetics[/maps]`, `…/oxygen`, `…/multicompartment`, `…/transient`, `…/uq`, `…/calibrate`, `…/export?fmt=npz\|csv\|vtk\|vtp`, `…/bundle`, `…/view3d` |
+| Explorer | `explore/grow` (roots + organ + generations + fill, 2-D/3-D, solve), `explore`, `explore/optimize`, `shapes`, `shapes/polygon` |
 
 ### MCP server
 
 `uv run --extra mcp perfusion-mcp` starts a [Model Context
-Protocol](https://modelcontextprotocol.io) server (stdio) that exposes the engine
-as tools — `run_simulation`, `run_sweep` (probe how perfusion responds to a
-parameter), and `describe_model` — so any MCP client (Claude Desktop, Claude
-Code, an agent) can drive the model. The bundled
-[`.mcp.json`](.mcp.json) registers it for Claude Code automatically when working
-in this repo.
+Protocol](https://modelcontextprotocol.io) server (stdio) exposing the engine as
+tools, so any MCP client (Claude Desktop, Claude Code, an agent) can drive it:
+`run_simulation`, `run_sweep`, `describe_model`, `grow_trees_in_tissue` (organ,
+2-D/3-D, generations, fill), `prune_vessel_tree`, `data_constrained_tree_growth`,
+`optimize_tree_config`, `adapt_vessel_network`, `strahler_morphometry`,
+`fit_tracer_kinetics`, `perfusion_parameter_maps`, `direct_transit_metrics`,
+`pulsatile_windkessel`, `multicompartment_perfusion`, `oxygen_extraction_map`,
+`heterogeneous_perfusion_lesion`, `anisotropic_perfusion_bed`,
+`calibrate_parameter_to_flow`, `uncertainty_quantification`,
+`sobol_sensitivity_indices`. The bundled [`.mcp.json`](.mcp.json) registers it for
+Claude Code automatically when working in this repo.
 
 Example figures are written to `outputs/`.
 
@@ -184,6 +217,9 @@ fit = tkm.fit(t, ca, C, model="2CXM")             # recover Fp, vp, PS, ve
   reference explaining the concepts, equations and numerical methods, with a
   concept → equation → code map. Source: `docs/MODEL_REFERENCE.md` (rebuild the
   PDF with the pandoc → Chrome recipe in `CLAUDE.md`).
+- **[`docs/MODELS.md`](docs/MODELS.md)** — every module's governing equation
+  (Poiseuille/Darcy/TPFA, coupling, transport, TKM, oxygen, adaptation, growth,
+  3-D post-processing, organ domains) with thesis equation numbers.
 - **[`docs/DEVELOPING.md`](docs/DEVELOPING.md)** — how to extend the platform: a
   feature → files → pattern → tests map, conventions, and how to run the pieces.
 - **[`docs/ROADMAP.md`](docs/ROADMAP.md)** — the development plan: target
@@ -205,30 +241,31 @@ src/perfusion/          # the package
     direct.py           #   direct-connection microcirculation (Paper C)
     transport.py        #   passive tracer advection (theta rule)
     tkm.py              #   tracer-kinetic models + fitting
-    timeofflight.py     #   flux magnitude + upwind time-of-flight
+    timeofflight.py     #   flux magnitude + upwind time-of-flight (2-D and 3-D)
     pipeline.py         #   one-call end-to-end hybrid run
-    darcy3d.py          #   3-D Darcy grid/TPFA + terminal response (Phase 4)
-    pipeline3d.py       #   3-D hybrid: 3-D trees coupled to a 3-D Darcy bed
+    darcy3d.py          #   3-D Darcy grid/TPFA, face fluxes, upwind operator
+    pipeline3d.py       #   3-D hybrid: 3-D trees + 3-D Darcy → pressure, flux, TOF
+    …                   #   hematocrit, multicompartment, oxygen, adaptation, morphometry, …
   segmentation.py       # image → vascular Network (skeletonise + graph trace)
-  growth.py             # grow vessels into tissue (space colonisation)
+  growth.py             # grow vessels into tissue: space colonisation + CCO (2-D/3-D)
+  organs.py             # organ tissue shapes (2-D outlines, 3-D masks) + anatomical roots
+  treegen.py            # tree-explorer service: roots → fractal skeleton → fill → solve
   optimize.py           # vascular-structure optimisation objectives (Paper D)
+  uq.py, inverse.py     # uncertainty / Sobol sensitivity, calibration
   io.py, viz.py         # .mat/PNG loaders + result exporters, matplotlib helpers
   api/                  # FastAPI back-end: projects, jobs, results (extra: api)
   mcp_server.py         # MCP server exposing the engine as tools (extra: mcp)
   examples/             # runnable drivers for Papers A/C/D
 tests/                  # pytest suite (physics sanity checks + API)
 data/                   # example assets (frog domain, segmented trees)
-frontend/               # zero-build 2-D web workspace, served at / by the API
+frontend/               # zero-build web app (workspace, tree explorer, 3-D viewer), served at /
 legacy/                 # original MATLAB source (reference only)
 ```
 
-The public API is unchanged — `from perfusion import Grid, Parameters,
-run_hybrid, arterial_tree, venous_tree, Network` and the module handles
-(`perfusion.darcy`, `perfusion.geometry`, …) still work; deep imports live under
-`perfusion.core.*`. The FastAPI back-end (`api/`), vessel **growth**
-(`growth.py`), and a zero-build 2-D web workspace (`frontend/`) are in place; see
-[`docs/ROADMAP.md`](docs/ROADMAP.md) for the plan to add persistence, tissue-mask
-drawing, and flow video.
+The public API is stable — `from perfusion import Grid, Parameters, run_hybrid,
+arterial_tree, venous_tree, Network` and the module handles (`perfusion.darcy`,
+`perfusion.geometry`, …) work; deep imports live under `perfusion.core.*`. See
+[`docs/ROADMAP.md`](docs/ROADMAP.md) for delivery status and what is left.
 
 ## Notes & scope
 
@@ -241,10 +278,9 @@ drawing, and flow video.
   node(s) — any number of each (`Network.inlet_nodes`, default the root); the
   Darcy datum is fixed by pinning one cell, and terminal fluxes are rebalanced so
   the pin carries no net flux (as in the thesis).
-- The frog example runs synthetic trees over the real domain mask. Loading the
-  hand-segmented networks (`data/frog_trees.mat`) is supported via
-  `perfusion.io.load_frog_trees`; wiring them into `Network` is left as an
-  extension (see CLAUDE.md).
+- The frog example (`perfusion-frog`, and 🐸 in the web app) runs on the **real
+  segmented** frog-tongue artery/vein networks and tongue mask
+  (`segmentation.load_frog_system`).
 
 ## License
 

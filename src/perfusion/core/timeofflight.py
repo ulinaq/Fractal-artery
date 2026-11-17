@@ -62,3 +62,22 @@ def time_of_flight(grid: Grid, fx: np.ndarray, fy: np.ndarray,
     tof = spla.spsolve(A, pore_volume)
     tof[~grid.mask.ravel(order="F")] = np.nan   # inactive cells carry no meaning
     return tof.reshape(grid.nx, grid.ny, order="F")
+
+
+def time_of_flight_3d(grid, fx, fy, fz, sources, terminal_flux) -> np.ndarray:
+    """3-D time-of-flight ``v . grad T = phi`` (first-order upwind), the twin of
+    :func:`time_of_flight` on a :class:`~perfusion.core.darcy3d.Grid3D` with the
+    interior face fluxes of :func:`~perfusion.core.darcy3d.face_fluxes_3d`.
+    Returns an ``(nx, ny, nz)`` field, NaN outside the mask."""
+    from .darcy3d import upwind_operator_3d
+
+    inflow_op, _ = upwind_operator_3d(grid, fx, fy, fz)
+    inflow = np.asarray(inflow_op.sum(axis=1)).ravel()
+    injection = np.maximum(_cell_sources(grid, sources, terminal_flux), 0.0)
+    A = (-inflow_op + sp.diags(inflow + injection)).tocsr()
+    dead = A.diagonal() == 0
+    if dead.any():
+        A = A + sp.diags(dead.astype(float))
+    tof = spla.spsolve(A, np.full(grid.n_cells, grid.cell_volume * grid.porosity))
+    tof[~grid.mask.ravel(order="F")] = np.nan
+    return tof.reshape(grid.nx, grid.ny, grid.nz, order="F")

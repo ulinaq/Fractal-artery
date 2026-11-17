@@ -179,3 +179,78 @@ def test_mask_in_domain_resamples_shape_and_preserves_blob():
     assert out.dtype == bool
     assert out.any()                                # resampled...
     assert not out.all()                            # ...still a partial region
+
+
+def _y_tree():
+    """root(0) -> 1 -> junction(2) -> {3 -> 4 (leaf), 5 (leaf)}: a trunk with a
+    two-segment branch and a one-segment branch."""
+    from perfusion.core.geometry import network_from_edges
+    xs = [0.0, 0.0, 0.0, -1.0, -2.0, 1.0]
+    ys = [0.0, 1.0, 2.0, 3.0, 4.0, 3.0]
+    edges = [(a, b, float(np.hypot(xs[b] - xs[a], ys[b] - ys[a])), r)
+             for a, b, r in [(0, 1, 3.0), (1, 2, 3.0), (2, 3, 2.0), (3, 4, 1.5), (2, 5, 2.0)]]
+    return network_from_edges(xs, ys, edges, root=0)
+
+
+def test_prune_removes_whole_terminal_branches():
+    from perfusion.core.geometry import prune_terminal_branches
+    net = _y_tree()
+    one = prune_terminal_branches(net, 1)
+    # both terminal branches (incl. the 2-segment chain) go; the trunk 0-1-2 stays
+    assert one.n_segments == 2
+    assert one.n_nodes == 3
+    assert one.node_y[one.inlet_nodes].tolist() == [0.0]
+    assert one.terminal_nodes.size == 1
+
+
+def test_prune_never_removes_the_fed_trunk():
+    from perfusion.core.geometry import prune_terminal_branches
+    net = _y_tree()
+    many = prune_terminal_branches(net, 10)
+    assert many.n_segments == 2            # the chain to the inlet survives any depth
+    assert prune_terminal_branches(net, 0).n_segments == net.n_segments
+
+
+def test_prune_keeps_radii_and_inverts_growth_generations():
+    from perfusion.core.geometry import arterial_tree, prune_terminal_branches
+    from perfusion.core.parameters import Parameters
+    net = arterial_tree(Parameters(r_min_frac=0.3, seed=0))
+    pruned = prune_terminal_branches(net, 1)
+    assert 0 < pruned.n_segments < net.n_segments
+    assert set(np.round(pruned.seg_radius, 9)) <= set(np.round(net.seg_radius, 9))
+    assert pruned.inlet_nodes.size == net.inlet_nodes.size
+
+
+def test_grow_tree_max_generations_caps_depth():
+    from perfusion.core.parameters import bifurcation_geometry
+    phi, ratio = bifurcation_geometry(1.0, 3.0)
+    tab = lambda v: np.tile(v, (8, 1))             # noqa: E731
+    counts = [grow_tree((0, 0), np.pi / 2, 2.0, 0.0, 8.0, tab(phi), tab(ratio),
+                        max_generations=g).n_segments for g in range(4)]
+    assert counts == [1, 3, 7, 15]                  # 2^(g+1) - 1: each step adds a level
+
+
+@pytest.mark.parametrize("direction", [(0, 0, 1), (1, 0, 0), (0, 1, 0), (1, 1, 1)])
+def test_grow_tree_3d_is_volumetric_not_planar(direction):
+    """Regression: the old rule kept every generation in one plane for a trunk along
+    an axis (zero x-extent). Twisting branch planes must fill all three dimensions."""
+    from perfusion.core.geometry import grow_tree_3d
+    t = grow_tree_3d((0, 0, 0), direction, root_radius=2, min_radius=0,
+                     length_to_radius=5, max_generations=6)
+    P = np.column_stack([t.node_x, t.node_y, t.node_z])
+    sv = np.linalg.svd(P - P.mean(0), compute_uv=False)
+    assert sv[-1] / sv[0] > 0.25                       # a real third dimension
+    assert t.n_segments == 2 ** 7 - 1                  # generation count unchanged
+
+
+def test_grow_tree_3d_asymmetry_and_jitter_are_seeded():
+    from perfusion.core.geometry import grow_tree_3d
+    kw = dict(root_radius=2, min_radius=0, length_to_radius=5, max_generations=4,
+              gamma=1.6, exponent=2.8, jitter=0.5)
+    a = grow_tree_3d((0, 0, 0), (0, 0, 1), seed=1, **kw)
+    b = grow_tree_3d((0, 0, 0), (0, 0, 1), seed=1, **kw)
+    c = grow_tree_3d((0, 0, 0), (0, 0, 1), seed=2, **kw)
+    assert np.allclose(a.node_x, b.node_x)
+    assert not np.allclose(a.node_x, c.node_x)
+    first = a.seg_radius[1:3]                          # the asymmetric first split
+    assert first.max() / first.min() > 1.1

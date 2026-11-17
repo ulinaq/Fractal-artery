@@ -244,14 +244,23 @@ def network_to_vtp(net, path: str | Path, *, flow=None) -> Path:
 
 
 def save_network(net, path: str | Path) -> Path:
-    """Serialise a :class:`~perfusion.core.geometry.Network` to a ``.npz`` file."""
+    """Serialise a :class:`~perfusion.core.geometry.Network` to a ``.npz`` file.
+
+    ``inlet_nodes`` (the prescribed-pressure nodes — every inlet/outlet) and
+    ``node_z`` (3-D trees) are stored when set, so they survive a round trip.
+    """
     path = Path(path)
+    extra = {}
+    if net.inlet_nodes is not None:
+        extra["inlet_nodes"] = np.asarray(net.inlet_nodes, dtype=int)
+    if net.node_z is not None:
+        extra["node_z"] = np.asarray(net.node_z, dtype=float)
     np.savez(
         path,
         node_x=net.node_x, node_y=net.node_y, node_role=net.node_role,
         seg_start=net.seg_start, seg_end=net.seg_end, seg_length=net.seg_length,
         seg_radius=net.seg_radius, seg_angle=net.seg_angle,
-        root_node=np.asarray(net.root_node),
+        root_node=np.asarray(net.root_node), **extra,
     )
     return path if path.suffix else path.with_suffix(".npz")
 
@@ -266,4 +275,7 @@ def load_network(path: str | Path):
             seg_start=d["seg_start"], seg_end=d["seg_end"], seg_length=d["seg_length"],
             seg_radius=d["seg_radius"], seg_angle=d["seg_angle"],
             root_node=int(d["root_node"]),
+            # older files predate these fields -> Network's defaults
+            inlet_nodes=d["inlet_nodes"] if "inlet_nodes" in d.files else None,
+            node_z=d["node_z"] if "node_z" in d.files else None,
         )

@@ -145,7 +145,8 @@ class Network:
 def grow_tree(root_xy: tuple[float, float], root_angle: float, root_radius: float,
               min_radius: float, length_to_radius: float,
               angles: np.ndarray, radius_ratios: np.ndarray,
-              mirror_children: bool = False) -> Network:
+              mirror_children: bool = False,
+              max_generations: int | None = None) -> Network:
     """Grow a self-similar binary fractal tree.
 
     Starting from a trunk, every segment whose radius exceeds ``min_radius``
@@ -162,6 +163,8 @@ def grow_tree(root_xy: tuple[float, float], root_angle: float, root_radius: floa
         child/parent radius ratios (from Murray's law).
     mirror_children : swap the child ordering (arterial vs. venous convention in
         ``Tree_artery.m`` / ``Tree_vein.m``).
+    max_generations : optional cap on the branching depth (the trunk is depth 0;
+        each bifurcation adds one). ``None`` keeps the radius-only stop rule.
 
     Returns
     -------
@@ -185,12 +188,14 @@ def grow_tree(root_xy: tuple[float, float], root_angle: float, root_radius: floa
     ys.append(ys[0] + seg_length[0] * np.sin(root_angle))
     roles.append(NodeRole.TERMINAL)        # provisional; set when the node is visited
     node_incoming.append(0)
+    depth = [0, 0]                         # bifurcation depth of each node
+    depth_cap = np.inf if max_generations is None else int(max_generations)
 
     n_bifurcations = 0
     node = 1
     while node < len(xs):
         parent_seg = node_incoming[node]
-        if seg_radius[parent_seg] > min_radius:
+        if seg_radius[parent_seg] > min_radius and depth[node] < depth_cap:
             roles[node] = NodeRole.BIFURCATION
             n_bifurcations += 1
             generation = min(n_bifurcations, n_generations) - 1
@@ -213,6 +218,7 @@ def grow_tree(root_xy: tuple[float, float], root_angle: float, root_radius: floa
                 ys.append(ys[node] + length * np.sin(angle))
                 roles.append(NodeRole.TERMINAL)
                 node_incoming.append(len(seg_start) - 1)
+                depth.append(depth[node] + 1)
         else:
             roles[node] = NodeRole.TERMINAL
         node += 1
@@ -473,21 +479,47 @@ def _rotate(vec: np.ndarray, axis: np.ndarray, angle: float) -> np.ndarray:
 
 def grow_tree_3d(root_xyz, direction=(0.0, 0.0, 1.0), *, root_radius=2.0,
                  min_radius=0.6, length_to_radius=8.0, theta=0.5, ratio=0.78,
-                 max_generations=8, mirror=False) -> Network:
+                 max_generations=8, mirror=False, gamma=None, exponent=3.0,
+                 twist=np.pi / 2, jitter=0.0, seed=None) -> Network:
     """Grow a 3-D self-similar binary fractal tree.
 
-    Every segment above ``min_radius`` splits into two children rotated by
-    ``±theta`` from the parent direction; the branching plane alternates each
-    generation (about z then y) so the tree fills 3-D. Radii/lengths scale by
-    ``ratio``. Returns a :class:`Network` carrying ``node_z`` (a 3-D network).
-    The solver is coordinate-free, so this plugs into the same hybrid solve.
+    Every segment above ``min_radius`` splits into two children. The two children
+    lie in a *branching plane* through the parent direction; each bifurcation's
+    plane is rotated by ``twist`` (default 90°, the alternating pattern of real
+    vascular trees) about the parent axis relative to its parent's plane, so the
+    tree fills 3-D from the second generation on — no generation is confined to a
+    fixed global plane. The first plane's orientation is random when ``seed`` is
+    given (else fixed).
+
+    Branching law: with ``gamma=None`` both children deviate by ``±theta`` and
+    scale by ``ratio`` (symmetric). With ``gamma`` (>= 1 asymmetry, as in 2-D) the
+    child angles and radius ratios follow Murray's law via
+    :func:`perfusion.core.parameters.bifurcation_geometry` with ``exponent``.
+    ``jitter`` (0..1) adds seeded random variation to the twist, the branching
+    angles and the segment lengths for a less regular, more natural tree.
+    Returns a :class:`Network` carrying ``node_z`` (a 3-D network); the solver is
+    coordinate-free, so this plugs into the same hybrid solve.
     """
     def unit(v):
         n = np.linalg.norm(v)
         return v / n if n > 0 else v
 
+    rng = np.random.default_rng(seed)
+    jit = float(np.clip(jitter, 0.0, 1.0))
+    if gamma is None:
+        phis, ratios = np.array([theta, theta]), np.array([ratio, ratio])
+    else:
+        from .parameters import bifurcation_geometry
+        phis, ratios = bifurcation_geometry(float(gamma), float(exponent))
+
     root = np.asarray(root_xyz, dtype=float)
     d0 = unit(np.asarray(direction, dtype=float))
+    # a reference normal perpendicular to the trunk (randomly turned if seeded)
+    helper = np.array([1.0, 0.0, 0.0]) if abs(d0[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+    n0 = unit(np.cross(d0, helper))
+    if seed is not None:
+        n0 = unit(_rotate(n0, d0, rng.uniform(0, 2 * np.pi)))
+
     xs, ys, zs, roles = [root[0]], [root[1]], [root[2]], [NodeRole.ROOT]
     seg_start, seg_end, seg_len, seg_rad, seg_ang = [], [], [], [], []
 
@@ -498,34 +530,37 @@ def grow_tree_3d(root_xyz, direction=(0.0, 0.0, 1.0), *, root_radius=2.0,
         roles.append(NodeRole.TERMINAL)
         return len(xs) - 1
 
-    def add_seg(parent, child, length, radius):
+    def add_seg(parent, child, length, radius, d):
         seg_start.append(parent)
         seg_end.append(child)
         seg_len.append(length)
         seg_rad.append(radius)
-        seg_ang.append(0.0)
+        seg_ang.append(float(np.arctan2(d[1], d[0])))
 
     L0 = length_to_radius * root_radius
-    add_seg(0, add_node(root + d0 * L0), L0, root_radius)
+    add_seg(0, add_node(root + d0 * L0), L0, root_radius, d0)
 
-    axes = (np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0]))
-    queue = deque([(1, d0, root_radius, L0, 0)])
+    # (node, direction, plane normal of the *previous* bifurcation, radius, length, gen)
+    queue = deque([(1, d0, n0, root_radius, L0, 0)])
     while queue:
-        node, d, r, length, gen = queue.popleft()
+        node, d, n_prev, r, length, gen = queue.popleft()
         if r <= min_radius or gen >= max_generations:
             continue
         roles[node] = NodeRole.BIFURCATION
-        axis = np.cross(axes[gen % 2], d)
-        if np.linalg.norm(axis) < 1e-9:
-            axis = np.cross(axes[(gen + 1) % 2], d)
-        axis = unit(axis)
-        cr, cl = r * ratio, length * ratio
+        tw = twist if gen > 0 else 0.0           # the first plane is n0 itself
+        tw += jit * rng.normal(0.0, 0.6)
+        normal = unit(_rotate(n_prev, d, tw))
+        normal = unit(normal - np.dot(normal, d) * d)     # keep it exactly ⟂ d
         parent_pos = np.array([xs[node], ys[node], zs[node]])
-        for sign in ((-1.0, 1.0) if not mirror else (1.0, -1.0)):
-            child_dir = unit(_rotate(d, axis, sign * theta))
+        signs = (1.0, -1.0) if mirror else (-1.0, 1.0)
+        for k, sign in enumerate(signs):
+            phi = phis[k] * (1.0 + jit * rng.normal(0.0, 0.2))
+            child_dir = unit(_rotate(d, normal, sign * phi))
+            cr = r * ratios[k]
+            cl = length * ratios[k] * max(0.3, 1.0 + jit * rng.normal(0.0, 0.2))
             child = add_node(parent_pos + child_dir * cl)
-            add_seg(node, child, cl, cr)
-            queue.append((child, child_dir, cr, cl, gen + 1))
+            add_seg(node, child, cl, cr, child_dir)
+            queue.append((child, child_dir, normal, cr, cl, gen + 1))
 
     return Network(
         node_x=np.asarray(xs), node_y=np.asarray(ys),
@@ -534,3 +569,73 @@ def grow_tree_3d(root_xyz, direction=(0.0, 0.0, 1.0), *, root_radius=2.0,
         seg_length=np.asarray(seg_len), seg_radius=np.asarray(seg_rad),
         seg_angle=np.asarray(seg_ang), root_node=0, node_z=np.asarray(zs),
     )
+
+
+def _subnetwork(net: Network, keep_seg: np.ndarray) -> Network:
+    """The network restricted to ``keep_seg`` segments; nodes left with no segment
+    are dropped unless they are inlets. Reindexes nodes, re-derives roles by degree,
+    and carries ``inlet_nodes``/``root_node``/``node_z`` across."""
+    ss, se = net.seg_start[keep_seg], net.seg_end[keep_seg]
+    keep_node = np.zeros(net.n_nodes, bool)
+    keep_node[ss] = True
+    keep_node[se] = True
+    keep_node[net.inlet_nodes] = True
+    old2new = np.full(net.n_nodes, -1, dtype=int)
+    old2new[keep_node] = np.arange(int(keep_node.sum()))
+    ss2, se2 = old2new[ss], old2new[se]
+    nx, ny = net.node_x[keep_node], net.node_y[keep_node]
+    inlets = old2new[net.inlet_nodes]
+    deg = np.bincount(np.concatenate([ss2, se2]), minlength=len(nx))
+    role = np.where(deg >= 2, int(NodeRole.BIFURCATION), int(NodeRole.TERMINAL))
+    role[inlets] = int(NodeRole.ROOT)
+    root = int(old2new[net.root_node]) if keep_node[net.root_node] else int(inlets[0])
+    return Network(
+        node_x=nx, node_y=ny, node_role=role, seg_start=ss2, seg_end=se2,
+        seg_length=net.seg_length[keep_seg], seg_radius=net.seg_radius[keep_seg],
+        seg_angle=net.seg_angle[keep_seg], root_node=root, inlet_nodes=inlets,
+        node_z=net.node_z[keep_node] if net.node_z is not None else None,
+    )
+
+
+def prune_terminal_branches(net: Network, steps: int = 1) -> Network:
+    """Prune the outermost ``steps`` generations of a tree — the inverse of growth.
+
+    One step removes every *terminal branch*: the chain of segments from a free end
+    (a degree-1 node that is not an inlet/outlet) back through pass-through
+    (degree-2) nodes to the nearest junction. All terminal branches of a generation
+    go at once, so a junction whose children were all pruned becomes a free end
+    that the next step removes. A chain that reaches an inlet/outlet (the trunk) is
+    never removed, so the fed tree survives; loops are untouched (no free end).
+    Segment geometry and radii of what remains are unchanged.
+    """
+    steps = int(steps)
+    if steps < 0:
+        raise ValueError("steps must be >= 0")
+    for _ in range(steps):
+        if net.n_segments == 0:
+            break
+        deg = net.node_degree
+        inlet = np.zeros(net.n_nodes, bool)
+        inlet[net.inlet_nodes] = True
+        adj: list[list[tuple[int, int]]] = [[] for _ in range(net.n_nodes)]
+        for s, (a, b) in enumerate(zip(net.seg_start, net.seg_end, strict=True)):
+            adj[a].append((int(b), s))
+            adj[b].append((int(a), s))
+        drop = np.zeros(net.n_segments, bool)
+        for leaf in np.flatnonzero((deg == 1) & ~inlet):
+            chain, prev, cur = [], -1, int(leaf)
+            while True:
+                nxt = [(v, s) for v, s in adj[cur] if s not in chain and v != prev]
+                if not nxt:                           # an isolated chain end: whole fragment
+                    break
+                v, s = nxt[0]
+                chain.append(s)
+                prev, cur = cur, v
+                if inlet[cur] or deg[cur] != 2:       # junction, trunk or the far end
+                    break
+            if not inlet[cur]:                        # never cut the fed trunk
+                drop[chain] = True
+        if not drop.any():
+            break
+        net = _subnetwork(net, ~drop)
+    return net
