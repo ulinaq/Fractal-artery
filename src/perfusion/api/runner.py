@@ -51,9 +51,60 @@ def network_from_strokes(polylines, root_xy=None):
     return network_from_polylines(segs, radii=radii, root_xy=root_xy, snap_tol=0.5)
 
 
+def is_3d(project) -> bool:
+    return bool(getattr(project.grid, "is_3d", False))
+
+
+def build_grid3d(project):
+    """A 3-D project's ``Grid3D`` (+ 6-value window) with its raster tissue mask."""
+    g = project.grid
+    raster = getattr(project, "mask", None)
+    mask = None
+    if raster is not None and np.asarray(raster).shape == (g.nx, g.ny, g.nz):
+        mask = np.asarray(raster, dtype=bool)
+    return g.to_core3d(mask=mask), tuple(g.domain_limit)
+
+
+def default_trees_3d(project):
+    """Fallback 3-D artery + vein for a 3-D project: fractal trees grown from the
+    tissue's anatomical roots (``organs.roots``), sized to the domain — the same
+    proportions as the Tree explorer's defaults."""
+    from .. import organs
+    from ..core.geometry import grow_tree_3d
+
+    dom = tuple(project.grid.domain_limit)
+    name = project.grid.tissue if project.grid.tissue in organs.SHAPES_3D else "box"
+    roots = organs.roots(name, 3, dom)
+    size = float(min(dom[1] - dom[0], dom[3] - dom[2], dom[5] - dom[4]))
+    r0 = 0.025 * size
+    kw = dict(min_radius=0.0, length_to_radius=5.0, max_generations=4, exponent=2.8,
+              jitter=0.3)
+    art = grow_tree_3d(roots["artery"]["root"], roots["artery"]["direction"],
+                       root_radius=r0, gamma=1.4, seed=0, **kw)
+    ven = grow_tree_3d(roots["vein"]["root"], roots["vein"]["direction"],
+                       root_radius=1.2 * r0, gamma=1.2, seed=7, mirror=True, **kw)
+    return art, ven
+
+
+def defaults_for(project):
+    """The project's fallback (art, ven): 3-D defaults for a 3-D project, else the
+    domain-fitted 2-D fractal trees."""
+    return default_trees_3d(project) if is_3d(project) else default_trees(project)
+
+
+def require_2d(project, feature: str) -> None:
+    """Raise :class:`InputError` for a 2-D-only feature on a 3-D project."""
+    if is_3d(project):
+        raise InputError(f"{feature} works on 2-D projects; this is a 3-D project — "
+                         "view and run it in the 3-D viewer.")
+
+
 def build_grid(project):
     """Grid + its domain window, with the tissue mask: a stored raster mask if
-    present (shape must match the grid), else the drawn tissue polygons, else none."""
+    present (shape must match the grid), else the drawn tissue polygons, else none.
+    A 3-D project gets its ``Grid3D`` (see :func:`build_grid3d`)."""
+    if is_3d(project):
+        return build_grid3d(project)
     nx, ny, domain_limit = project.grid.nx, project.grid.ny, project.grid.domain_limit
     raster = getattr(project, "mask", None)
     if raster is not None and np.asarray(raster).shape == (nx, ny):
@@ -111,7 +162,7 @@ def build_networks(project, use_vessels, defaults=False):
     if project.vein_network is not None:
         ven = project.vein_network
     if defaults and (art is None or ven is None):
-        d_art, d_ven = default_trees(project)
+        d_art, d_ven = defaults_for(project)
         art = art if art is not None else d_art
         ven = ven if ven is not None else d_ven
     return art, ven
@@ -165,6 +216,8 @@ def validate_run(project, use_vessels):
     """Check the model can be solved; raise :class:`InputError` with a clear,
     actionable message for the common misconfigurations. Returns (grid, art, ven)."""
     prm = project.params.to_core()
+    if is_3d(project):
+        return _validate_run_3d(project, prm)
     grid, _ = build_grid(project)
     if grid.mask is not None:
         active = int(np.asarray(grid.mask).sum())
@@ -203,6 +256,31 @@ def validate_run(project, use_vessels):
     return grid, art, ven
 
 
+def _validate_run_3d(project, prm):
+    """The 3-D counterpart of :func:`validate_run` → ``(Grid3D, art, ven)``."""
+    from scipy.ndimage import label
+
+    grid, _ = build_grid3d(project)
+    active = int(grid.mask.sum())
+    if active == 0:
+        raise InputError("The 3-D tissue mask has no active cells.")
+    n_blobs = label(grid.mask)[1]
+    if n_blobs > 1:
+        raise InputError(f"The 3-D tissue is split into {n_blobs} disconnected regions; "
+                         "the Darcy solve needs one connected tissue.")
+    if prm.p_in == prm.p_out:
+        raise InputError(f"p_in equals p_out ({prm.p_in}); there is no pressure drop to "
+                         "drive flow. Set p_in above p_out.")
+    art, ven = build_networks(project, use_vessels=True, defaults=True)
+    if not (art.is_3d and ven.is_3d):
+        raise InputError("A 3-D project needs 3-D vessel trees (with z coordinates).")
+    for net, name, word in ((art, "arterial", "inlet"), (ven, "venous", "outlet")):
+        if net.terminal_nodes.size == 0:
+            raise InputError(f"The {name} tree has no free ends: every end is marked as "
+                             f"an {word}, so it cannot exchange blood with the tissue.")
+    return grid, art, ven
+
+
 def solve(project, *, use_vessels, nonlinear=False, max_iter=100, tol=1e-10,
           phase_separation=False, elasticity=False, compliance=0.01):
     """Build the model (grid, trees, inlet/outlet nodes) and run the hybrid solve."""
@@ -213,6 +291,10 @@ def solve(project, *, use_vessels, nonlinear=False, max_iter=100, tol=1e-10,
         prm.compliance = compliance
     grid, art, ven = validate_run(project, use_vessels)
     domain_limit = project.grid.domain_limit
+    if is_3d(project):                      # the 3-D hybrid: pressure, flux, time-of-flight
+        from ..core.pipeline3d import run_hybrid_3d
+
+        return run_hybrid_3d(prm, grid, art, ven, tuple(domain_limit))
     return run_hybrid(prm, grid, domain_limit=domain_limit, nonlinear=nonlinear,
                       art=art, ven=ven,
                       art_inlets=snap_io(art, project.inlets),
@@ -239,6 +321,7 @@ def solve_direct_model(project, use_vessels, rho_c=0.0):
 def run_project(store, project, req: RunRequest) -> None:
     """Execute the simulation (hybrid Darcy or direct-connection) and persist it."""
     if getattr(req, "model", "hybrid") == "direct":
+        require_2d(project, "The direct-connection model")
         art, ven, sol = solve_direct_model(project, req.use_vessels, req.rho_c)
         store.save_direct_result(project, art, ven, sol)
         return

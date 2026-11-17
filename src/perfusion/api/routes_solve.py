@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from .. import io as perfio
 from . import helpers, runner
-from .deps import get_jobs, get_project, get_store
+from .deps import get_jobs, get_project, get_project_2d, get_store
 from .schemas import (
     CalibrateRequest,
     FieldResponse,
@@ -35,7 +35,7 @@ def run_project(body: RunRequest | None = None, project: Project = Depends(get_p
 
 
 @router.post("/projects/{pid}/tracer", response_model=JobInfo)
-def run_tracer(body: TracerRequest | None = None, project: Project = Depends(get_project),
+def run_tracer(body: TracerRequest | None = None, project: Project = Depends(get_project_2d),
                jobs=Depends(get_jobs)) -> JobInfo:
     req = body or TracerRequest()
     jid = jobs.submit(project.id, "tracer", req.model_dump())
@@ -64,7 +64,7 @@ def results(project: Project = Depends(get_project)) -> dict:
 
 
 @router.get("/projects/{pid}/results/field/{name}", response_model=FieldResponse)
-def result_field(pid: str, name: str, project: Project = Depends(get_project),
+def result_field(pid: str, name: str, project: Project = Depends(get_project_2d),
                  store: ProjectStore = Depends(get_store)) -> FieldResponse:
     if not store.result_path(pid).exists():
         raise HTTPException(409, "no field result; the direct-connection model has no "
@@ -114,7 +114,7 @@ def transit_distribution(pid: str, bins: int = 40, k: float = 0.0,
 
 @router.get("/projects/{pid}/kinetics")
 def tracer_kinetics(pid: str, model: str = "1CM",
-                    project: Project = Depends(get_project),
+                    project: Project = Depends(get_project_2d),
                     store: ProjectStore = Depends(get_store)) -> dict:
     """Fit a tracer-kinetic model to the computed tracer's tissue curve.
 
@@ -161,7 +161,7 @@ _DECONV_FIELDS = ("Fp", "CBV", "MTT")
 @router.get("/projects/{pid}/kinetics/maps", response_model=FieldResponse)
 def kinetic_map(pid: str, field: str = "Fp", method: str = "semi",
                 oi: float = 0.1, osvd: bool = False,
-                project: Project = Depends(get_project),
+                project: Project = Depends(get_project_2d),
                 store: ProjectStore = Depends(get_store)) -> FieldResponse:
     """Voxel-wise parametric map from the tracer.
 
@@ -202,7 +202,7 @@ _OXYGEN_FIELDS = ("saturation", "consumption", "concentration")
 
 @router.get("/projects/{pid}/oxygen")
 def oxygen_map(pid: str, field: str = "saturation", k: float = 1.0, c_art: float = 1.0,
-               diffusivity: float = 0.0, project: Project = Depends(get_project),
+               diffusivity: float = 0.0, project: Project = Depends(get_project_2d),
                store: ProjectStore = Depends(get_store)) -> dict:
     """Steady oxygen / solute map on the Darcy field (Krogh-style advection–reaction).
 
@@ -223,7 +223,7 @@ def oxygen_map(pid: str, field: str = "saturation", k: float = 1.0, c_art: float
 
 
 @router.post("/projects/{pid}/calibrate")
-def calibrate_parameter(body: CalibrateRequest, project: Project = Depends(get_project)) -> dict:
+def calibrate_parameter(body: CalibrateRequest, project: Project = Depends(get_project_2d)) -> dict:
     """Inverse problem: recover ``param`` so the model's ``qoi`` matches ``target``
     (bounded 1-D search over forward solves). Useful to fit permeability or inlet
     pressure to a measured flow."""
@@ -236,7 +236,7 @@ def calibrate_parameter(body: CalibrateRequest, project: Project = Depends(get_p
 
 
 @router.post("/projects/{pid}/uq")
-def uncertainty_quantification(body: UQRequest, project: Project = Depends(get_project)) -> dict:
+def uncertainty_quantification(body: UQRequest, project: Project = Depends(get_project_2d)) -> dict:
     """Monte-Carlo uncertainty quantification: sample the given input ranges
     (Latin-hypercube), re-solve, and return each quantity of interest's
     mean/std/5-95 percentiles plus first-order sensitivities (Pearson r). Runs
@@ -252,7 +252,7 @@ def uncertainty_quantification(body: UQRequest, project: Project = Depends(get_p
 
 @router.get("/projects/{pid}/multicompartment")
 def multicompartment_map(pid: str, field: str = "perfusion", n: int = 3, beta: float = 1.0,
-                         project: Project = Depends(get_project)) -> dict:
+                         project: Project = Depends(get_project_2d)) -> dict:
     """Multi-compartment Darcy bed (arteriole→…→venule) with inter-compartment
     exchange ``beta``. ``field='perfusion'`` returns the arteriole→next exchange (the
     capillary perfusion map); ``field='comp0'..'comp{n-1}'`` a compartment pressure.
@@ -313,7 +313,7 @@ def transient_response(pid: str, period: float = 1.0, pulse: float = 0.5,
 
 
 @router.get("/projects/{pid}/direct")
-def direct_result(pid: str, project: Project = Depends(get_project),
+def direct_result(pid: str, project: Project = Depends(get_project_2d),
                   store: ProjectStore = Depends(get_store)) -> dict:
     """Render data for a direct-connection result: arterial/venous vessel
     segments and the terminal-connection links, each ``[x0,y0,x1,y1,flow]``."""
@@ -330,7 +330,7 @@ def direct_result(pid: str, project: Project = Depends(get_project),
 
 
 @router.get("/projects/{pid}/network-tracer")
-def network_tracer(pid: str, project: Project = Depends(get_project),
+def network_tracer(pid: str, project: Project = Depends(get_project_2d),
                    store: ProjectStore = Depends(get_store)) -> dict:
     """Direct-model bolus animation: each vascular element ``[x0,y0,x1,y1]`` with a
     per-frame concentration (0 arterial / 1 venous / 2 connection), computed from
@@ -348,10 +348,14 @@ def network_tracer(pid: str, project: Project = Depends(get_project),
 
 
 @router.get("/projects/{pid}/view3d")
-def project_view3d(pid: str, project: Project = Depends(get_project),
+def project_view3d(pid: str, field: str = "pressure", project: Project = Depends(get_project),
                    store: ProjectStore = Depends(get_store)) -> dict:
-    """This project's result as a 3-D scene: pressure as a relief surface
-    (z ∝ pressure) with the vessel trees at the base. Voxels only once solved."""
+    """This project's result as a 3-D scene. A 2-D project: pressure as a relief
+    surface (z ∝ pressure) with the vessel trees at the base. A **3-D project**: its
+    3-D trees and the solved ``field`` (pressure / flux / tof) as voxels — or the
+    tissue as a point cloud before the first run."""
+    if project.grid.is_3d:
+        return _view3d_volume(project, store, field)
     grid, dom = runner.build_grid(project)
     x0, x1, y0, y1 = dom
     art, ven = runner.build_networks(project, use_vessels=True, defaults=True)
@@ -388,6 +392,36 @@ def project_view3d(pid: str, project: Project = Depends(get_project),
             "pressure": {"min": pmin, "max": pmax, "voxels": voxels}}
 
 
+def _view3d_volume(project, store, field: str) -> dict:
+    """The 3-D scene of a 3-D project (same payload shape as ``/demo3d``)."""
+    if field not in ("pressure", "flux", "tof"):
+        raise HTTPException(422, "field must be 'pressure', 'flux' or 'tof'")
+    grid, dom = runner.build_grid3d(project)
+    art, ven = runner.build_networks(project, use_vessels=True, defaults=True)
+    segments = [[*map(lambda v: round(v, 2), sg[:6]), round(sg[6], 3), k]
+                for net, k in ((art, 0), (ven, 1)) for sg in helpers.segment_lines_3d(net)]
+    lo, hi = np.asarray(dom[0::2]), np.asarray(dom[1::2])
+    h = (hi - lo) / np.array([grid.nx, grid.ny, grid.nz])
+    k = max(1, round((grid.mask.sum() / 3500) ** (1 / 3)))
+    idx = np.argwhere(grid.mask[::k, ::k, ::k]) * k
+    xyz = np.round(lo + (idx + 0.5) * h, 1)
+    out = {"shape": [grid.nx, grid.ny, grid.nz], "domain": [float(v) for v in dom],
+           "segments": segments, "has_result": project.has_result, "dim": 3,
+           "tissue": project.grid.tissue, "field": field,
+           "pressure": {"min": 0.0, "max": 0.0, "voxels": []},
+           "tissue_points": xyz.tolist()}
+    if project.has_result:
+        f = store.result_field(project.id, field)
+        vals = f[tuple(idx.T)]
+        ok = np.isfinite(vals)
+        fin = f[grid.mask & np.isfinite(f)]
+        lo_v, hi_v = (np.percentile(fin, [2, 98]) if fin.size else (0.0, 1.0))
+        out["pressure"] = {"min": float(lo_v), "max": float(hi_v), "name": field,
+                           "voxels": np.column_stack([xyz[ok], np.round(vals[ok], 6)]).tolist()}
+        out["summary"] = project.summary
+    return out
+
+
 @router.get("/projects/{pid}/export")
 def export(pid: str, fmt: str = "npz", project: Project = Depends(get_project),
            store: ProjectStore = Depends(get_store)):
@@ -406,6 +440,8 @@ def export(pid: str, fmt: str = "npz", project: Project = Depends(get_project),
                             filename=f"{name}.npz")
     if fmt not in ("csv", "vtk"):
         raise HTTPException(422, "fmt must be 'npz', 'csv', 'vtk' or 'vtp'")
+    if project.grid.is_3d:
+        raise HTTPException(409, "a 3-D result exports as npz (fields) or vtp (vessels)")
     with np.load(store.result_path(pid)) as d:
         dl, mask = tuple(d["domain_limit"]), d["mask"]
         fields = {"pressure": d["pressure"], "flux": d["flux"], "tof": d["tof"]}
@@ -420,7 +456,7 @@ def export(pid: str, fmt: str = "npz", project: Project = Depends(get_project),
 
 
 @router.get("/projects/{pid}/bundle")
-def export_bundle(pid: str, project: Project = Depends(get_project),
+def export_bundle(pid: str, project: Project = Depends(get_project_2d),
                   store: ProjectStore = Depends(get_store)):
     """One zip with everything: npz + CSV + VTK fields, summary/meta JSON, and
     the tracer GIF if one exists."""
@@ -459,7 +495,7 @@ def export_bundle(pid: str, project: Project = Depends(get_project),
 
 
 @router.get("/projects/{pid}/tracer", response_model=TracerInfo)
-def tracer_frames(pid: str, project: Project = Depends(get_project),
+def tracer_frames(pid: str, project: Project = Depends(get_project_2d),
                   store: ProjectStore = Depends(get_store)) -> TracerInfo:
     if not project.has_tracer:
         raise HTTPException(409, "no tracer yet; POST to /tracer first")
@@ -472,7 +508,7 @@ def tracer_frames(pid: str, project: Project = Depends(get_project),
 
 
 @router.get("/projects/{pid}/tracer.gif")
-def tracer_gif(pid: str, project: Project = Depends(get_project),
+def tracer_gif(pid: str, project: Project = Depends(get_project_2d),
                store: ProjectStore = Depends(get_store)):
     from fastapi.responses import Response
 

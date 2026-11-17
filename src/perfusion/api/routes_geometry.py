@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from .. import growth
 from ..core.geometry import rasterize_mask
 from . import helpers, runner
-from .deps import get_project, get_store, project_info
+from .deps import get_project, get_project_2d, get_store, project_info
 from .schemas import (
     AdaptInfo,
     AdaptRequest,
@@ -42,7 +42,7 @@ def get_vessels(project: Project = Depends(get_project)) -> VesselsIn:
 
 
 @router.put("/projects/{pid}/vessels", response_model=ProjectInfo)
-def set_vessels(body: VesselsIn, project: Project = Depends(get_project),
+def set_vessels(body: VesselsIn, project: Project = Depends(get_project_2d),
                 store: ProjectStore = Depends(get_store)) -> ProjectInfo:
     project.arteries, project.veins = body.arteries, body.veins
     store.save(project)
@@ -55,7 +55,7 @@ def get_mask(project: Project = Depends(get_project)) -> dict:
 
 
 @router.put("/projects/{pid}/mask", response_model=ProjectInfo)
-def set_mask(body: MaskIn, project: Project = Depends(get_project),
+def set_mask(body: MaskIn, project: Project = Depends(get_project_2d),
              store: ProjectStore = Depends(get_store)) -> ProjectInfo:
     project.regions = [[list(pt) for pt in poly] for poly in body.regions]
     store.save(project)
@@ -68,7 +68,7 @@ def get_lesions(project: Project = Depends(get_project)) -> dict:
 
 
 @router.put("/projects/{pid}/lesions", response_model=ProjectInfo)
-def set_lesions(body: LesionsIn, project: Project = Depends(get_project),
+def set_lesions(body: LesionsIn, project: Project = Depends(get_project_2d),
                 store: ProjectStore = Depends(get_store)) -> ProjectInfo:
     """Set the low-permeability tissue patches (heterogeneous ``K``). Invalidates any
     stale result so the next solve uses the new permeability field."""
@@ -85,7 +85,7 @@ def get_hotspots(project: Project = Depends(get_project)) -> dict:
 
 
 @router.put("/projects/{pid}/hotspots", response_model=ProjectInfo)
-def set_hotspots(body: HotspotsIn, project: Project = Depends(get_project),
+def set_hotspots(body: HotspotsIn, project: Project = Depends(get_project_2d),
                  store: ProjectStore = Depends(get_store)) -> ProjectInfo:
     """Set the data-constrained growth targets: subsequent grows sample attraction
     points with probability weighted by these hotspots (denser tree where demand is
@@ -101,7 +101,7 @@ def get_io(project: Project = Depends(get_project)) -> dict:
 
 
 @router.put("/projects/{pid}/io", response_model=ProjectInfo)
-def set_io(body: IOIn, project: Project = Depends(get_project),
+def set_io(body: IOIn, project: Project = Depends(get_project_2d),
            store: ProjectStore = Depends(get_store)) -> ProjectInfo:
     """Set arterial inlet / venous outlet points (snapped to vessel ends on run)."""
     project.inlets = [list(p) for p in body.inlets]
@@ -111,7 +111,7 @@ def set_io(body: IOIn, project: Project = Depends(get_project),
 
 
 @router.post("/projects/{pid}/vectorize", response_model=ProjectInfo)
-def vectorize(project: Project = Depends(get_project),
+def vectorize(project: Project = Depends(get_project_2d),
               store: ProjectStore = Depends(get_store)) -> ProjectInfo:
     """Turn hand-drawn polylines into an editable vessel **network** (tree/graph).
 
@@ -162,7 +162,7 @@ def get_editable(project: Project = Depends(get_project)) -> dict:
 
 
 @router.put("/projects/{pid}/editable", response_model=ProjectInfo)
-def put_editable(body: NetworksEditIn, project: Project = Depends(get_project),
+def put_editable(body: NetworksEditIn, project: Project = Depends(get_project_2d),
                  store: ProjectStore = Depends(get_store)) -> ProjectInfo:
     """Apply moved nodes + resized segments to the stored trees.
 
@@ -211,7 +211,7 @@ def put_editable(body: NetworksEditIn, project: Project = Depends(get_project),
 
 @router.post("/projects/{pid}/image", response_model=ProjectInfo)
 async def upload_image(request: Request, kind: str = "artery", min_size: int = 20,
-                       project: Project = Depends(get_project),
+                       project: Project = Depends(get_project_2d),
                        store: ProjectStore = Depends(get_store)) -> ProjectInfo:
     """Segment an uploaded vessel image into the arterial or venous network.
 
@@ -248,7 +248,7 @@ async def upload_image(request: Request, kind: str = "artery", min_size: int = 2
 
 
 @router.post("/projects/{pid}/grow", response_model=GrowInfo)
-def grow_vessels(body: GrowRequest | None = None, project: Project = Depends(get_project),
+def grow_vessels(body: GrowRequest | None = None, project: Project = Depends(get_project_2d),
                  store: ProjectStore = Depends(get_store)) -> GrowInfo:
     """Grow the arterial *or* venous tree into the tissue (``target``).
 
@@ -273,7 +273,7 @@ def grow_vessels(body: GrowRequest | None = None, project: Project = Depends(get
             nx, ny, domain_limit,
             [(h["polygon"], h["weight"]) for h in project.hotspots], base=1.0)
 
-    d_art, d_ven = runner.default_trees(project)       # fitted into this project's domain
+    d_art, d_ven = runner.defaults_for(project)       # fitted into this project's domain
     if req.target == "artery":
         polys, existing, default = project.arteries, project.artery_network, d_art
     else:
@@ -316,7 +316,7 @@ def prune_vessels(body: PruneRequest | None = None, project: Project = Depends(g
     req = body or PruneRequest()
     if req.target not in ("artery", "vein"):
         raise HTTPException(422, "target must be 'artery' or 'vein'")
-    d_art, d_ven = runner.default_trees(project)       # fitted into this project's domain
+    d_art, d_ven = runner.defaults_for(project)       # fitted into this project's domain
     if req.target == "artery":
         polys, existing, default = project.arteries, project.artery_network, d_art
     else:
@@ -334,7 +334,7 @@ def prune_vessels(body: PruneRequest | None = None, project: Project = Depends(g
 
 
 @router.post("/projects/{pid}/adapt", response_model=AdaptInfo)
-def adapt_vessels(body: AdaptRequest | None = None, project: Project = Depends(get_project),
+def adapt_vessels(body: AdaptRequest | None = None, project: Project = Depends(get_project_2d),
                   store: ProjectStore = Depends(get_store)) -> AdaptInfo:
     """Structurally adapt the vessel radii toward Murray's law (Pries–Secomb).
 
@@ -397,7 +397,7 @@ def network_geometry(project: Project = Depends(get_project)) -> dict:
     has_art = project.artery_network is not None or bool(project.arteries)
     has_ven = project.vein_network is not None or bool(project.veins)
     if not (has_art and has_ven):
-        d_art, d_ven = runner.default_trees(project)
+        d_art, d_ven = runner.defaults_for(project)
         if not has_art:
             _add(d_art, "artery", default=True)
             defaults.append("artery")
