@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from ..core.darcy import Grid
 from ..core.parameters import Parameters
@@ -29,7 +29,12 @@ class ParametersIn(BaseModel):
 
 
 class GridIn(BaseModel):
-    """Darcy capillary-bed grid and the coordinate window it maps to."""
+    """Darcy capillary-bed grid and the coordinate window it maps to.
+
+    A **3-D project** sets ``nz`` (+ ``lz``) and a 6-value ``domain_limit``
+    ``(x0, x1, y0, y1, z0, z1)``; its tissue is the stored raster mask
+    ``(nx, ny, nz)`` and ``tissue`` names the organ it came from (display only).
+    """
 
     nx: int = 140
     ny: int = 160
@@ -37,7 +42,30 @@ class GridIn(BaseModel):
     ly: float = 160.0
     permeability: float = Field(1.0, gt=0)   # homogeneous capillary-bed permeability (x)
     permeability_y: float | None = Field(None, gt=0)   # y-permeability; None => isotropic
-    domain_limit: tuple[float, float, float, float] = (-70.0, 70.0, 0.0, 160.0)
+    domain_limit: tuple[float, ...] = (-70.0, 70.0, 0.0, 160.0)
+    nz: int | None = Field(None, ge=2, le=64)   # set => a 3-D project
+    lz: float | None = Field(None, gt=0)
+    tissue: str | None = None                 # organ name (3-D tissue provenance)
+
+    @model_validator(mode="after")
+    def _check_dims(self):
+        want = 6 if self.nz is not None else 4
+        if len(self.domain_limit) != want:
+            raise ValueError(f"domain_limit needs {want} values for a "
+                             f"{'3' if self.nz is not None else '2'}-D grid")
+        if self.nz is not None and self.lz is None:
+            self.lz = float(self.domain_limit[5] - self.domain_limit[4])
+        return self
+
+    @property
+    def is_3d(self) -> bool:
+        return self.nz is not None
+
+    def to_core3d(self, mask=None):
+        from ..core.darcy3d import Grid3D
+
+        return Grid3D(nx=self.nx, ny=self.ny, nz=self.nz, lx=self.lx, ly=self.ly,
+                      lz=self.lz, permeability=self.permeability, mask=mask)
 
     def to_core(self, mask=None, permeability=None) -> Grid:
         return Grid(nx=self.nx, ny=self.ny, lx=self.lx, ly=self.ly, mask=mask,
@@ -190,6 +218,13 @@ class ExploreGrowRequest(BaseModel):
     kind: str = "tof_std"                     # 2-D homogeneity objective
     nx: int = Field(60, ge=12, le=200)        # 2-D grid (3-D uses n³ with n = nx, ≤ 36)
     ny: int = Field(70, ge=12, le=230)
+
+
+class ExploreProjectRequest(ExploreGrowRequest):
+    """Turn the current explorer setup into a project (2-D → the workspace, with an
+    editable outline + trees; 3-D → a 3-D project for the viewer)."""
+
+    name: str = "explorer"
 
 
 class ShapePolygonRequest(BaseModel):
@@ -363,7 +398,7 @@ class NetworkModel(BaseModel):
 class MaskModel(BaseModel):
     """A raster tissue mask: ``shape`` + a row-major flat list of booleans."""
 
-    shape: tuple[int, int]
+    shape: tuple[int, ...]                 # (nx, ny) or (nx, ny, nz) for a 3-D project
     data: list[bool]
 
     @classmethod
@@ -371,7 +406,7 @@ class MaskModel(BaseModel):
         import numpy as np
 
         m = np.asarray(mask, dtype=bool)
-        return cls(shape=(int(m.shape[0]), int(m.shape[1])), data=m.reshape(-1).tolist())
+        return cls(shape=tuple(int(n) for n in m.shape), data=m.reshape(-1).tolist())
 
     def to_core(self):
         import numpy as np

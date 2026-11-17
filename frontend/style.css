@@ -222,3 +222,5 @@ button.link-danger:hover:not(:disabled) { color: #b91c1c; }
 .organ-row label { flex: 1; margin: 0; }
 .rootmode { justify-content: space-between; flex-wrap: nowrap; }
 .rootmode button { padding: 4px 9px; font-size: 12px; white-space: nowrap; }
+#btn-project { width: 100%; }
+.v3sum { padding: 8px 0 0; border: none; gap: 14px; }

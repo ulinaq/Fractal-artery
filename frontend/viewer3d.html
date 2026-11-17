@@ -35,7 +35,7 @@
           </select>
         </label>
         <label class="check"><input id="show-trees" type="checkbox" checked /> vessel trees</label>
-        <label class="check"><input id="show-field" type="checkbox" checked /> pressure field</label>
+        <label class="check"><input id="show-field" type="checkbox" checked /> field (voxels)</label>
         <label class="check"><input id="spin" type="checkbox" checked /> auto-rotate</label>
         <label>field opacity <input id="opacity" type="range" min="0" max="100" value="45" /></label>
         <label id="gen-row">detail (branch depth, synthetic)
@@ -44,13 +44,27 @@
         <button id="reset">Reset view</button>
         <p class="muted" id="info"></p>
       </section>
+      <section class="card" id="proj-card" hidden>
+        <h2>3-D project</h2>
+        <p class="muted" id="proj-desc"></p>
+        <label>field
+          <select id="v3-field">
+            <option value="pressure">pressure</option>
+            <option value="flux">Darcy flux</option>
+            <option value="tof">time-of-flight</option>
+          </select>
+        </label>
+        <button id="v3-run" class="primary">▶ Run 3-D simulation</button>
+        <p class="muted" id="v3-run-info"></p>
+        <div class="summary v3sum" id="v3-summary"></div>
+      </section>
       <section class="card">
         <h2>Legend</h2>
         <div class="legend" style="border:none;padding:0">
           <span><i class="ln art"></i> artery</span>
           <span><i class="ln ven"></i> vein</span>
         </div>
-        <p class="muted">Field coloured by pressure (viridis: low → high).</p>
+        <p class="muted">Voxels coloured by the field (viridis: low → high) — pressure for the demos; pick pressure / flux / time-of-flight for a 3-D project.</p>
       </section>
     </aside>
 

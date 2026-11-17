@@ -593,6 +593,21 @@ async function animate() {
 }
 $("btn-animate").addEventListener("click", animate);
 
+// ── send the current setup to a project (2-D → workspace, 3-D → 3-D viewer) ─────
+async function toProject() {
+  const btn = $("btn-project"); btn.disabled = true;
+  status("creating project…");
+  try {
+    const shape = S.dim === 3 ? $("shape3").value : (S.polygon ? "custom" : $("shape2").value);
+    const made = await post("/explore/project",
+                            { ...request({ solve: false }), name: `explorer ${shape} (${S.dim}-D)` });
+    status("project created", "ok");
+    window.open(made.open, "_blank");
+  } catch (e) { status(e.message, "err"); }
+  finally { btn.disabled = false; }
+}
+$("btn-project").addEventListener("click", toProject);
+
 // ── optimise (2-D default frame): loads the best asymmetry / L:R / exponent ────
 async function optimise() {
   const btn = $("btn-opt"), label = btn.textContent;

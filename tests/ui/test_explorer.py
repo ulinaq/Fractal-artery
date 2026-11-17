@@ -51,3 +51,42 @@ def test_3d_tree_computes_time_of_flight_and_objective(page, server):
     assert "PERFUSED INFLOW" in page.inner_text("#summary").upper()
     wait_status(page, "ready")
     assert not page.errors
+
+
+def test_3d_explorer_result_opens_as_a_project_and_runs(page, server):
+    page.goto(server + "/explorer.html")
+    _ready(page)
+    page.click("#dim-3")
+    page.wait_for_timeout(300)
+    _ready(page)
+    page.select_option("#fill", "cco")
+    _ready(page)
+    with page.context.expect_page() as new:
+        page.click("#btn-project")
+    viewer = new.value
+    viewer.wait_for_load_state()
+    assert "/viewer3d.html?project=" in viewer.url
+    viewer.wait_for_selector("#proj-card:not([hidden])")
+    viewer.click("#v3-run")
+    viewer.wait_for_function("document.querySelector('#v3-summary').textContent"
+                             ".includes('arterial inflow')", timeout=120000)
+    viewer.select_option("#v3-field", "tof")
+    viewer.wait_for_function("document.querySelector('#status').textContent"
+                             ".includes('solved')")
+    assert "segments" in viewer.inner_text("#proj-desc")
+
+
+def test_2d_explorer_result_opens_in_the_workspace(page, server):
+    page.goto(server + "/explorer.html")
+    _ready(page)
+    page.select_option("#shape2", "liver")
+    _ready(page)
+    with page.context.expect_page() as new:
+        page.click("#btn-project")
+    ws = new.value
+    ws.wait_for_load_state()
+    ws.wait_for_function("document.querySelector('#status').textContent.includes('opened')",
+                         timeout=60000)
+    assert "artery segments" in ws.inner_text("#node-info")
+    ws.keyboard.press("2")
+    assert ws.inner_text("#tissue-info").startswith("1 organ")
