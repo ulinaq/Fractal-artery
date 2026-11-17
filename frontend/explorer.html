@@ -39,35 +39,42 @@
 
       <details class="card" open>
         <summary>Tissue shape</summary>
-        <label class="d2">shape
-          <select id="shape2">
-            <option value="ellipse">ellipse</option>
-            <option value="rectangle">rectangle</option>
-            <option value="kidney">kidney</option>
-            <option value="wedge">wedge (fan)</option>
-            <option value="custom">custom (edited outline)</option>
-          </select>
-        </label>
-        <label class="d3">shape
-          <select id="shape3">
-            <option value="ellipsoid">ellipsoid</option>
-            <option value="box">box</option>
-            <option value="cylinder">cylinder</option>
-            <option value="hemisphere">hemisphere (dome)</option>
-          </select>
-        </label>
+        <label class="d2">organ / shape <select id="shape2"></select></label>
+        <label class="d3">organ / shape <select id="shape3"></select></label>
         <label>size <span class="rv" id="v-size"></span>
           <input id="size" type="range" min="0.3" max="1" step="0.05" value="0.85" /></label>
         <p class="muted d2"><b>Drag</b> an outline point to reshape the tissue (it
           becomes <i>custom</i>) · <b>double-click</b> the outline to add a point ·
           click a point + <b>Del</b> to remove it.</p>
-        <p class="muted d3">Drag the view to rotate, scroll to zoom.</p>
+        <p class="muted d3">Drag to rotate · scroll to zoom · right-drag or Space+drag to pan.</p>
+      </details>
+
+      <details class="card" open>
+        <summary>Domain &amp; resolution</summary>
+        <label>object size (domain scale) <span class="rv" id="v-extent"></span>
+          <span class="stepper">
+            <button id="ext-dec" title="halve the object">÷2</button>
+            <input id="extent" type="range" min="0.5" max="16" step="0.5" value="4" />
+            <button id="ext-inc" title="double the object">×2</button>
+          </span></label>
+        <label>grid resolution <span class="rv" id="v-res"></span>
+          <input id="res" type="range" min="30" max="200" step="2" value="60" /></label>
+        <p class="muted" id="res-info"></p>
+        <p class="muted">Resizing scales the roots and trunk calibre with the object;
+          then add generations, growth steps, attraction points or resolution for more
+          detail. Finer grids solve more slowly (3-D cost grows with n³). Zoom the view
+          to inspect any part.</p>
       </details>
 
       <details class="card" open>
         <summary>Roots (initial condition)</summary>
-        <p class="muted d2"><b>Drag</b> ▲ / ▼ on the canvas to move a root, and its
-          small ● handle to aim the trunk.</p>
+        <p class="muted">Each organ starts with its <b>anatomical</b> artery and vein
+          entry (renal hilum, aortic root, porta hepatis, circle of Willis…).
+          <span class="d2"><b>Drag</b> ▲ / ▼ to move a root and its ● handle to aim it.</span></p>
+        <div class="row rootmode">
+          <span class="muted" id="root-mode">roots: organ default</span>
+          <button id="btn-root-default" title="put the roots back where this organ's vessels attach">⟲ Organ default</button>
+        </div>
         <div class="rootbox">
           <div class="roothead"><span class="dot art"></span> artery</div>
           <div class="grid3">
@@ -114,8 +121,13 @@
           <input id="ltr" type="range" min="3" max="20" step="0.5" value="10" /></label>
         <label>Murray exponent <span class="rv" id="v-exponent"></span>
           <input id="exponent" type="range" min="2" max="3.5" step="0.05" value="2.8" /></label>
-        <label class="d3">branch angle (°) <span class="rv" id="v-bangle"></span>
-          <input id="bangle" type="range" min="10" max="70" step="1" value="35" /></label>
+        <label class="d3" title="rotation of each bifurcation's plane relative to its parent's (90° = alternating, like real trees)">branch-plane twist (°) <span class="rv" id="v-twist"></span>
+          <input id="twist" type="range" min="0" max="180" step="5" value="90" /></label>
+        <label class="d3" title="seeded random variation of branching angles, twist and segment lengths">randomness <span class="rv" id="v-jitter"></span>
+          <input id="jitter" type="range" min="0" max="1" step="0.05" value="0.3" /></label>
+        <p class="muted d3">Asymmetry γ and the Murray exponent set the child calibres
+          and angles in 3-D as in 2-D; each split turns its plane by the twist so the
+          tree fills the volume from the first generations.</p>
       </details>
 
       <details class="card" open>
@@ -166,8 +178,10 @@
         </div>
       </details>
 
-      <details class="card d2" open>
+      <details class="card" open>
         <summary>Field &amp; objective</summary>
+        <p class="muted d3">Computed in 3-D: pressure, Darcy flux and time-of-flight
+          on the voxel bed (colour range clipped to the 2–98 % percentiles).</p>
         <label>field
           <select id="field">
             <option value="flux">flux</option>
@@ -207,6 +221,7 @@
     <section class="stage">
       <div class="canvas-wrap">
         <canvas id="view" width="490" height="560"></canvas>
+        <div class="viewhint">scroll = zoom · drag empty space / right-drag = pan · ⤢ = fit</div>
         <div class="colorbar" id="colorbar" hidden>
           <span class="cb-max" id="cb-max">—</span>
           <div class="cb-ramp" id="cb-ramp"></div>

@@ -154,9 +154,8 @@ class ExploreTree(BaseModel):
     root: list[float] | None = None                      # [x, y] or [x, y, z]; None = default
     angle: float = 90.0                                   # 2-D trunk direction (deg from +x)
     direction: list[float] = Field(default_factory=lambda: [0.0, 0.0, 1.0])   # 3-D trunk
-    radius: float = Field(2.0, gt=0.1, le=8.0)
+    radius: float = Field(2.0, gt=0.05, le=200.0)        # scales with the domain (extent)
     gamma: float = Field(1.4, ge=1.0, le=1.9)             # branching asymmetry
-    branch_angle: float = Field(35.0, ge=5.0, le=80.0)    # 3-D child half-angle (deg)
 
 
 class ExploreGrowRequest(BaseModel):
@@ -165,29 +164,41 @@ class ExploreGrowRequest(BaseModel):
     levels, optionally fill the tissue (space colonisation / CCO), and solve."""
 
     dim: int = Field(2, ge=2, le=3)
-    shape: str = "ellipse"                    # 2-D: rectangle|ellipse|kidney|wedge|custom
-    polygon: list[list[float]] | None = None  #      custom outline; 3-D: box|ellipsoid|…
+    shape: str = "ellipse"                    # an organ (GET /shapes) or 2-D "custom"
+    polygon: list[list[float]] | None = None  # the custom 2-D outline
     size: float = Field(0.85, ge=0.3, le=1.0)
+    extent: float = Field(1.0, ge=0.25, le=16.0)  # domain scale: >1 = a bigger object
     artery: ExploreTree = Field(default_factory=ExploreTree)
     vein: ExploreTree = Field(default_factory=lambda: ExploreTree(angle=-90.0, radius=2.4,
                                                                   gamma=1.2))
     generations: int = Field(4, ge=1, le=10)
     length_to_radius: float = Field(10.0, ge=3.0, le=20.0)
     exponent: float = Field(2.8, ge=2.0, le=3.5)
+    twist: float = Field(90.0, ge=0.0, le=180.0)  # 3-D branching-plane rotation (deg)
+    jitter: float = Field(0.3, ge=0.0, le=1.0)    # 3-D random variation
     fill: str = "colonization"                # none | colonization | cco
     fill_target: str = "both"                 # both | artery | vein
     fill_steps: int = Field(40, ge=0, le=400)
     n_points: int = Field(400, ge=10, le=4000)
-    step: float | None = Field(None, gt=0, le=40)
-    influence: float | None = Field(None, gt=0, le=200)
+    step: float | None = Field(None, gt=0, le=1000)          # (scale with extent)
+    influence: float | None = Field(None, gt=0, le=5000)
     n_terminals: int = Field(60, ge=1, le=600)
-    leaf_radius: float | None = Field(None, gt=0, le=5)
+    leaf_radius: float | None = Field(None, gt=0, le=100)
     seed: int = 0
     solve: bool = True
     field: str = "flux"                       # 2-D field to render (pressure/flux/tof)
     kind: str = "tof_std"                     # 2-D homogeneity objective
-    nx: int = Field(60, ge=12, le=120)        # 2-D grid (3-D uses n³ with n = nx, ≤ 30)
-    ny: int = Field(70, ge=12, le=140)
+    nx: int = Field(60, ge=12, le=200)        # 2-D grid (3-D uses n³ with n = nx, ≤ 36)
+    ny: int = Field(70, ge=12, le=230)
+
+
+class ShapePolygonRequest(BaseModel):
+    """An organ outline placed in a 2-D window (workspace tissue presets)."""
+
+    name: str = "kidney"
+    domain: list[float] = Field(default_factory=lambda: [0.0, 100.0, 0.0, 120.0])
+    size: float = Field(0.85, ge=0.1, le=1.0)
+    seed: int = 0
 
 
 class ExploreOptimizeRequest(BaseModel):

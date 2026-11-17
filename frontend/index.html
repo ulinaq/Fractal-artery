@@ -50,10 +50,15 @@
           <label>p_out <input id="p_out" type="number" value="0" step="1" /></label>
           <label>r_min_frac <input id="r_min_frac" type="number" value="0.15" step="0.05" min="0.05" max="0.9" /></label>
           <label>seed <input id="seed" type="number" value="0" step="1" /></label>
-          <label>grid nx <input id="nx" type="number" value="120" step="10" /></label>
-          <label>grid ny <input id="ny" type="number" value="140" step="10" /></label>
+          <label title="physical width of the domain (a bigger object = larger numbers)">domain width <input id="dom-w" type="number" value="100" step="10" min="10" /></label>
+          <label title="physical height of the domain">domain height <input id="dom-h" type="number" value="120" step="10" min="10" /></label>
+          <label title="grid cells across (more = finer, slower)">grid nx <input id="nx" type="number" value="120" step="10" min="10" /></label>
+          <label title="grid cells up (kept to the domain aspect)">grid ny <input id="ny" type="number" value="140" step="10" min="10" /></label>
           <label title="capillary-bed permeability anisotropy: Ky relative to Kx=1 (1 = isotropic)">K aniso Ky/Kx <input id="perm_y" type="number" value="1" step="0.25" min="0.01" /></label>
         </div>
+        <p class="muted" id="grid-info"></p>
+        <p class="muted">Domain size and grid apply to <b>New</b> projects; an open
+          project keeps its own.</p>
       </details>
 
       <details class="card" data-mode="vessels" open>
@@ -111,6 +116,10 @@
             <option value="hotspot">Growth hotspot (demand)</option>
           </select>
         </label>
+        <div class="row organ-row">
+          <label>organ preset <select id="organ-preset"></select></label>
+          <button id="btn-organ" title="drop this organ outline into the domain as the tissue (then edit its points)">Insert</button>
+        </div>
         <label id="lesion-k-row" style="display:none">permeability k
           <input id="lesion-k" type="number" value="0.1" step="0.05" min="0.001" max="1" />
         </label>
@@ -344,6 +353,7 @@
 
       <div class="canvas-wrap">
         <canvas id="view" width="640" height="720"></canvas>
+        <div class="viewhint">scroll = zoom · right-drag / Space+drag = pan (drag in Result)</div>
         <div class="colorbar" id="colorbar" hidden>
           <span class="cb-max" id="cb-max">—</span>
           <div class="cb-ramp" id="cb-ramp"></div>

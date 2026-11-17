@@ -21,7 +21,8 @@ no separate dev server.
   bundled segmented frog-tongue system — arterial + venous networks placed in the
   domain and the tongue as the organ mask — so the whole pipeline is instantly
   testable on real data.
-- **Project** — create a project (name, parameters, grid).
+- **Project** — create a project (name, parameters, physical **domain size** and
+  grid — ny follows the aspect), save/load it as a `.json` file, undo/redo.
 - **Vessels tab — edit the network directly.** Vessels are a node/edge network
   (each edge has its own radius), edited on the canvas: click empty space to
   start a vessel and keep clicking to extend it; click a node, then empty space,
@@ -38,6 +39,11 @@ no separate dev server.
 - **Segment an image** — upload a vessel image; it is skeletonised into the
   artery or vein network (per the artery/vein selector) placed in the domain
   (`POST /projects/{id}/image?kind=…`, `image` extra).
+- **Zoom / pan everywhere** (`viewport.js`): canvases fill the window (HiDPI), scroll
+  zooms about the cursor, right-drag / Space+drag pans (plain drag in Result), ＋ − ⤢.
+- **Domain size + organ presets**: Parameters sets a New project's physical
+  width/height (grid ny follows the aspect); the Tissue tab's *organ preset* drops
+  an editable organ outline (`POST /shapes/polygon`).
 - **Tissue tab — the same node editing for polygons.** Pick a layer (organ
   outline → `Grid.mask`, low-K lesion, growth hotspot); click to add points,
   click the first point / Enter to close; drag a point, click an outline to
@@ -65,9 +71,12 @@ no separate dev server.
 - **Tree explorer** (`explorer.html`) — grow an artery + vein into a tissue, in
   **2-D or 3-D**, with no project needed (`POST /explore/grow`, logic in
   `perfusion.treegen`). Set the **initial condition** (drag the ▲/▼ roots and their
-  aim handles in 2-D; x/y/z + trunk direction in 3-D), the **tissue shape**
-  (2-D presets or drag/insert/delete outline points for a custom shape; 3-D box /
-  ellipsoid / cylinder / hemisphere), the fractal skeleton's **generations** (−/＋
+  aim handles in 2-D; x/y/z + trunk direction in 3-D — each organ starts with its
+  *anatomical* artery/vein entry, ⟲ Organ default restores it), the **tissue shape**
+  (organ presets from `perfusion.organs` — heart, kidney, brain, liver, lung,
+  tongue, tumour, placenta, … — or drag/insert/delete outline points for a custom
+  2-D shape), the **domain size** (explore a bigger object) and **grid resolution**,
+  3-D branch-plane **twist** + **randomness**, the fractal skeleton's **generations** (−/＋
   adds a level of branches), and a **space-filling** algorithm — space
   colonisation (growth steps, attraction points, step length, influence radius) or
   CCO (terminals) — then see the solved field, Strahler orders and inflow.
@@ -95,14 +104,14 @@ are vectorised into the network and points snap onto the nearest end nodes.
 | `edit.js`    | Vessels tab: node/edge network editor + inlet/outlet nodes |
 | `tissue.js`  | Tissue tab: polygon (organ / lesion / hotspot) editor |
 | `render.js`  | all canvas drawing |
+| `viewport.js`| shared canvas sizing (fills the stage, HiDPI) + zoom/pan/fit for every view |
 | `run.js`     | solve, results, tracer, analyses |
 | `viewer3d.html` / `viewer3d.js` | standalone rotatable 3-D result viewer |
 | `explorer.html` / `explorer.js` | tree explorer: roots, tissue shape, 2-D/3-D growth |
 
 ## Roadmap
 
-This satisfies Phase 2 (usable 2-D app) with the smallest possible toolchain.
-The heavier React/TypeScript/Vite build named in `docs/ROADMAP.md` remains an
-option for later — it would target the same OpenAPI contract, so the back-end
-does not change. Planned next: hand-drawn tissue mask, flow-video playback, and
-(Phase 4) 3-D views via vtk.js.
+The zero-build stack stays deliberately small. Still open for the UI (see
+`docs/ROADMAP.md` §11): a 3-D project path (store/edit 3-D trees in projects),
+automated browser tests in CI, a run-comparison view, 3-D flow video, and an
+optional React/Vite + vtk.js rebuild against the same API.

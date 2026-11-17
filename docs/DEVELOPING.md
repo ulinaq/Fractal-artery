@@ -7,10 +7,10 @@ Read this with `CLAUDE.md` (conventions & invariants) and `docs/ROADMAP.md`
 ## Layers (depend only downward)
 
 ```
-frontend/ (zero-build 2-D web UI)   ─┐
+frontend/ (zero-build web UI)       ─┐
 perfusion.api  (FastAPI + SQLite)    │  service / app layers
 perfusion.mcp_server (MCP tools)     │  (optional extras: api, mcp, image)
-io · viz · segmentation · growth · optimize
+io · viz · segmentation · growth · organs · treegen · optimize · uq · inverse
 ────────────────────────────────────┘
 perfusion.core   (pure NumPy/SciPy engine — no I/O, viz, web, or optional deps)
 ```
@@ -25,12 +25,14 @@ stays out of it. `core` must stay import-clean without any extra installed.
 |---|---|---|---|
 | add/adjust physics | `core/*` | vectorise via `Network.incidence()`; cite the thesis eq. | `tests/test_<module>.py` + a conservation/analytic check |
 | add a network builder | `core/geometry.py` | return a `Network`; classify nodes by **degree** | round-trip / topology test |
-| a new grid field or op | `core/darcy.py`, `core/timeofflight.py` | honour `Grid.mask`; column-major `order="F"` | linear-ramp / mask test |
+| a new grid field or op | `core/darcy.py`, `core/timeofflight.py` (3-D: `core/darcy3d.py`, `*_3d`) | honour `Grid.mask` (no flux across inactive faces); column-major `order="F"`; add the 3-D twin and return it from `run_hybrid_3d` | linear-ramp / mask test; 3-D mask + ordering test |
 | a result exporter | `io.py` | `fields_to_*` take arrays; `save_results_*` wrap a `HybridResult` | write + reparse |
 | an API endpoint | `api/routes_{projects,geometry,solve}.py` (+ `schemas.py`, `store.py`) | add to the matching router; get store/jobs/project via `api.deps` (`Depends`); shared compute → `api/helpers.py`; long work → a job | `tests/test_api.py` (TestClient) |
-| a UI capability | `frontend/` | state/geometry/api in `core.js`, drawing in `render.js`, vessel network editing in `edit.js`, tissue polygon editing in `tissue.js`, solve/results/tracer in `run.js`, viridis in `palette.js`, feature logic + wiring in `app.js`, markup in `index.html`; mode tabs; auto-save on run | `node --check`; live screenshot |
+| a UI capability | `frontend/` | state/geometry/api in `core.js`, drawing in `render.js`, vessel network editing in `edit.js`, tissue polygon editing in `tissue.js`, solve/results/tracer in `run.js`, viridis in `palette.js`, zoom/pan/HiDPI sizing in `viewport.js` (always map with `toCanvas`/`toDomain`, never raw canvas size), feature logic + wiring in `app.js`, markup in `index.html`; tabs Vessels · Tissue · Result; pending edits auto-save before run/grow/prune | `node --check`; drive it in a browser (Playwright) + screenshot |
 | an MCP tool | `mcp_server.py` | put logic in a plain function; wrap with `@server.tool()` | `tests/test_mcp.py` |
-| a vessel-growth method | `growth.py` | produce `(pos, parent)` then `_assemble`; Murray radii | valid-tree + mass-conservation |
+| a vessel-growth method | `growth.py` | produce `(pos, parent)` then `_assemble` (2-D or 3-D by the base network); Murray radii; never use `np.hypot` — keep it dimension-agnostic | valid-tree + mass-conservation, in 2-D **and** 3-D |
+| an organ / tissue shape | `organs.py` | a unit-frame 2-D outline and/or 3-D inside-test, **plus** a `_ROOTS_2D/_ROOTS_3D` entry (anatomical artery/vein position + aim) | `tests/test_organs.py`: connected at all resolutions; roots lead into the tissue |
+| a Tree-explorer option | `treegen.py` (+ `ExploreGrowRequest`, `routes_explore.py`, `explorer.js`) | add a `GenSpec` field; map it in `grow_spec`; expose in MCP `grow_trees_in_tissue` | `tests/test_api.py::test_explore_grow_*` |
 
 ## Conventions that bite (see `CLAUDE.md` for the full list)
 
@@ -70,8 +72,9 @@ it — keep it importable and its args picklable.
 
 ## MCP server
 
-`mcp_server.py` exposes the engine as MCP tools (`run_simulation`,
-`describe_model`) so any MCP client — Claude Desktop, Claude Code, an agent — can
+`mcp_server.py` exposes the engine as ~20 MCP tools (`run_simulation`, `run_sweep`,
+`grow_trees_in_tissue`, `prune_vessel_tree`, the analysis tools, `describe_model`, …)
+so any MCP client — Claude Desktop, Claude Code, an agent — can
 drive the model. The repo's `.mcp.json` registers it for Claude Code
 automatically (`uv run --extra mcp perfusion-mcp`). To add a tool: write the
 logic as a plain, testable function, then add a thin `@server.tool()` wrapper in

@@ -74,3 +74,49 @@ def test_3d_terminals_outside_the_mask_snap_to_tissue():
     assert np.all(np.isfinite(res.pressure[mask]))
     assert q[q > 0].sum() == pytest.approx(-q[q < 0].sum(), rel=1e-6)
     assert q[q > 0].sum() > 0
+
+
+def _masked_3d_result():
+    from perfusion.treegen import DOMAIN_3D, shape_mask_3d
+    mask = shape_mask_3d("ellipsoid", 14, 14, 14, size=0.8)
+    art = grow_tree_3d((30, 30, 6), (0, 0, 1), root_radius=2, min_radius=0,
+                       length_to_radius=5, max_generations=3)
+    ven = grow_tree_3d((30, 30, 54), (0, 0, -1), root_radius=2, min_radius=0,
+                       length_to_radius=5, max_generations=3, mirror=True)
+    grid = Grid3D(nx=14, ny=14, nz=14, lx=60, ly=60, lz=60, mask=mask)
+    return run_hybrid_3d(Parameters(p_in=10, p_out=0), grid, art, ven, DOMAIN_3D), mask
+
+
+def test_3d_result_has_flux_and_time_of_flight_like_2d():
+    res, mask = _masked_3d_result()
+    assert res.flux.shape == res.tof.shape == mask.shape
+    assert np.all(np.isfinite(res.flux[mask]))
+    assert np.all(res.flux[mask] >= 0)
+    assert np.isnan(res.flux[~mask]).all()
+    tof = res.tof[mask]
+    assert np.all(np.isfinite(tof))
+    assert np.all(tof > 0)
+    assert np.isnan(res.tof[~mask]).all()
+
+
+def test_3d_face_fluxes_do_not_cross_the_mask():
+    from perfusion.core.darcy3d import face_fluxes_3d
+    res, mask = _masked_3d_result()
+    fx, _, fz = face_fluxes_3d(res.grid, res.pressure)
+    assert np.all(fx[~(mask[:-1] & mask[1:])] == 0)
+    assert np.all(fz[~(mask[:, :, :-1] & mask[:, :, 1:])] == 0)
+    # interior conservation: net face outflow of the active cells equals the net
+    # terminal source (+art in, -ven out) — zero overall for a balanced solve
+    assert res.solution.terminal_flux.sum() == pytest.approx(0, abs=1e-8)
+
+
+def test_3d_time_of_flight_is_shortest_at_the_arterial_feeds():
+    """Blood reaches the arterial injection cells first, the venous drains later,
+    and stagnant tissue last: TOF(art terminals) < TOF(ven terminals) < bulk."""
+    from perfusion.core.pipeline3d import _terminal_cells_3d
+    res, _ = _masked_3d_result()
+    cells = _terminal_cells_3d(res.grid, res.art, res.ven, res.domain_limit)
+    na = res.art.terminal_nodes.size
+    tof = res.tof.ravel(order="F")
+    t_art, t_ven = np.nanmedian(tof[cells[:na]]), np.nanmedian(tof[cells[na:]])
+    assert t_art < t_ven < np.nanmedian(tof)

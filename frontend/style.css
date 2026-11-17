@@ -190,3 +190,35 @@ button.link-danger:hover:not(:disabled) { color: #b91c1c; }
 .stepper button { padding: 3px 10px; font-size: 14px; line-height: 1.2; }
 .stepper b { min-width: 2.2em; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
 .seedlbl { margin: 0; width: 7em; }
+
+/* ── full-window workspace: the canvas takes all the space the panel leaves ── */
+@media (min-width: 861px) {
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+  .topbar { flex: none; }
+  .layout { flex: 1; min-height: 0; align-items: stretch; }
+  .panel { min-height: 0; overflow-y: auto; padding-right: 4px; scrollbar-width: thin; }
+  .stage { display: flex; flex-direction: column; min-height: 0; }
+  .stage .canvas-wrap { flex: 1; min-height: 0; }
+  .stage .summary, .stage .legend, .stage .stage-head { flex: none; }
+}
+@media (max-width: 860px) {
+  .stage .canvas-wrap { height: 72vh; }
+}
+.canvas-wrap { padding: 10px; align-items: center; overflow: hidden; }
+.canvas-wrap canvas { max-width: none; border-radius: 6px; }
+
+/* zoom controls overlaid on a canvas */
+.zoombar {
+  position: absolute; left: 18px; top: 18px; display: flex; align-items: center; gap: 2px;
+  background: rgba(255,255,255,.92); border: 1px solid var(--line); border-radius: 9px;
+  padding: 3px; box-shadow: var(--shadow); z-index: 2; user-select: none;
+}
+.zoombar button { padding: 3px 9px; font-size: 14px; line-height: 1.2; border: none; background: none; }
+.zoombar button:hover { background: var(--bg); }
+.zoombar .zl { min-width: 3.4em; text-align: center; font-size: 11px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.viewhint { position: absolute; left: 18px; bottom: 16px; font-size: 11px; color: var(--muted);
+  background: rgba(255,255,255,.85); padding: 3px 8px; border-radius: 6px; pointer-events: none; }
+.organ-row { align-items: flex-end; flex-wrap: nowrap; }
+.organ-row label { flex: 1; margin: 0; }
+.rootmode { justify-content: space-between; flex-wrap: nowrap; }
+.rootmode button { padding: 4px 9px; font-size: 12px; white-space: nowrap; }

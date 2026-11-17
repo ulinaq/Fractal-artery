@@ -32,6 +32,7 @@ class Grid3D:
     lz: float = 1.0
     permeability: float = 1.0
     thickness: float = 1.0                 # unused in 3-D; kept for API symmetry
+    porosity: float = 1.0                  # pore fraction (time-of-flight pore volume)
     mask: np.ndarray | None = None         # (nx, ny, nz) bool; True = active
 
     hx: float = field(init=False)
@@ -191,10 +192,49 @@ def face_fluxes_3d(grid: Grid3D, pressure: np.ndarray):
     """Interior-face Darcy fluxes ``T * (p_owner - p_neighbour)`` per direction.
 
     ``pressure`` is an ``(nx, ny, nz)`` field. Returns ``(fx, fy, fz)`` arrays on
-    the interior x/y/z faces.
+    the interior x/y/z faces, shapes ``(nx-1, ny, nz)``, ``(nx, ny-1, nz)``,
+    ``(nx, ny, nz-1)``. Faces touching an inactive cell carry no flow (as in the
+    TPFA operator), so nothing leaks across an organ-shaped mask.
     """
     tx, ty, tz = _face_transmissibilities(grid)
-    fx = tx * (pressure[:-1, :, :] - pressure[1:, :, :])
-    fy = ty * (pressure[:, :-1, :] - pressure[:, 1:, :])
-    fz = tz * (pressure[:, :, :-1] - pressure[:, :, 1:])
+    m = grid.mask
+    p = np.where(m, pressure, 0.0)
+    fx = tx * (p[:-1, :, :] - p[1:, :, :]) * (m[:-1, :, :] & m[1:, :, :])
+    fy = ty * (p[:, :-1, :] - p[:, 1:, :]) * (m[:, :-1, :] & m[:, 1:, :])
+    fz = tz * (p[:, :, :-1] - p[:, :, 1:]) * (m[:, :, :-1] & m[:, :, 1:])
     return fx, fy, fz
+
+
+def flux_magnitude_3d(grid: Grid3D, fx, fy, fz) -> np.ndarray:
+    """Cell-centred Darcy flux magnitude ``|v|`` ``(nx, ny, nz)`` from interior face
+    fluxes (boundary faces carry none) — the 3-D twin of ``flux_magnitude``."""
+    def centred(f, axis):
+        pad = [(0, 0)] * 3
+        pad[axis] = (1, 1)
+        g = np.pad(f, pad)
+        lo = [slice(None)] * 3
+        hi = [slice(None)] * 3
+        lo[axis], hi[axis] = slice(0, -1), slice(1, None)
+        return 0.5 * (g[tuple(lo)] + g[tuple(hi)])
+
+    q = np.sqrt(centred(fx, 0) ** 2 + centred(fy, 1) ** 2 + centred(fz, 2) ** 2)
+    return np.where(grid.mask, q, np.nan)       # same units as the 2-D flux_magnitude
+
+
+def upwind_operator_3d(grid: Grid3D, fx, fy, fz):
+    """Sparse first-order upwind advection operator over the interior faces —
+    the 3-D twin of ``darcy.upwind_operator``. Returns ``(M, outflow)`` with
+    ``(M @ c)[i]`` the net advective inflow into cell ``i``."""
+    n = grid.n_cells
+    cell = np.arange(n).reshape(grid.nx, grid.ny, grid.nz, order="F")
+    pairs = [(cell[:-1, :, :], cell[1:, :, :], fx), (cell[:, :-1, :], cell[:, 1:, :], fy),
+             (cell[:, :, :-1], cell[:, :, 1:], fz)]
+    owner = np.concatenate([o.ravel(order="F") for o, _, _ in pairs])
+    neigh = np.concatenate([m.ravel(order="F") for _, m, _ in pairs])
+    flux = np.concatenate([f.ravel(order="F") for _, _, f in pairs])
+    to_n, to_o = np.maximum(flux, 0.0), -np.minimum(flux, 0.0)
+    M = (sp.coo_matrix((to_n, (neigh, owner)), shape=(n, n))
+         + sp.coo_matrix((to_o, (owner, neigh)), shape=(n, n)))
+    outflow = np.bincount(np.concatenate([owner, neigh]),
+                          weights=np.concatenate([to_n, to_o]), minlength=n)
+    return M.tocsr(), outflow

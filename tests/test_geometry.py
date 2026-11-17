@@ -228,3 +228,29 @@ def test_grow_tree_max_generations_caps_depth():
     counts = [grow_tree((0, 0), np.pi / 2, 2.0, 0.0, 8.0, tab(phi), tab(ratio),
                         max_generations=g).n_segments for g in range(4)]
     assert counts == [1, 3, 7, 15]                  # 2^(g+1) - 1: each step adds a level
+
+
+@pytest.mark.parametrize("direction", [(0, 0, 1), (1, 0, 0), (0, 1, 0), (1, 1, 1)])
+def test_grow_tree_3d_is_volumetric_not_planar(direction):
+    """Regression: the old rule kept every generation in one plane for a trunk along
+    an axis (zero x-extent). Twisting branch planes must fill all three dimensions."""
+    from perfusion.core.geometry import grow_tree_3d
+    t = grow_tree_3d((0, 0, 0), direction, root_radius=2, min_radius=0,
+                     length_to_radius=5, max_generations=6)
+    P = np.column_stack([t.node_x, t.node_y, t.node_z])
+    sv = np.linalg.svd(P - P.mean(0), compute_uv=False)
+    assert sv[-1] / sv[0] > 0.25                       # a real third dimension
+    assert t.n_segments == 2 ** 7 - 1                  # generation count unchanged
+
+
+def test_grow_tree_3d_asymmetry_and_jitter_are_seeded():
+    from perfusion.core.geometry import grow_tree_3d
+    kw = dict(root_radius=2, min_radius=0, length_to_radius=5, max_generations=4,
+              gamma=1.6, exponent=2.8, jitter=0.5)
+    a = grow_tree_3d((0, 0, 0), (0, 0, 1), seed=1, **kw)
+    b = grow_tree_3d((0, 0, 0), (0, 0, 1), seed=1, **kw)
+    c = grow_tree_3d((0, 0, 0), (0, 0, 1), seed=2, **kw)
+    assert np.allclose(a.node_x, b.node_x)
+    assert not np.allclose(a.node_x, c.node_x)
+    first = a.seg_radius[1:3]                          # the asymmetric first split
+    assert first.max() / first.min() > 1.1

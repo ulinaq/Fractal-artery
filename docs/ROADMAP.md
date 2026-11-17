@@ -99,12 +99,14 @@ Every requested capability, and where it lives.
 | Feature | Front-end | API endpoint (sketch) | Back-end |
 |---|---|---|---|
 | Load vessel drawing/image | ✅ file picker | ✅ `POST /projects/{id}/image` | ✅ `segmentation.segment_network` + `network_in_domain` |
-| Draw tissue (mask) by hand | paint canvas | `PUT /projects/{id}/tissue` | rasterise → `core.darcy.Grid.mask` |
-| Draw vessels by hand | polyline canvas | `PUT /projects/{id}/vessels` | **new** `core.geometry.network_from_polylines` |
+| Draw tissue (mask) by hand | ✅ polygon editor (vertex drag/insert/delete, organ presets) | ✅ `PUT /projects/{id}/mask\|lesions\|hotspots`, `POST /shapes/polygon` | ✅ `rasterize_mask` → `Grid.mask`; `organs.polygon` |
+| Draw vessels by hand | ✅ node-graph editor (draw, branch, drag, per-segment radius, inlet/outlet nodes) | ✅ `GET/PUT /projects/{id}/editable` | ✅ `helpers.rebuild_network`; `Network.inlet_nodes` |
+| Prune vessels | ✅ steps + undo | ✅ `POST /projects/{id}/prune` | ✅ `geometry.prune_terminal_branches` |
 | Grow vessels from selected segments | ✅ method + run | ✅ `POST /projects/{id}/grow?…method=` | ✅ `growth` (space colonisation + CCO) |
 | Run simulation | run + progress | `POST /projects/{id}/run` (job) | `core.pipeline.run_hybrid` |
-| 2-D result views | canvas/Plotly | `GET /results/{id}/field/{name}` | `core` fields → JSON/PNG |
-| 3-D result views | vtk.js | `GET /results/{id}/mesh` | **new** VTK/glTF export (Phase 4) |
+| 2-D result views | ✅ canvas heatmap, zoom/pan, HiDPI | ✅ `GET /projects/{id}/results/field/{name}` | `core` fields → JSON |
+| 3-D result views | ✅ dependency-free canvas (rotate/zoom/pan); vtk.js optional | ✅ `GET /projects/{id}/view3d`, `/demo3d`, `POST /explore/grow` (dim=3) | ✅ `pipeline3d` (pressure + flux + TOF); `.vtp` export |
+| Grow trees into an organ (2-D/3-D) | ✅ Tree explorer: organ, roots, generations, fill, size | ✅ `POST /explore/grow`, `GET /shapes` | ✅ `treegen`, `organs`, `growth` (2-D/3-D) |
 | Flow video (2-D/3-D) | ✅ player + scrubber | ✅ `POST/GET /projects/{id}/tracer`, `…/tracer.gif` | `core.transport` (bolus advection) + GIF |
 | Export results | ✅ download + format picker | ✅ `GET /projects/{id}/export?fmt=npz\|csv\|vtk` | ✅ `io` exporters (npz/CSV/VTK); MP4 pending |
 | Parameter sweeps / experiments | forms | `POST /experiments` (batch jobs) | `optimize`, batch runner |
@@ -153,7 +155,7 @@ self-contained and testable against the existing physics checks.
 |---|---|---|
 | **0. Reorganise** *(this change)* | Maintainable, layered source | `perfusion.core` split out; stable public API; docs updated |
 | **1. Back-end API** | Headless service | ✅ FastAPI `perfusion.api`: projects, async jobs, vessels/grow/run/results/field/network/export; ✅ SQLite + blob store; OpenAPI contract; result exporters (`io`) |
-| **2. Web front-end** | Usable 2-D app | ✅ *v1 shipped* — zero-build workspace (`frontend/`, served at `/`): vessel **drawing**, grow, run + poll, 2-D field heatmap + network overlay, export, shareable URLs. *Next:* tissue-mask drawing, **flow video**, optional React/Vite rebuild |
+| **2. Web front-end** | Usable 2-D app | ✅ zero-build app (`frontend/`, served at `/`): node-graph **vessel editor** + **tissue polygon editor**, organ presets, grow/prune/adapt, run + poll, field heatmaps, **flow video**, analyses, export, save/load, undo/redo, zoom/pan, shareable URLs; Tree explorer; 3-D viewer. *Open:* optional React/Vite rebuild, automated UI tests |
 | **3. Research features** | Publishable depth | monolithic sparse solve + AMG (scale), heterogeneous permeability, **vessel growth** from selections, elasticity |
 | **4. 3-D** | 3-D modelling + views | 3-D grids/trees/segmentation, vtk.js rendering, 3-D flow video, VTK export |
 | **5. Research tooling** | Studies at scale | parameter sweeps, inverse estimation, UQ, reproducible "experiments", batch jobs |
@@ -275,8 +277,9 @@ imports move to `perfusion.core.*`.
 - ✅ **Multiple inlets / outlets** — the solver prescribes `p_in`/`p_out` at a
   *set* of boundary nodes (`Network.inlet_nodes`), not just the root; node
   roles are classified by **degree** so any leaf can be an inlet/terminal.
-  `PUT/GET /projects/{id}/io` stores inlet/outlet points (snapped to vessel ends
-  on run); the UI's **Inlets/Outlets** mode marks them (▲ inlet / ▼ outlet).
+  *(Superseded in the UI by inlet/outlet **nodes** on the editable network — see
+  "Interactive network editing" below; `PUT/GET /projects/{id}/io` points remain as a
+  legacy path, snapped onto nodes when a project opens.)*
 
 - ✅ **Separate feeding trees (multi-component)** — `network_from_edges`/
   `_polylines` orient each connected component from its own root and seed
@@ -304,6 +307,35 @@ imports move to `perfusion.core.*`.
   are now **contextual to the active mode tab** for a tidier UI). *(vtk.js/WebGL volume rendering could swap in
   behind the same `/demo3d` data later for fancier transfer functions.)*
   *Next 3-D:* 3-D segmentation from image stacks; a full 3-D project path in the API/UI.
+- ✅ **Interactive network editing** — the workspace's Vessels tab edits the
+  artery/vein networks directly (draw, extend, branch, drag, **per-segment radius**,
+  split, join, delete); **inlets/outlets are network nodes** (`inlet_nodes`, `I`
+  key) — the separate I/O and Edit tabs are gone, legacy strokes / I/O points are
+  converted on open. `PUT /editable` can create or remove a tree.
+  `io.save_network` now persists `inlet_nodes`/`node_z` (multiple outlets were
+  silently lost on reload before). `validate_run` rejects a tree with no free end.
+- ✅ **Tissue polygon editor** — organ / lesion / hotspot layers edited vertex by
+  vertex; **organ presets** (`organs.polygon`, `POST /shapes/polygon`); per-project
+  **domain size** (Parameters → width/height; grid ny follows the aspect).
+- ✅ **Pruning** — `geometry.prune_terminal_branches` removes the outermost
+  terminal-branch generations (never the fed trunk); `POST …/prune`, web Grow/prune
+  card, MCP `prune_vessel_tree`.
+- ✅ **Tree explorer growth (2-D + 3-D)** — `perfusion.treegen` + `POST
+  /explore/grow` + MCP `grow_trees_in_tissue`: organ tissue (11 2-D / 10 3-D shapes,
+  `perfusion.organs`, all tested connected) with **anatomical artery/vein entries**
+  (`organs.roots`), fractal skeleton of N generations (`grow_tree(max_generations=)`),
+  space filling by colonisation or CCO, adjustable object size (×0.5–×16) and grid
+  resolution, solve + homogeneity objective, animate-growth replay.
+- ✅ **Truly volumetric 3-D trees** — `grow_tree_3d` twists each branching plane
+  relative to its parent's (the old fixed-axis rule kept every generation in one
+  plane); Murray-law asymmetry, seeded jitter.
+- ✅ **3-D flux + time-of-flight** — `run_hybrid_3d` returns `flux` and `tof`
+  (`darcy3d.face_fluxes_3d` masked, `flux_magnitude_3d`, `upwind_operator_3d`,
+  `timeofflight.time_of_flight_3d`), and 3-D terminals outside the mask snap to the
+  tissue (`_snap_to_active_3d`). The explorer computes fields and objectives in 3-D.
+- ✅ **Viewport** — every canvas fills the window, HiDPI-crisp, with zoom about the
+  cursor, pan and fit (`frontend/viewport.js`), in the workspace, explorer and 3-D
+  viewer.
 
 - ✅ **Task queue (optional RQ)** — job execution moved to `api.runner` +
   `run_job` (reconstructs the store from its root), so it runs in either the
@@ -312,11 +344,13 @@ imports move to `perfusion.core.*`.
   Redis, and `rq worker`), with graceful fallback to threads. Verified in-process
   with fakeredis.
 
-**Next**
+**Next** (see §11 for the full list of what is still open)
 
-1. Server-side **mp4** (needs ffmpeg); couple the **3-D** grid to the network
-   solver + vtk.js rendering; the optional React/Vite front-end rebuild.
-2. Research tooling: parameter sweeps, inverse estimation, batch experiments.
+1. A **3-D project path**: store/edit/solve 3-D trees + organ masks in projects (today
+   3-D lives in the explorer and the 3-D viewer); 3-D segmentation from image stacks.
+2. Scale: **monolithic sparse coupling** instead of the dense `T×T` terminal response
+   (needed for fine 3-D grids and thousands of terminals); response reuse in sweeps.
+3. Server-side **mp4**; automated UI tests; optional React/Vite rebuild + vtk.js.
 
 Each step is independently useful and testable; the API contract lets the
 front-end be built in parallel.
@@ -368,9 +402,10 @@ a research project. Each notes where it lands in the tree.
 
 ## 9.3 Growth & geometry
 
-- ◑ 3-D CCO and staged/optimised CCO — *deferred.* 2-D CCO (`cco_grow`) is done; a 3-D
-  version is a substantial rewrite (3-D nearest-segment projection + `node_z` network) worth
-  its own validation pass. Structural adaptation already optimises the Murray exponent (9.1).
+- ✅ **3-D CCO and 3-D space colonisation** — `growth` sampling, colonisation and CCO are
+  dimension-agnostic (2-D or 3-D by the base network / mask); tested in 3-D and used by the
+  explorer. ◑ *Staged / optimised CCO* (global re-optimisation of bifurcation positions)
+  remains deferred; structural adaptation already optimises the Murray exponent (9.1).
 - ◑ Loopy venous networks / anastomoses — *partially covered.* The **solver** already handles
   cyclic venous graphs (segmented veins contain loops); only the *growth* algorithms are
   tree-only. Growing anastomoses is a research effort (loop-closure heuristics) — deferred.
@@ -598,3 +633,64 @@ the operator or state each step and already reuse a single factorisation where p
 Monte-Carlo/Sobol/sweep *samples* are independent (parallelisable, not vectorisable) and their
 win is response-reuse (above), not loop fusion; CCO and space-colonisation growth are iterative
 by construction.
+
+---
+
+# 11. What's still open
+
+One consolidated list of everything not yet delivered, gathered from §4–§10 and from
+gaps noticed while building the editors / explorer. Ordered by value ÷ effort.
+Effort: **S** ≲ a day, **M** a few days, **L** a week+, **XL** research.
+
+## 11.1 Highest value next
+
+| # | Item | Why | Effort | Lands in |
+|---|---|---|---|---|
+| 1 | **Monolithic sparse coupling** — one sparse saddle-point solve of network + Darcy cells instead of the dense `T×T` terminal response (`O(T·n_cells)` memory for the field columns) | the scaling wall: fine 3-D grids (`>36³`) and thousands of terminals; also lifts the explorer's 3-D resolution cap | L | `core/network`, `core/darcy`, `core/darcy3d` |
+| 2 | **3-D project path** — store / edit / solve 3-D trees + organ masks in projects (today 3-D lives in the explorer and viewer); "send explorer result to a project" | turns the explorer into a modelling front door; makes 3-D results exportable / analysable | M–L | `api` (store, schemas), `frontend` |
+| 3 | **Darcy-response reuse in UQ / calibration / sweeps** (§10.2) when only `p_in/p_out/μ/H` vary — guard against `K` or terminal changes | ≈6× per sample, measured for adaptation | S–M | `uq`, `inverse`, `mcp_server.sweep` |
+| 4 | **Workspace default trees follow the project domain** — the fallback fractal trees use fixed 100×120 roots, so a larger domain is only partly perfused and they are not drawn on the result | correctness / clarity for the new domain-size feature | S | `api/runner`, `frontend/render` |
+| 5 | **Automated UI tests** — the Playwright drives used during development (draw/branch/drag, tissue editing, zoom, explorer, run) as a CI job | the web app is now the main entry point; regressions are only caught by hand | M | `tests/ui/`, `.github/workflows` |
+
+## 11.2 Modelling & numerics
+
+- **Non-Newtonian rheology options** (shear-thinning apparent viscosity beyond
+  Fåhræus–Lindqvist) — §4. *M.*
+- **MPFA-O** for full (off-diagonal) tensor permeability / skewed grids — §9.2, deferred. *L.*
+- **Staged / optimised CCO** (global re-optimisation of bifurcation positions) — §9.3. *L.*
+- **Growing anastomoses / loopy venous growth** (loop-closure heuristics; the solver
+  already handles loops) — §9.3. *XL.*
+- **Data-constrained growth matched to Strahler statistics** (follow-up in §9.3). *M.*
+- **Inverse estimation from real DCE-MRI curves** beyond the 1-D calibration
+  (`inverse.calibrate`) — multi-parameter fit of the hybrid model. *L.*
+- **GPU / matrix-free `darcy3d`** (cupy) — needs hardware; deferred. *L.*
+- ◑ Newton with an analytic Jacobian — *deliberately not added* (the factorisation-reusing
+  fixed point is faster and reduces exactly to the linear solve). Units via pint —
+  *deferred by design* (non-dimensional engine).
+
+## 11.3 Geometry & data
+
+- **3-D segmentation from image stacks / MRA** into `node_z` networks — §4, §8. *L.*
+- **Organ library refinement** — the 3-D heart is a stylised ventricular wall; image- or
+  atlas-derived organ masks would replace the analytic shapes. *M.*
+- **Explorer Optimise for the current setup** — today it optimises the asymmetries in the
+  thesis' default fractal frame, ignoring the chosen organ, roots and fill. *M.*
+
+## 11.4 Platform & UI
+
+- **Batch experiments / run comparison** — `POST /experiments` (§3), an A/B
+  result-comparison view (needs a multi-result-per-project data model) — §9.5. *M–L.*
+- **Server-side MP4** export of the flow video (ffmpeg) — §3. *S.*
+- **3-D flow video** (tracer transport on the voxel bed + viewer playback) — §4. *M.*
+- **Workspace result analyses for 3-D** (tracer, kinetics, oxygen are 2-D only). *L.*
+- Optional **React/Vite** rebuild and **vtk.js/WebGL** volume rendering behind the same
+  API data — §5, §8. *L.*
+
+## 11.5 Performance (from §10.2, measured, not yet applied)
+
+- Avoid the `.tolil()` Dirichlet-pin round-trip in `darcy.terminal_response`,
+  `multicompartment` and `darcy3d`. *S.*
+- KD-tree the 2-D terminal snapping (`pipeline._snap_to_active` is `O(T·n_active)`; the 3-D
+  path already uses `cKDTree`) and the coincident-cell spreading. *S.*
+- Maintain CCO node/child arrays incrementally (`growth.cco_grow` is `O(n²)`). *S–M.*
+- Vectorise `network_transit.arrival_times` edge construction. *S.*

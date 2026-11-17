@@ -479,21 +479,47 @@ def _rotate(vec: np.ndarray, axis: np.ndarray, angle: float) -> np.ndarray:
 
 def grow_tree_3d(root_xyz, direction=(0.0, 0.0, 1.0), *, root_radius=2.0,
                  min_radius=0.6, length_to_radius=8.0, theta=0.5, ratio=0.78,
-                 max_generations=8, mirror=False) -> Network:
+                 max_generations=8, mirror=False, gamma=None, exponent=3.0,
+                 twist=np.pi / 2, jitter=0.0, seed=None) -> Network:
     """Grow a 3-D self-similar binary fractal tree.
 
-    Every segment above ``min_radius`` splits into two children rotated by
-    ``±theta`` from the parent direction; the branching plane alternates each
-    generation (about z then y) so the tree fills 3-D. Radii/lengths scale by
-    ``ratio``. Returns a :class:`Network` carrying ``node_z`` (a 3-D network).
-    The solver is coordinate-free, so this plugs into the same hybrid solve.
+    Every segment above ``min_radius`` splits into two children. The two children
+    lie in a *branching plane* through the parent direction; each bifurcation's
+    plane is rotated by ``twist`` (default 90°, the alternating pattern of real
+    vascular trees) about the parent axis relative to its parent's plane, so the
+    tree fills 3-D from the second generation on — no generation is confined to a
+    fixed global plane. The first plane's orientation is random when ``seed`` is
+    given (else fixed).
+
+    Branching law: with ``gamma=None`` both children deviate by ``±theta`` and
+    scale by ``ratio`` (symmetric). With ``gamma`` (>= 1 asymmetry, as in 2-D) the
+    child angles and radius ratios follow Murray's law via
+    :func:`perfusion.core.parameters.bifurcation_geometry` with ``exponent``.
+    ``jitter`` (0..1) adds seeded random variation to the twist, the branching
+    angles and the segment lengths for a less regular, more natural tree.
+    Returns a :class:`Network` carrying ``node_z`` (a 3-D network); the solver is
+    coordinate-free, so this plugs into the same hybrid solve.
     """
     def unit(v):
         n = np.linalg.norm(v)
         return v / n if n > 0 else v
 
+    rng = np.random.default_rng(seed)
+    jit = float(np.clip(jitter, 0.0, 1.0))
+    if gamma is None:
+        phis, ratios = np.array([theta, theta]), np.array([ratio, ratio])
+    else:
+        from .parameters import bifurcation_geometry
+        phis, ratios = bifurcation_geometry(float(gamma), float(exponent))
+
     root = np.asarray(root_xyz, dtype=float)
     d0 = unit(np.asarray(direction, dtype=float))
+    # a reference normal perpendicular to the trunk (randomly turned if seeded)
+    helper = np.array([1.0, 0.0, 0.0]) if abs(d0[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+    n0 = unit(np.cross(d0, helper))
+    if seed is not None:
+        n0 = unit(_rotate(n0, d0, rng.uniform(0, 2 * np.pi)))
+
     xs, ys, zs, roles = [root[0]], [root[1]], [root[2]], [NodeRole.ROOT]
     seg_start, seg_end, seg_len, seg_rad, seg_ang = [], [], [], [], []
 
@@ -504,34 +530,37 @@ def grow_tree_3d(root_xyz, direction=(0.0, 0.0, 1.0), *, root_radius=2.0,
         roles.append(NodeRole.TERMINAL)
         return len(xs) - 1
 
-    def add_seg(parent, child, length, radius):
+    def add_seg(parent, child, length, radius, d):
         seg_start.append(parent)
         seg_end.append(child)
         seg_len.append(length)
         seg_rad.append(radius)
-        seg_ang.append(0.0)
+        seg_ang.append(float(np.arctan2(d[1], d[0])))
 
     L0 = length_to_radius * root_radius
-    add_seg(0, add_node(root + d0 * L0), L0, root_radius)
+    add_seg(0, add_node(root + d0 * L0), L0, root_radius, d0)
 
-    axes = (np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0]))
-    queue = deque([(1, d0, root_radius, L0, 0)])
+    # (node, direction, plane normal of the *previous* bifurcation, radius, length, gen)
+    queue = deque([(1, d0, n0, root_radius, L0, 0)])
     while queue:
-        node, d, r, length, gen = queue.popleft()
+        node, d, n_prev, r, length, gen = queue.popleft()
         if r <= min_radius or gen >= max_generations:
             continue
         roles[node] = NodeRole.BIFURCATION
-        axis = np.cross(axes[gen % 2], d)
-        if np.linalg.norm(axis) < 1e-9:
-            axis = np.cross(axes[(gen + 1) % 2], d)
-        axis = unit(axis)
-        cr, cl = r * ratio, length * ratio
+        tw = twist if gen > 0 else 0.0           # the first plane is n0 itself
+        tw += jit * rng.normal(0.0, 0.6)
+        normal = unit(_rotate(n_prev, d, tw))
+        normal = unit(normal - np.dot(normal, d) * d)     # keep it exactly ⟂ d
         parent_pos = np.array([xs[node], ys[node], zs[node]])
-        for sign in ((-1.0, 1.0) if not mirror else (1.0, -1.0)):
-            child_dir = unit(_rotate(d, axis, sign * theta))
+        signs = (1.0, -1.0) if mirror else (-1.0, 1.0)
+        for k, sign in enumerate(signs):
+            phi = phis[k] * (1.0 + jit * rng.normal(0.0, 0.2))
+            child_dir = unit(_rotate(d, normal, sign * phi))
+            cr = r * ratios[k]
+            cl = length * ratios[k] * max(0.3, 1.0 + jit * rng.normal(0.0, 0.2))
             child = add_node(parent_pos + child_dir * cl)
-            add_seg(node, child, cl, cr)
-            queue.append((child, child_dir, cr, cl, gen + 1))
+            add_seg(node, child, cl, cr, child_dir)
+            queue.append((child, child_dir, normal, cr, cl, gen + 1))
 
     return Network(
         node_x=np.asarray(xs), node_y=np.asarray(ys),
