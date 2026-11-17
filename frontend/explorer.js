@@ -495,7 +495,7 @@ function setDim(dim) {
   setRoots(dim);
   // scale the skeleton to the domain: the 3-D box (60³) is smaller than the 2-D
   // window (140×160), and 3-D colonisation grows many segments per step
-  const D = dim === 3 ? { ltr: 5, gen: 4, ar: 1.5, vr: 1.8, steps: 25, res: [12, 36, 22] }
+  const D = dim === 3 ? { ltr: 5, gen: 4, ar: 1.5, vr: 1.8, steps: 25, res: [12, 48, 22] }
                       : { ltr: 10, gen: 4, ar: 2, vr: 2.4, steps: 40, res: [30, 200, 80] };
   const e = num("extent");                     // trunk calibre scales with the object
   $("ltr").value = D.ltr; $("generations").value = D.gen; $("fill-steps").value = D.steps;

@@ -105,23 +105,33 @@ def _snap_to_active_3d(grid: Grid3D, cells: np.ndarray) -> np.ndarray:
 
 def run_hybrid_3d(prm: Parameters, grid: Grid3D, art: Network, ven: Network,
                   domain_limit, eps: float = 2.0,
-                  art_inlets=None, ven_outlets=None) -> HybridResult3D:
+                  art_inlets=None, ven_outlets=None, coupling: str = "auto") -> HybridResult3D:
     """Couple 3-D arterial/venous trees to the 3-D Darcy bed and solve.
 
     ``art``/``ven`` are 3-D networks (``node_z`` set, e.g. from
     :func:`perfusion.core.geometry.grow_tree_3d`); ``domain_limit`` is the 3-D
     window ``(xmin, xmax, ymin, ymax, zmin, zmax)`` the grid maps to. ``prm``
-    supplies ``p_in``/``p_out`` and the (scalar) viscosity ``mu``.
+    supplies ``p_in``/``p_out`` and the (scalar) viscosity ``mu``. ``coupling`` is as
+    in :func:`perfusion.core.pipeline.run_hybrid` — the sparse ``"monolithic"`` solve
+    is what makes fine 3-D grids with many terminals fit in memory.
     """
     if art_inlets is not None:
         art = replace(art, inlet_nodes=np.asarray(art_inlets, dtype=int))
     if ven_outlets is not None:
         ven = replace(ven, inlet_nodes=np.asarray(ven_outlets, dtype=int))
 
+    from .pipeline import use_monolithic
+
     terminal_cells = _terminal_cells_3d(grid, art, ven, domain_limit)
-    response, field_response, sources = darcy3d.terminal_response_3d(grid, terminal_cells, eps)
-    sol = network.solve_linear(art, ven, response, prm.p_in, prm.p_out, prm.mu)
-    pressure = reconstruct_field(field_response, sol.terminal_flux, balance=True)
+    if use_monolithic(coupling, grid.n_cells, len(terminal_cells)):
+        coupling_op, sources = darcy3d.coupling_operator_3d(grid, terminal_cells, eps)
+        sol = network.solve_linear(art, ven, coupling_op, prm.p_in, prm.p_out, prm.mu)
+        pressure = np.asarray(sol.darcy_pressure)
+    else:
+        response, field_response, sources = darcy3d.terminal_response_3d(
+            grid, terminal_cells, eps)
+        sol = network.solve_linear(art, ven, response, prm.p_in, prm.p_out, prm.mu)
+        pressure = reconstruct_field(field_response, sol.terminal_flux, balance=True)
     pressure = pressure.reshape(grid.nx, grid.ny, grid.nz, order="F")
     # the same post-processing as 2-D: Darcy flux magnitude + time-of-flight
     fx, fy, fz = darcy3d.face_fluxes_3d(grid, pressure)
