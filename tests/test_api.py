@@ -120,7 +120,9 @@ def test_grow_then_run(client):
 
     # the grown tree is exposed as segment geometry for the front-end overlay
     net = client.get(f"/projects/{pid}/network").json()
-    assert len(net["segments"]) == grown["n_segments"]
+    own = [sg for sg in net["segments"] if not sg.get("default")]
+    assert len(own) == grown["n_segments"]
+    assert net["defaults"] == ["vein"]          # the vein a run would use is the default
     assert {"x0", "y0", "x1", "y1", "r", "kind"} <= set(net["segments"][0])
 
     # the CCO method is also available and produces a usable tree
@@ -180,7 +182,8 @@ def test_image_upload_segments_a_network(client):
     r = client.post(f"/projects/{pid}/image", content=img, params={"min_size": 30})
     assert r.status_code == 200
 
-    segs = client.get(f"/projects/{pid}/network").json()["segments"]
+    segs = [sg for sg in client.get(f"/projects/{pid}/network").json()["segments"]
+            if not sg.get("default")]
     assert len(segs) > 10
     xs = [c for s in segs for c in (s["x0"], s["x1"])]
     ys = [c for s in segs for c in (s["y0"], s["y1"])]
@@ -1246,3 +1249,128 @@ def test_explore_grow_places_roots_where_the_organ_attaches(client, dim):
                                            "solve": False, "nx": 16,
                                            "artery": {"root": mine}}).json()
     assert d["roots"]["artery"] == mine
+
+
+def test_default_trees_are_fitted_into_the_project_domain(client):
+    """A project with no vessels runs on default fractal trees — fitted inside its own
+    domain (the raw thesis trees sit in a fixed frame, partly outside most domains),
+    and reported by /network so the UI can draw what is solved."""
+    for dom in ([0, 100, 0, 120], [0, 400, 0, 200]):
+        grid = {"nx": 40, "ny": 40, "lx": dom[1] - dom[0], "ly": dom[3] - dom[2],
+                "domain_limit": dom}
+        pid = client.post("/projects", json={"name": "d", "grid": grid,
+                                             "params": FAST_PARAMS}).json()["id"]
+        net = client.get(f"/projects/{pid}/network").json()
+        assert sorted(net["defaults"]) == ["artery", "vein"]
+        xs = [v for sg in net["segments"] for v in (sg["x0"], sg["x1"])]
+        ys = [v for sg in net["segments"] for v in (sg["y0"], sg["y1"])]
+        assert min(xs) >= dom[0]
+        assert max(xs) <= dom[1]
+        assert min(ys) >= dom[2]
+        assert max(ys) <= dom[3]
+        assert max(xs) - min(xs) > 0.5 * (dom[1] - dom[0]) or \
+            max(ys) - min(ys) > 0.5 * (dom[3] - dom[2])      # actually fills the domain
+        jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+        assert _wait_for_job(client, jid)["state"] == "done"
+        res = client.get(f"/projects/{pid}/results").json()
+        assert res["arterial_inflow"] > 0
+        assert res["arterial_inflow"] == pytest.approx(res["venous_outflow"], rel=1e-6)
+
+
+def test_uq_with_default_trees_still_responds_to_tree_depth(client):
+    """With no drawn vessels the default trees are rebuilt per sample, so the tree
+    depth (r_min_frac) remains an effective uncertain input."""
+    pid = client.post("/projects", json={"name": "uq", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    r = client.post(f"/projects/{pid}/uq", json={"params": {"r_min_frac": [0.4, 0.7]},
+                                                 "n_samples": 6})
+    assert r.status_code == 200, r.text
+    assert r.json()["std"]["arterial_inflow"] > 0
+
+
+# ── 3-D projects ───────────────────────────────────────────────────────────────
+def _explorer_project(client, dim, **kw):
+    body = {"dim": dim, "shape": "heart" if dim == 3 else "kidney", "fill": "cco",
+            "n_terminals": 12, "generations": 3, "nx": 16 if dim == 3 else 40, "ny": 46,
+            "name": f"from-explorer-{dim}d", **kw}
+    r = client.post("/explore/project", json=body)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_explorer_3d_result_becomes_a_runnable_3d_project(client):
+    made = _explorer_project(client, 3)
+    pid = made["id"]
+    assert made["open"] == f"/viewer3d.html?project={pid}"
+    info = client.get(f"/projects/{pid}").json()
+    assert info["grid"]["nz"] == 16
+    assert info["grid"]["tissue"] == "heart"
+    assert len(info["grid"]["domain_limit"]) == 6
+    pre = client.get(f"/projects/{pid}/view3d").json()
+    assert pre["dim"] == 3
+    assert pre["tissue_points"]
+    assert all(len(sg) == 8 for sg in pre["segments"])
+    assert not pre["has_result"]
+
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    res = client.get(f"/projects/{pid}/results").json()
+    assert res["arterial_inflow"] > 0
+    assert res["arterial_inflow"] == pytest.approx(res["venous_outflow"], rel=1e-6)
+    for field in ("pressure", "flux", "tof"):
+        v = client.get(f"/projects/{pid}/view3d?field={field}").json()
+        assert v["pressure"]["name"] == field
+        assert v["pressure"]["voxels"]
+        assert all(len(x) == 4 for x in v["pressure"]["voxels"][:5])
+    assert client.get(f"/projects/{pid}/export?fmt=npz").status_code == 200
+    assert client.get(f"/projects/{pid}/export?fmt=csv").status_code == 409
+
+
+def test_2d_only_features_say_so_on_a_3d_project(client):
+    pid = _explorer_project(client, 3)["id"]
+    for method, path, body in [
+        ("post", "tracer", {}), ("get", "oxygen?field=saturation", None),
+        ("put", "mask", {"regions": []}), ("post", "grow", {}),
+        ("get", "results/field/pressure", None),
+    ]:
+        r = getattr(client, method)(f"/projects/{pid}/{path}",
+                                    **({"json": body} if body is not None else {}))
+        assert r.status_code == 409, (path, r.status_code, r.text)
+        assert "3-D project" in r.json()["detail"]
+    jid = client.post(f"/projects/{pid}/run", json={"model": "direct"}).json()["id"]
+    final = _wait_for_job(client, jid)
+    assert final["state"] == "error"
+    assert "2-D projects" in final["error"]
+
+
+def test_3d_project_prune_morphometry_and_document_round_trip(client):
+    pid = _explorer_project(client, 3)["id"]
+    before = client.get(f"/projects/{pid}/morphometry").json()
+    assert before["max_order"] >= 2
+    r = client.post(f"/projects/{pid}/prune", json={"target": "artery", "steps": 1})
+    assert r.status_code == 200
+    assert r.json()["n_removed"] > 0
+    doc = client.get(f"/projects/{pid}/document").json()
+    assert doc["grid"]["nz"] == 16
+    assert len(doc["mask"]["shape"]) == 3
+    assert doc["artery_network"]["node_z"] is not None
+    new = client.post("/projects/import", json=doc).json()["id"]
+    jid = client.post(f"/projects/{new}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+
+
+def test_explorer_2d_result_becomes_an_editable_workspace_project(client):
+    made = _explorer_project(client, 2)
+    pid = made["id"]
+    assert made["open"] == f"/?project={pid}"
+    assert len(client.get(f"/projects/{pid}/mask").json()["regions"]) == 1
+    ed = client.get(f"/projects/{pid}/editable").json()
+    assert ed["artery"] is not None
+    assert ed["vein"] is not None
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+
+
+def test_grid_dims_are_validated(client):
+    bad = {"name": "x", "grid": {"nx": 10, "ny": 10, "nz": 10, "domain_limit": [0, 1, 0, 1]}}
+    assert client.post("/projects", json=bad).status_code == 422

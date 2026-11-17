@@ -170,10 +170,9 @@ def terminal_response_3d(grid: Grid3D, terminal_cells, eps: float, pin_cell=None
     active = grid.mask.ravel(order="F")
     if pin_cell is None:
         pin_cell = int(np.flatnonzero(active)[0])
-    A = tpfa_operator_3d(grid).tolil()
-    A[pin_cell, :] = 0.0
-    A[pin_cell, pin_cell] = 1.0                 # Dirichlet pin removes the nullspace
-    lu = spla.splu(A.tocsc())
+    from .darcy import pin_row
+
+    lu = spla.splu(pin_row(tpfa_operator_3d(grid), pin_cell))   # Dirichlet pin
 
     sources = [point_source_3d(grid, int(c), eps) for c in terminal_cells]
     rhs = np.zeros((grid.n_cells, n_terminals))
@@ -186,6 +185,20 @@ def terminal_response_3d(grid: Grid3D, terminal_cells, eps: float, pin_cell=None
     for i, (cells, weights) in enumerate(sources):
         response[i, :] = weights @ field_response[cells, :]
     return response, field_response, sources
+
+
+def coupling_operator_3d(grid: Grid3D, terminal_cells, eps: float, pin_cell=None):
+    """3-D twin of :func:`perfusion.core.darcy.coupling_operator`: the sparse
+    monolithic coupling ``(MonolithicDarcy, sources)`` — no dense ``(n_cells, T)``
+    field-response block, so fine 3-D grids with many terminals fit in memory."""
+    from .darcy import _weight_matrices, pin_row
+    from .network import MonolithicDarcy
+
+    if pin_cell is None:
+        pin_cell = int(np.flatnonzero(grid.mask.ravel(order="F"))[0])
+    A = pin_row(tpfa_operator_3d(grid), pin_cell).tocsr()
+    sources = [point_source_3d(grid, int(c), eps) for c in terminal_cells]
+    return MonolithicDarcy(A, *_weight_matrices(grid.n_cells, sources, pin_cell)), sources
 
 
 def face_fluxes_3d(grid: Grid3D, pressure: np.ndarray):

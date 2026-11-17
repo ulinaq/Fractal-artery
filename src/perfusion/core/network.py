@@ -54,6 +54,29 @@ class HybridSolution:
     p_v: np.ndarray            # venous node pressures
     q_v: np.ndarray            # venous segment flows
     terminal_flux: np.ndarray  # signed flux per terminal (+ arterial in, - venous out)
+    darcy_pressure: np.ndarray | None = None   # (n_cells,) bed pressure (monolithic solve)
+
+
+@dataclass
+class MonolithicDarcy:
+    """Sparse Darcy coupling for the **monolithic** hybrid solve.
+
+    Instead of the dense ``(T, T)`` terminal response (and its ``(n_cells, T)`` field
+    columns) the Darcy bed enters the network system directly: its cell pressures
+    ``P`` become unknowns, with rows ``A P = W_src (s∘q)`` (pinned TPFA operator,
+    mollified terminal sources) and coupling rows ``p_node − p_ref − W_avgᵀ P = 0``.
+    Eliminating ``P`` gives back exactly the Schur form ``R = W_avgᵀ A⁻¹ W_src``, so the
+    two are the same model — but memory is ``O(nnz)`` instead of ``O(n_cells · T)``,
+    which is what fine (3-D) grids with thousands of terminals need.
+    """
+
+    A: sp.csr_matrix          # (n, n) TPFA operator with the Dirichlet pin row
+    W_src: sp.csr_matrix      # (n, T) terminal source weights, pin row zeroed
+    W_avg: sp.csr_matrix      # (n, T) terminal averaging weights (mollifier)
+
+    @property
+    def n(self) -> int:
+        return self.A.shape[0]
 
 
 @dataclass
@@ -146,6 +169,26 @@ def _network_blocks(net: Network, R: np.ndarray, lay: _Layout,
     return dirichlet, pois, cons
 
 
+def _coupling_monolithic(lay: _Layout, darcy: MonolithicDarcy, columns: np.ndarray,
+                         signs: np.ndarray, ta: np.ndarray, tv: np.ndarray):
+    """Coupling, balance and Darcy rows of the monolithic system (width
+    ``lay.size + n``): ``p_node − p_ref − W_avgᵀ P = 0``, ``Σ s q = 0`` and
+    ``A P − W_src (s∘q) = 0``."""
+    n_term, n = len(columns), darcy.n
+    width = lay.size + n
+    p_cols = np.concatenate([lay.pa + ta, lay.pv + tv])
+    net = sp.csr_matrix((np.concatenate([np.ones(n_term), -np.ones(n_term)]),
+                         (np.concatenate([np.arange(n_term)] * 2),
+                          np.concatenate([p_cols, np.full(n_term, lay.p_ref)]))),
+                        shape=(n_term, lay.size))
+    coupling = sp.hstack([net, -darcy.W_avg.T.tocsr()], format="csr")
+    balance = sp.csr_matrix((signs, (np.zeros(n_term, int), columns)), shape=(1, width))
+    # scatter terminal j's (signed) source column onto its flux unknown columns[j]
+    place = sp.csr_matrix((signs, (np.arange(n_term), columns)), shape=(n_term, lay.size))
+    darcy_rows = sp.hstack([-(darcy.W_src @ place), darcy.A], format="csr")
+    return coupling, balance, darcy_rows
+
+
 @dataclass
 class _System:
     """Assembled linear hybrid system and the row slices the solvers need."""
@@ -157,21 +200,33 @@ class _System:
     signs: np.ndarray
     pois_a_rows: slice        # arterial Poiseuille rows (for junction-loss RHS)
     pois_v_rows: slice        # venous Poiseuille rows
+    n_darcy: int = 0          # Darcy unknowns appended (monolithic solve)
 
 
-def _assemble(art: Network, ven: Network, response: np.ndarray, p_in: float,
+def _assemble(art: Network, ven: Network, response, p_in: float,
               p_out: float, Ra: np.ndarray, Rv: np.ndarray) -> _System:
-    """Assemble the sparse linear hybrid system ``A x = b``."""
+    """Assemble the sparse linear hybrid system ``A x = b``.
+
+    ``response`` is the dense ``(T, T)`` Darcy response (Schur form) or a
+    :class:`MonolithicDarcy` (the bed's cell pressures appended as unknowns)."""
     lay = _Layout(art, ven)
     columns, signs, ta, tv = lay.terminal_flux_columns()
 
     dir_a, pois_a, cons_a = _network_blocks(art, Ra, lay, is_arterial=True)
     dir_v, pois_v, cons_v = _network_blocks(ven, Rv, lay, is_arterial=False)
-    coupling, balance = _coupling_and_balance(lay, response, columns, signs, ta, tv)
-
-    A = sp.vstack([dir_a, pois_a, cons_a, dir_v, pois_v, cons_v, coupling, balance],
-                  format="csr")
-    b = np.zeros(lay.size)
+    network = [dir_a, pois_a, cons_a, dir_v, pois_v, cons_v]
+    if isinstance(response, MonolithicDarcy):
+        n_darcy = response.n
+        coupling, balance, darcy_rows = _coupling_monolithic(lay, response, columns, signs,
+                                                             ta, tv)
+        network = [sp.hstack([blk, sp.csr_matrix((blk.shape[0], n_darcy))], format="csr")
+                   for blk in network]
+        A = sp.vstack([*network, coupling, balance, darcy_rows], format="csr")
+    else:
+        n_darcy = 0
+        coupling, balance = _coupling_and_balance(lay, response, columns, signs, ta, tv)
+        A = sp.vstack([*network, coupling, balance], format="csr")
+    b = np.zeros(lay.size + n_darcy)
     ka, kv = art.inlet_nodes.size, ven.inlet_nodes.size
     nbif_a = len(art.bifurcation_nodes)
     b[:ka] = p_in                                 # dir_a: one row per arterial inlet
@@ -181,7 +236,7 @@ def _assemble(art: Network, ven: Network, response: np.ndarray, p_in: float,
     pois_a_rows = slice(ka, ka + lay.ma)
     v0 = v_dir + kv
     pois_v_rows = slice(v0, v0 + lay.mv)
-    return _System(A, b, lay, columns, signs, pois_a_rows, pois_v_rows)
+    return _System(A, b, lay, columns, signs, pois_a_rows, pois_v_rows, n_darcy)
 
 
 def solve_linear(art: Network, ven: Network, response: np.ndarray, p_in: float,
@@ -192,22 +247,25 @@ def solve_linear(art: Network, ven: Network, response: np.ndarray, p_in: float,
     ----------
     art, ven : arterial and venous trees.
     response : ``(T, T)`` Darcy terminal-response matrix from
-        :func:`perfusion.darcy.terminal_response`.
+        :func:`perfusion.darcy.terminal_response`, or a :class:`MonolithicDarcy`
+        (``darcy.coupling_operator``) to solve network + bed in one sparse system
+        (the bed pressure is then returned in ``darcy_pressure``).
     p_in, p_out : Dirichlet pressures at the arterial/venous roots.
     viscosity : scalar/array for both trees, or a ``(mu_art, mu_ven)`` pair.
     """
     Ra, Rv = _resistances(art, ven, viscosity)
     sys = _assemble(art, ven, response, p_in, p_out, Ra, Rv)
-    x = spla.spsolve(sys.A, sys.b)
-    return _split(x, sys.lay, sys.columns, sys.signs)
+    x = spla.spsolve(sys.A.tocsc(), sys.b)
+    return _split(x, sys)
 
 
-def _split(x: np.ndarray, lay: _Layout, columns: np.ndarray,
-           signs: np.ndarray) -> HybridSolution:
+def _split(x: np.ndarray, sys: _System) -> HybridSolution:
+    lay = sys.lay
     return HybridSolution(
         p_a=x[lay.pa:lay.qa], q_a=x[lay.qa:lay.pv],
         p_v=x[lay.pv:lay.qv], q_v=x[lay.qv:lay.p_ref],
-        terminal_flux=signs * x[columns],
+        terminal_flux=sys.signs * x[sys.columns],
+        darcy_pressure=x[lay.size:] if sys.n_darcy else None,
     )
 
 
@@ -230,7 +288,7 @@ def solve_nonlinear(art: Network, ven: Network, response: np.ndarray, p_in: floa
     x = lu.solve(sys.b)                                   # linear seed
 
     if not junction_loss:
-        return _split(x, sys.lay, sys.columns, sys.signs)
+        return _split(x, sys)
 
     jl_a, jl_v = _junction_geometry(art), _junction_geometry(ven)
     lay = sys.lay
@@ -247,7 +305,7 @@ def solve_nonlinear(art: Network, ven: Network, response: np.ndarray, p_in: floa
     else:
         warnings.warn("solve_nonlinear: fixed-point did not converge in "
                       f"{max_iter} iterations", RuntimeWarning, stacklevel=2)
-    return _split(x, lay, sys.columns, sys.signs)
+    return _split(x, sys)
 
 
 def _junction_geometry(net: Network):

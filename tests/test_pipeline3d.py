@@ -120,3 +120,15 @@ def test_3d_time_of_flight_is_shortest_at_the_arterial_feeds():
     tof = res.tof.ravel(order="F")
     t_art, t_ven = np.nanmedian(tof[cells[:na]]), np.nanmedian(tof[cells[na:]])
     assert t_art < t_ven < np.nanmedian(tof)
+
+
+def test_3d_monolithic_coupling_matches_schur():
+    res_s, mask = _masked_3d_result()
+    from perfusion.core.darcy3d import Grid3D
+    grid = Grid3D(nx=14, ny=14, nz=14, lx=60, ly=60, lz=60, mask=mask)
+    res_m = run_hybrid_3d(Parameters(p_in=10, p_out=0), grid, res_s.art, res_s.ven,
+                          res_s.domain_limit, coupling="monolithic")
+    assert np.allclose(res_s.pressure[mask], res_m.pressure[mask], rtol=1e-9, atol=1e-14)
+    assert np.allclose(res_s.tof[mask], res_m.tof[mask], rtol=1e-8)
+    assert np.allclose(res_s.solution.terminal_flux, res_m.solution.terminal_flux,
+                       rtol=1e-9, atol=1e-14)

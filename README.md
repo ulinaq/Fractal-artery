@@ -45,6 +45,7 @@ uv sync --extra api          # + fastapi/uvicorn/pydantic (for the web back-end)
 uv sync --extra mcp          # + the MCP SDK (to expose the engine as MCP tools)
 
 uv run pytest                # run the test suite
+uv run --extra api --extra image --extra ui pytest tests/ui   # browser tests (Playwright)
 uv run perfusion-tree        # Paper D: hybrid on a synthetic fractal tree
 uv run perfusion-frog        # Paper A: hybrid on the frog-tongue domain
 uv run python -m perfusion.examples.tkm_demo   # Paper C: TKM comparison
@@ -92,9 +93,12 @@ and a **space-filling** algorithm (colonisation steps or CCO terminals); scale t
 **object size** (opens at ×4, up to ×16) and grid resolution; see the solved
 pressure / flux / time-of-flight field — computed in 3-D for 3-D trees — plus
 Strahler orders, inflow and a homogeneity objective, or *Animate growth*.
+**📤 Open as project** turns the setup into a project: 2-D opens in the workspace
+(outline + trees editable), 3-D opens in the 3-D viewer to run and inspect.
 
 **🧊 3-D viewer** (`/viewer3d.html`) renders a 3-D hybrid result (trees + voxel
-field) in a rotatable, dependency-free canvas. Interactive API docs are at `/docs`.
+field) in a rotatable, dependency-free canvas; for a **3-D project** it runs the 3-D
+solve and shows pressure / flux / time-of-flight. Interactive API docs are at `/docs`.
 See [`frontend/`](frontend/README.md) for the UI in detail.
 
 ### Back-end API

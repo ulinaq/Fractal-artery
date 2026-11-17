@@ -35,3 +35,12 @@ def project_info(project: Project) -> ProjectInfo:
                        has_vessels=project.has_vessels, has_mask=has_mask,
                        has_result=project.has_result, has_tracer=project.has_tracer,
                        params=project.params, grid=project.grid)
+
+
+def get_project_2d(request: Request, project: Project = Depends(get_project)) -> Project:
+    """Like :func:`get_project`, for 2-D-only features: a clear 409 on a 3-D project."""
+    if project.grid.is_3d:
+        raise HTTPException(409, f"{request.url.path.rsplit('/', 1)[-1]} works on 2-D "
+                                 "projects; this is a 3-D project — view and run it in "
+                                 "the 3-D viewer (/viewer3d.html?project=…).")
+    return project
