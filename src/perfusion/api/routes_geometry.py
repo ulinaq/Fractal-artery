@@ -12,7 +12,7 @@ import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from .. import growth
-from ..core.geometry import arterial_tree, rasterize_mask
+from ..core.geometry import rasterize_mask
 from . import helpers, runner
 from .deps import get_project, get_store, project_info
 from .schemas import (
@@ -256,8 +256,6 @@ def grow_vessels(body: GrowRequest | None = None, project: Project = Depends(get
     branches extend the existing vessels rather than a straight trunk), else
     the default fractal tree. Artery and vein grow independently.
     """
-    from ..core.geometry import venous_tree
-
     req = body or GrowRequest()
     if req.method not in ("colonization", "cco"):
         raise HTTPException(422, "method must be 'colonization' or 'cco'")
@@ -275,11 +273,11 @@ def grow_vessels(body: GrowRequest | None = None, project: Project = Depends(get
             nx, ny, domain_limit,
             [(h["polygon"], h["weight"]) for h in project.hotspots], base=1.0)
 
-    prm = project.params.to_core()
+    d_art, d_ven = runner.default_trees(project)       # fitted into this project's domain
     if req.target == "artery":
-        polys, existing, default = project.arteries, project.artery_network, arterial_tree(prm)
+        polys, existing, default = project.arteries, project.artery_network, d_art
     else:
-        polys, existing, default = project.veins, project.vein_network, venous_tree(prm)
+        polys, existing, default = project.veins, project.vein_network, d_ven
     # prefer the drawn strokes (bends kept) so growth extends them, else an
     # existing segmented/grown tree, else the default fractal tree
     base = (polys and runner.network_from_strokes(polys)) or existing or default
@@ -313,17 +311,17 @@ def prune_vessels(body: PruneRequest | None = None, project: Project = Depends(g
     """Prune ``steps`` generations of terminal branches off the arterial *or* venous
     tree — the inverse of :func:`grow_vessels`. Works on the same base (drawn strokes,
     else the stored tree, else the default fractal tree) and stores the result."""
-    from ..core.geometry import prune_terminal_branches, venous_tree
+    from ..core.geometry import prune_terminal_branches
 
     req = body or PruneRequest()
     if req.target not in ("artery", "vein"):
         raise HTTPException(422, "target must be 'artery' or 'vein'")
-    prm = project.params.to_core()
+    d_art, d_ven = runner.default_trees(project)       # fitted into this project's domain
     if req.target == "artery":
-        polys, existing, default = project.arteries, project.artery_network, arterial_tree
+        polys, existing, default = project.arteries, project.artery_network, d_art
     else:
-        polys, existing, default = project.veins, project.vein_network, venous_tree
-    base = (polys and runner.network_from_strokes(polys)) or existing or default(prm)
+        polys, existing, default = project.veins, project.vein_network, d_ven
+    base = (polys and runner.network_from_strokes(polys)) or existing or default
     network = prune_terminal_branches(base, req.steps)
     if req.target == "artery":
         project.artery_network, project.arteries = network, []
@@ -364,26 +362,29 @@ def morphometry(target: str = "artery", project: Project = Depends(get_project))
     """Horton–Strahler morphometry of the project's ``target`` tree (artery/vein):
     per-order segment counts + mean length/radius, and the bifurcation / length /
     diameter ratios. Falls back to the default fractal tree when none is drawn."""
-    from ..core.geometry import venous_tree
     from ..core.morphometry import strahler_summary
 
-    prm = project.params.to_core()
-    art, ven = runner.build_networks(project, use_vessels=True)
-    if target == "vein":
-        net = ven if ven is not None else venous_tree(prm)
-    else:
-        net = art if art is not None else arterial_tree(prm)
+    art, ven = runner.build_networks(project, use_vessels=True, defaults=True)
+    net = ven if target == "vein" else art
     return {"target": target, **strahler_summary(net)}
 
 
 @router.get("/projects/{pid}/network")
 def network_geometry(project: Project = Depends(get_project)) -> dict:
-    """Segment geometry (domain frame) for overlaying grown/drawn vessels."""
-    segments: list[dict] = []
+    """Segment geometry (domain frame) for overlaying grown/drawn vessels.
 
-    def _add(net, kind: str) -> None:
+    A tree the project doesn't have is returned as the domain-fitted **default**
+    fractal tree that a run would use, flagged ``"default": true`` per segment, and
+    listed in ``defaults`` — so the UI can show what will actually be solved."""
+    segments: list[dict] = []
+    defaults: list[str] = []
+
+    def _add(net, kind: str, default: bool = False) -> None:
         for x0, y0, x1, y1, r in helpers.segment_lines(net):
-            segments.append({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "r": r, "kind": kind})
+            seg = {"x0": x0, "y0": y0, "x1": x1, "y1": y1, "r": r, "kind": kind}
+            if default:
+                seg["default"] = True
+            segments.append(seg)
 
     if project.artery_network is not None:
         _add(project.artery_network, "artery")
@@ -393,4 +394,14 @@ def network_geometry(project: Project = Depends(get_project)) -> dict:
         _add(project.vein_network, "vein")
     elif project.veins:
         _add(runner.polylines_to_network(project.veins), "vein")
-    return {"segments": segments}
+    has_art = project.artery_network is not None or bool(project.arteries)
+    has_ven = project.vein_network is not None or bool(project.veins)
+    if not (has_art and has_ven):
+        d_art, d_ven = runner.default_trees(project)
+        if not has_art:
+            _add(d_art, "artery", default=True)
+            defaults.append("artery")
+        if not has_ven:
+            _add(d_ven, "vein", default=True)
+            defaults.append("vein")
+    return {"segments": segments, "defaults": defaults}

@@ -286,13 +286,8 @@ def transient_response(pid: str, period: float = 1.0, pulse: float = 0.5,
     if q_steady <= 0 or p_mean <= p_out:
         raise HTTPException(422, "need a positive steady inflow and p_in > p_out")
     r_total = (p_mean - p_out) / q_steady
-    art, ven = runner.build_networks(project, use_vessels=True)
-    if art is None or ven is None:            # a vessel-less run used the default trees
-        from ..core.geometry import arterial_tree, venous_tree
-
-        prm = project.params.to_core()
-        art = art if art is not None else arterial_tree(prm)
-        ven = ven if ven is not None else venous_tree(prm)
+    # a vessel-less run used the default trees (fitted into the project's domain)
+    art, ven = runner.build_networks(project, use_vessels=True, defaults=True)
     c_total = transient.compliance_total([art, ven], compliance)
 
     cycles = min(max(cycles, 1), 20)
@@ -359,7 +354,7 @@ def project_view3d(pid: str, project: Project = Depends(get_project),
     (z ∝ pressure) with the vessel trees at the base. Voxels only once solved."""
     grid, dom = runner.build_grid(project)
     x0, x1, y0, y1 = dom
-    art, ven = runner.build_networks(project, use_vessels=True)
+    art, ven = runner.build_networks(project, use_vessels=True, defaults=True)
 
     def segs(net, kind):
         if net is None:
@@ -400,9 +395,7 @@ def export(pid: str, fmt: str = "npz", project: Project = Depends(get_project),
 
     name = project.name or project.id
     if fmt == "vtp":       # vessel-network PolyData (tubes) — no solved field needed
-        from ..core.geometry import arterial_tree
-        art, _ = runner.build_networks(project, use_vessels=True)
-        net = art if art is not None else arterial_tree(project.params.to_core())
+        net, _ = runner.build_networks(project, use_vessels=True, defaults=True)
         out = Path(tempfile.gettempdir()) / f"perfusion_{pid}.vtp"
         perfio.network_to_vtp(net, out)
         return FileResponse(out, media_type="application/xml", filename=f"{name}.vtp")

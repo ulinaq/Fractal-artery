@@ -639,3 +639,25 @@ def prune_terminal_branches(net: Network, steps: int = 1) -> Network:
             break
         net = _subnetwork(net, ~drop)
     return net
+
+
+def transform_network(net: Network, scale: float = 1.0, shift=(0.0, 0.0, 0.0)) -> Network:
+    """A copy of ``net`` uniformly scaled about the origin, then shifted.
+
+    Coordinates, segment lengths **and radii** scale together, so the tree's shape,
+    its length-to-radius ratio and its Murray geometry are unchanged — e.g. to fit a
+    fractal tree built in the thesis' native frame into another physical domain.
+    Topology, roles and inlets are kept.
+    """
+    from dataclasses import replace
+
+    s = float(scale)
+    if s <= 0:
+        raise ValueError("scale must be positive")
+    dz = shift[2] if len(shift) > 2 else 0.0
+    return replace(
+        net, node_x=net.node_x * s + shift[0], node_y=net.node_y * s + shift[1],
+        node_z=None if net.node_z is None else net.node_z * s + dz,
+        seg_length=net.seg_length * s, seg_radius=net.seg_radius * s,
+        inlet_nodes=net.inlet_nodes,
+    )
