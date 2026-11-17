@@ -8,6 +8,8 @@ project without importing the app. Functions take a ``ProjectStore`` + a
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 
 from .. import tkm, transport
@@ -143,6 +145,18 @@ def validate_run(project, use_vessels):
         raise InputError(
             f"p_in equals p_out ({prm.p_in}); there is no pressure drop to drive flow. "
             "Set p_in above p_out in Parameters.")
+    for net, points, name, word in ((art, project.inlets, "arterial", "inlet"),
+                                    (ven, project.outlets, "venous", "outlet")):
+        if net is None:
+            continue
+        snapped = snap_io(net, points)
+        eff = net if snapped is None else replace(net, inlet_nodes=snapped)
+        if eff.terminal_nodes.size == 0:
+            raise InputError(
+                f"The {name} tree has no free ends: every end is marked as an {word}, so "
+                "it cannot exchange blood with the tissue and no flow can pass. In the "
+                f"Vessels tab, select an end node and unset {word} (I) so it couples to "
+                "the capillary bed.")
     return grid, art, ven
 
 

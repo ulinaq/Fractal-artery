@@ -221,3 +221,29 @@ def test_simulate_is_json_serialisable():
 
     json.dumps(mcp_server.simulate(nx=40, ny=40, r_min_frac=0.6))
     assert np.isfinite(mcp_server.simulate(nx=40, ny=40, r_min_frac=0.6)["pressure_max"])
+
+
+def test_prune_tree_reduces_generations():
+    r = mcp_server.prune_tree(kind="artery", steps=1, r_min_frac=0.3, seed=0)
+    assert r["removed_segments"] > 0
+    assert r["after"]["segments"] < r["before"]["segments"]
+    assert r["after"]["max_order"] <= r["before"]["max_order"]
+
+
+@pytest.mark.parametrize(("dim", "shape"), [(2, "kidney"), (3, "hemisphere")])
+def test_generate_trees_fills_tissue_and_conserves_mass(dim, shape):
+    r = mcp_server.generate_trees(dim=dim, shape=shape, generations=3, fill="cco",
+                                  n_terminals=15)
+    assert r["artery"]["segments"] > 7
+    assert r["inflow"] > 0
+    assert r["inflow"] == pytest.approx(r["outflow"], rel=1e-6)
+    h = r["homogeneity"]                       # flux + time-of-flight, in 2-D and 3-D
+    assert np.isfinite(h["tof_std"])
+    assert h["flux_mean"] > 0
+
+
+def test_generate_trees_uses_anatomical_roots_and_solves():
+    r = mcp_server.generate_trees(dim=2, shape="kidney", generations=3, fill="cco",
+                                  n_terminals=15)
+    assert r["inflow"] > 0
+    assert r["inflow"] == pytest.approx(r["outflow"], rel=1e-6)

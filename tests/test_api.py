@@ -2,6 +2,7 @@
 
 import time
 
+import numpy as np
 import pytest
 
 pytest.importorskip("fastapi")
@@ -968,6 +969,103 @@ def test_editable_absent_without_networks(client):
                       ).status_code == 404
 
 
+def _drawn_tree(x0, y_root, y_tip, inlet=0):
+    """A small Y-shaped tree drawn node by node, as the canvas editor sends it."""
+    return {"node_x": [x0, x0, x0 - 20, x0 + 20], "node_y": [y_root, 60, y_tip, y_tip],
+            "seg_start": [0, 1, 1], "seg_end": [1, 2, 3], "seg_radius": [3, 2, 2],
+            "inlet_nodes": [inlet], "root_node": inlet}
+
+
+def test_editable_creates_tree_from_scratch_and_solves(client):
+    """The canvas editor draws vessels straight into the network: PUT /editable
+    creates trees the project didn't have, with inlet/outlet *nodes*, and the run
+    feeds exactly those nodes (no I/O points needed)."""
+    pid = client.post("/projects", json={"name": "drawn", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    body = {"artery": _drawn_tree(-20, 10, 120), "vein": _drawn_tree(20, 150, 30)}
+    r = client.put(f"/projects/{pid}/editable", json=body)
+    assert r.status_code == 200, r.text
+    ed = client.get(f"/projects/{pid}/editable").json()
+    assert ed["artery"]["inlet_nodes"] == [0]
+    assert ed["vein"]["inlet_nodes"] == [0]
+    assert len(ed["artery"]["seg_start"]) == 3
+
+    job = client.post(f"/projects/{pid}/run", json={"use_vessels": True}).json()
+    final = _wait_for_job(client, job["id"])
+    assert final["state"] == "done", final.get("error")
+    res = client.get(f"/projects/{pid}/results").json()
+    assert res["arterial_segments"] == 3
+    assert res["venous_segments"] == 3
+    assert res["arterial_inflow"] > 0
+    assert res["arterial_inflow"] == pytest.approx(res["venous_outflow"], rel=1e-6)
+
+
+def test_editable_keeps_multiple_outlets_across_reload(client, tmp_path):
+    """Several inlet/outlet nodes must survive the store's .npz round trip."""
+    pid = client.post("/projects", json={"name": "drawn", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    vein = _drawn_tree(20, 150, 30)
+    vein["inlet_nodes"] = [0, 2, 3]
+    assert client.put(f"/projects/{pid}/editable", json={"vein": vein}).status_code == 200
+    fresh = TestClient(create_app(store=ProjectStore(tmp_path)))     # reopen from disk
+    assert fresh.get(f"/projects/{pid}/editable").json()["vein"]["inlet_nodes"] == [0, 2, 3]
+
+
+def test_run_rejects_tree_whose_every_end_is_an_outlet(client):
+    """A vein with no free (terminal) end can't drain the tissue -> clear error,
+    not a silent zero-flow 'solution'."""
+    pid = client.post("/projects", json={"name": "drawn", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    vein = {"node_x": [20, 20, 20], "node_y": [150, 90, 30], "seg_start": [0, 1],
+            "seg_end": [1, 2], "seg_radius": [2, 2], "inlet_nodes": [0, 2]}
+    client.put(f"/projects/{pid}/editable",
+               json={"artery": _drawn_tree(-20, 10, 120), "vein": vein})
+    job = client.post(f"/projects/{pid}/run", json={"use_vessels": True}).json()
+    final = _wait_for_job(client, job["id"])
+    assert final["state"] == "error"
+    assert "venous tree has no free ends" in final["error"]
+
+
+def test_prune_removes_terminal_generations(client):
+    pid = client.post("/projects", json={"name": "prune", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    client.put(f"/projects/{pid}/editable", json={"artery": _drawn_tree(0, 10, 120)})
+    r = client.post(f"/projects/{pid}/prune", json={"target": "artery", "steps": 1})
+    assert r.status_code == 200, r.text
+    info = r.json()
+    assert info["n_removed"] == 2          # both branches of the Y; the trunk stays
+    assert info["n_segments"] == 1
+    a = client.get(f"/projects/{pid}/editable").json()["artery"]
+    assert len(a["seg_start"]) == 1
+    assert a["inlet_nodes"] == [0]
+    # the default fractal tree is pruned when nothing was drawn
+    r = client.post(f"/projects/{pid}/prune", json={"target": "vein", "steps": 2}).json()
+    assert r["n_removed"] > 0
+    assert client.post(f"/projects/{pid}/prune", json={"target": "x"}).status_code == 422
+
+
+def test_editable_new_tree_defaults_inlet_to_root(client):
+    pid = client.post("/projects", json={"name": "drawn", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    tree = _drawn_tree(0, 10, 120)
+    tree.pop("inlet_nodes")
+    tree["root_node"] = 2
+    assert client.put(f"/projects/{pid}/editable", json={"artery": tree}).status_code == 200
+    a = client.get(f"/projects/{pid}/editable").json()["artery"]
+    assert a["inlet_nodes"] == [2]
+
+
+def test_editable_zero_segments_removes_tree(client):
+    pid = client.post("/projects", json={"name": "drawn", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    client.put(f"/projects/{pid}/editable", json={"artery": _drawn_tree(0, 10, 120)})
+    empty = {"node_x": [], "node_y": [], "seg_radius": [], "seg_start": [], "seg_end": []}
+    assert client.put(f"/projects/{pid}/editable", json={"artery": empty}).status_code == 200
+    assert client.get(f"/projects/{pid}/editable").json()["artery"] is None
+    # clearing a tree that doesn't exist is a harmless no-op
+    assert client.put(f"/projects/{pid}/editable", json={"vein": empty}).status_code == 200
+
+
 def test_mask_makes_the_solved_domain_organ_shaped(client):
     pid = client.post("/projects", json={"name": "mask", "grid": SMALL_GRID,
                                          "params": FAST_PARAMS}).json()["id"]
@@ -1013,3 +1111,138 @@ def test_missing_project_and_result(client):
     assert client.get("/jobs/nope").status_code == 404
     pid = client.post("/projects", json={"name": "empty", "grid": SMALL_GRID}).json()["id"]
     assert client.get(f"/projects/{pid}/results").status_code == 409  # not run yet
+
+
+@pytest.mark.parametrize(("dim", "shape", "fill"), [
+    (2, "ellipse", "colonization"), (2, "kidney", "cco"), (2, "wedge", "none"),
+    (3, "ellipsoid", "colonization"), (3, "cylinder", "cco"),
+])
+def test_explore_grow_shapes_fills_and_dims(client, dim, shape, fill):
+    body = {"dim": dim, "shape": shape, "fill": fill, "generations": 3,
+            "n_points": 200, "n_terminals": 20, "nx": 20 if dim == 3 else 40, "ny": 46}
+    r = client.post("/explore/grow", json=body)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["dim"] == dim
+    assert d["stats"]["artery"]["segments"] >= 7          # 3 fractal generations at least
+    assert d["inflow"] > 0
+    seg_len = 8 if dim == 3 else 6
+    assert all(len(s) == seg_len for s in d["segments"])
+    if dim == 2:
+        assert len(d["outline"]) >= 3
+        assert d["field"]["shape"] == [40, 46]
+    else:
+        assert d["field"]["voxels"]
+        assert len(d["field"]["voxels"][0]) == 4
+
+
+@pytest.mark.parametrize("field", ["pressure", "flux", "tof"])
+def test_explore_grow_3d_computes_flux_tof_and_objective(client, field):
+    body = {"dim": 3, "shape": "ellipsoid", "fill": "none", "generations": 3, "nx": 16,
+            "field": field, "kind": "tof_std"}
+    d = client.post("/explore/grow", json=body).json()
+    assert d["field"]["name"] == field
+    vals = [v[3] for v in d["field"]["voxels"]]
+    assert all(np.isfinite(vals))
+    assert d["field"]["min"] <= d["field"]["max"]
+    assert d["kind"] == "tof_std"
+    assert np.isfinite(d["objective"])
+
+
+def test_explore_grow_generations_add_branches_and_roots_move(client):
+    def n_art(**kw):
+        body = {"fill": "none", "solve": False, **kw}
+        return client.post("/explore/grow", json=body).json()["stats"]["artery"]["segments"]
+    assert n_art(generations=2) < n_art(generations=3) < n_art(generations=4)
+    d = client.post("/explore/grow", json={"fill": "none", "solve": False,
+                                           "artery": {"root": [-30, 20], "angle": 60}}).json()
+    assert d["roots"]["artery"] == [-30, 20]
+    assert d["segments"][0][:2] == [-30, 20]                 # the trunk starts at the root
+
+
+def test_explore_grow_custom_polygon_and_fill_steps(client):
+    poly = [[-50, 10], [50, 10], [40, 150], [-40, 150]]
+    base = {"shape": "custom", "polygon": poly, "fill": "colonization", "solve": False}
+    few = client.post("/explore/grow", json={**base, "fill_steps": 3}).json()
+    many = client.post("/explore/grow", json={**base, "fill_steps": 30}).json()
+    assert few["outline"] == poly
+    assert few["stats"]["artery"]["segments"] < many["stats"]["artery"]["segments"]
+    bad = client.post("/explore/grow", json={"shape": "custom", "polygon": [[0, 0], [1, 1]]})
+    assert bad.status_code == 422
+
+
+def test_shapes_endpoints(client):
+    s = client.get("/shapes").json()
+    assert {"heart", "kidney", "brain", "liver", "lung"} <= set(s["2d"])
+    assert {"heart", "kidney", "brain", "liver", "lung"} <= set(s["3d"])
+    r = client.post("/shapes/polygon", json={"name": "heart", "domain": [0, 100, 0, 120]})
+    assert r.status_code == 200
+    poly = np.array(r.json()["polygon"])
+    assert poly[:, 0].min() >= 0
+    assert poly[:, 0].max() <= 100
+    assert client.post("/shapes/polygon", json={"name": "nope"}).status_code == 422
+    assert client.post("/shapes/polygon",
+                       json={"name": "heart", "domain": [5, 1, 0, 1]}).status_code == 422
+
+
+def test_explore_grow_extent_and_organs(client):
+    d = client.post("/explore/grow", json={"shape": "brain", "extent": 2.0, "fill": "none",
+                                           "solve": False}).json()
+    assert d["domain"] == [-140.0, 140.0, 0.0, 320.0]
+    # the brain's anatomical arterial entry (circle of Willis, below), scaled ×2
+    from perfusion import organs
+    anat = organs.roots("brain", 2, d["domain"])
+    assert d["roots"]["artery"] == pytest.approx(anat["artery"]["root"])
+    assert d["aims"]["artery"] == pytest.approx(90.0)
+    d3 = client.post("/explore/grow", json={"dim": 3, "shape": "heart", "nx": 14,
+                                            "twist": 70, "jitter": 0.5, "fill": "none",
+                                            "generations": 3}).json()
+    assert d3["inflow"] > 0
+    zs = [s[2] for s in d3["segments"]] + [s[5] for s in d3["segments"]]
+    xs = [s[0] for s in d3["segments"]] + [s[3] for s in d3["segments"]]
+    assert np.ptp(xs) > 1                                   # not confined to a plane
+    assert np.ptp(zs) > 1
+
+
+def test_explore_grow_large_domain_with_scaled_trees(client):
+    """The explorer opens at ×4 and can scale to ×16: scaled roots/calibre are valid."""
+    for e in (4, 16):
+        body = {"extent": e, "fill": "colonization", "nx": 50, "ny": 57,
+                "artery": {"root": [0, 8 * e], "radius": 2 * e},
+                "vein": {"root": [0, 152 * e], "angle": -90, "radius": 2.4 * e}}
+        r = client.post("/explore/grow", json=body)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["domain"] == [-70 * e, 70 * e, 0, 160 * e]
+        assert d["inflow"] > 0
+
+
+@pytest.mark.parametrize("dim", [2, 3])
+def test_explore_grow_places_roots_where_the_organ_attaches(client, dim):
+    """Picking an organ puts the artery/vein where they attach anatomically, aimed
+    into the tissue; a root the user places is respected."""
+    from perfusion import organs
+    shapes = ["kidney", "heart", "liver", "lung", "brain"]
+    roots = {}
+    for shape in shapes:
+        body = {"dim": dim, "shape": shape, "fill": "none", "solve": False, "nx": 16}
+        d = client.post("/explore/grow", json=body).json()
+        anat = organs.roots(shape, dim, d["domain"])
+        assert d["roots"]["artery"] == pytest.approx(anat["artery"]["root"])
+        assert d["roots"]["vein"] == pytest.approx(anat["vein"]["root"])
+        assert d["segments"][0][:dim] == pytest.approx(anat["artery"]["root"], abs=0.01)
+        roots[shape] = tuple(np.round(d["roots"]["artery"], 3))
+    assert len(set(roots.values())) == len(shapes)          # each organ differs
+    # kidney: artery and vein both at the hilum, pointing into the organ (+x)
+    k = client.post("/explore/grow", json={"dim": dim, "shape": "kidney", "fill": "none",
+                                           "solve": False, "nx": 16}).json()
+    if dim == 2:
+        assert k["aims"]["artery"] == pytest.approx(0.0)
+    else:
+        assert k["aims"]["artery"] == pytest.approx([1.0, 0.0, 0.0])
+    # a placed root wins over the anatomical default
+    mine = [1.0, 2.0] if dim == 2 else [10.0, 11.0, 12.0]
+    d = client.post("/explore/grow", json={"dim": dim, "shape": "kidney", "fill": "none",
+                                           "solve": False, "nx": 16,
+                                           "artery": {"root": mine}}).json()
+    assert d["roots"]["artery"] == mine

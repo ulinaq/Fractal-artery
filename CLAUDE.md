@@ -13,7 +13,7 @@ in `legacy/` (reference only — do not extend it). New work goes in
 pure compute engine (NumPy/SciPy only, no I/O/viz/web deps); `io`, `viz`,
 `segmentation`, `growth`, `optimize` are service layers built on it; `api`
 (FastAPI back-end — see `perfusion/api/`) sits on top and also serves the
-zero-build 2-D web `frontend/` (plain HTML/CSS/ES-modules, mounted at `/` by
+zero-build web `frontend/` — 2-D workspace, Tree explorer, 3-D viewer (plain HTML/CSS/ES-modules, mounted at `/` by
 `api.app._mount_frontend`, no build step). `api.app.create_app` is thin — it sets
 `app.state.store`/`jobs`, exposes `/health` + `/frontend-version`, mounts the
 frontend, and includes three `APIRouter` modules grouped by concern:
@@ -199,23 +199,30 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   lives in `store.document_from_project` / `project_from_document`; the frontend
   Project card has 💾 Save file / 📂 Load file.
 - **Interactive vessel editing (network/tree model)**: vessels are edited as a
-  **network** — nodes + edges, each edge carrying its own radius (extensible to
-  more per-edge attributes later) — *not* free polylines, which are inaccurate for
-  branching trees. The frontend **Edit** mode renders draggable node handles: drag
-  to move, click a node and the slider sets *that edge's* radius, ＋ Add branch
-  (click to grow a new edge from the selected node), 🗑 Delete node, then Save.
-  Segmented/grown/frog trees are already networks (edited via `GET`/`PUT
-  /projects/{id}/editable`, node-level `NetworkModel`; `null` for 3-D). Hand-drawn
-  strokes are folded into one network by `POST /projects/{id}/vectorize` (auto-run
-  when Edit is opened with only strokes): each stroke explodes into consecutive
-  2-point edges (bends stay as degree-2 nodes, each edge keeps its stroke radius),
-  shared endpoints snap into junctions, and the polylines are cleared so editing
-  and the solver see one graph. (`GET /vessels` exists and `openProject` restores
-  strokes.) A move/resize PUT omits `seg_start`/`seg_end` (topology preserved via
-  `dataclasses.replace`); an add/delete PUT includes them and `_rebuild_network`
-  reindexes, drops isolated (degree-0, non-inlet) nodes and re-derives
-  `node_role`/`seg_length`/`seg_angle` (fragments without an inlet are kept — their
-  leaves couple to Darcy). Radii clamp `>= 1e-3`; edits invalidate the stale result.
+  **network** — nodes + edges, each edge carrying its own radius — *not* free
+  polylines. The frontend **Vessels** tab (`frontend/edit.js`) *is* the editor:
+  click empty canvas to start a vessel and keep clicking to extend it, click a
+  node then empty space to branch, drag to move, click a vessel to *select the
+  segment* (its radius is then editable any time), double-click a vessel to split
+  it, Shift+click to join, Del to delete the selected node/segment. **Pruning**
+  (`core.geometry.prune_terminal_branches`, `POST /projects/{id}/prune`, MCP
+  `prune_vessel_tree`) is the inverse of growth: each step removes every terminal
+  branch (free end → nearest junction through degree-2 nodes), never the chain to
+  an inlet. **Inlets/outlets are network nodes**
+  (`inlet_nodes`; artery → `p_in`, vein → `p_out`), toggled on the selected node —
+  there is no separate I/O or Edit tab, and the old `project.inlets/outlets` points
+  are only a legacy path (snapped onto nodes on open, cleared on save). `PUT
+  /projects/{id}/editable` with topology rebuilds a tree via `helpers.rebuild_network`
+  and can also **create** a tree the project lacks or **remove** one (zero
+  segments); a move/resize PUT omits `seg_start`/`seg_end`. `_rebuild_network`
+  reindexes, drops isolated non-inlet nodes and re-derives `node_role`/`seg_length`/
+  `seg_angle`. `io.save_network` persists `inlet_nodes`/`node_z`, so multiple
+  inlets/outlets survive a reload. `runner.validate_run` rejects a tree whose every
+  end is an inlet/outlet (no terminals → no tissue exchange). Legacy hand-drawn
+  polylines are folded in once by `POST /vectorize` when a project opens.
+  The **Tissue** tab (`frontend/tissue.js`) edits organ/lesion/hotspot polygons the
+  same way (drag vertices, click an outline to insert, drag inside to move); only
+  the layer chosen in *Draw* is hit-testable. Edits invalidate the stale result.
 
 ## Recent web/API additions
 
@@ -233,11 +240,33 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   with actionable messages (empty mask, mask split into disconnected Darcy regions,
   `p_in == p_out`); `jobs._describe_error` surfaces those verbatim and adds a
   traceback tail for unexpected errors. The frontend shows it in a styled box.
+- **Viewport** (`frontend/viewport.js`): every canvas fills its stage (HiDPI) with
+  zoom/pan/fit. Map coordinates only through `toCanvas`/`toDomain` (workspace,
+  `core.js`) or the explorer's `tc`/`td` — never through raw canvas width/height.
+  The workspace domain is per project (`setDomain`, from `grid.domain_limit`).
 - **Frontend UX**: global undo/redo (`recordHistory` snapshots the editable
-  geometry; ⌘/Ctrl+Z), context-aware keyboard shortcuts (Del/Enter/A/V/G/R/Esc/1–5),
-  a build-version badge (`GET /frontend-version`) that flags a stale tab, edge-aware
-  node picking, and a 2-D/3-D view toggle that keeps the project
+  geometry; ⌘/Ctrl+Z), context-aware keyboard shortcuts (Del/Enter/I/A/V/G/R/Esc/1–3),
+  a build-version badge (`GET /frontend-version`) that flags a stale tab, three
+  tabs (Vessels · Tissue · Result), and a 2-D/3-D view toggle that keeps the project
   (`GET /projects/{id}/view3d`).
+
+- **Tree explorer growth** (`perfusion/treegen.py`, `POST /explore/grow`, MCP
+  `grow_trees_in_tissue`): a fractal skeleton (`grow_tree(max_generations=)` /
+  `grow_tree_3d`) from placed roots, then optional space filling. `growth`'s
+  colonisation/CCO/sampling are **dimension-agnostic** (2-D or 3-D by the base
+  network / mask), and `pipeline3d` now snaps terminals outside a 3-D mask to the
+  nearest active cell (`_snap_to_active_3d`), like 2-D — keep both invariants.
+  `grow_tree_3d` rotates each bifurcation's plane by `twist` relative to its
+  parent's (the old fixed-axis rule left every generation in one plane — keep the
+  volumetric regression test); optional `gamma`/`exponent` (Murray asymmetry),
+  `jitter`, `seed`. `run_hybrid_3d` also returns `flux` + `tof` (masked faces carry
+  no flux). Organ shapes live in `perfusion/organs.py` (2-D outlines, 3-D masks);
+  every shape must stay **one connected region** (`tests/test_organs.py`).
+  `organs.roots(name, dim, domain, size)` gives each organ's **anatomical** artery
+  inlet / vein outlet + trunk aim (renal hilum, aortic root, porta hepatis, circle
+  of Willis, …); `/explore/grow` and the MCP tool use them whenever a root isn't
+  sent, and the explorer follows them until the user moves a root. A new organ
+  needs an outline/mask *and* a roots entry whose trunks lead into the tissue.
 
 ## Gotchas
 

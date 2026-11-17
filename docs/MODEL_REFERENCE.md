@@ -154,6 +154,31 @@ Branching stops when a segment radius falls below $r_{\min}$.
 > $(\phi_1,\phi_2)$ and $(\delta,\beta)$; `geometry.grow_tree` grows the tree and
 > `arterial_tree` / `venous_tree` are the convenience wrappers.
 
+## 3.2 Trees in three dimensions
+
+In 3-D the two children of a bifurcation lie in a *branching plane* through the
+parent direction $\mathbf d$. If every plane were chosen relative to a fixed global
+axis, a trunk along that axis would keep all generations in one plane. Instead each
+plane normal is rotated about $\mathbf d$ by a **twist** angle $\theta_t$ (90° by
+default — the alternating pattern of real vascular trees) relative to the parent's
+plane, so the tree fills the volume from its second generation. Optional seeded
+jitter perturbs the twist, branch angles and lengths for a less regular tree.
+
+> **Code.** `geometry.grow_tree_3d(..., gamma, exponent, twist, jitter, seed)`.
+
+## 3.3 Growing into tissue, and pruning
+
+A fractal skeleton can be grown on until it fills a tissue region by **space
+colonisation** (tips advance toward attraction points sampled in the tissue) or
+**constrained constructive optimisation** (terminals added one at a time at the
+nearest point of the tree), both with Murray-law radii and both in 2-D or 3-D.
+**Pruning** is the inverse: each step removes every terminal branch back to its
+junction, never the trunk to an inlet/outlet.
+
+> **Code.** `growth.grow_network`, `growth.cco_grow`,
+> `geometry.prune_terminal_branches`; organ tissue shapes and their anatomical
+> vessel entry points in `organs` (`polygon`, `mask_3d`, `roots`).
+
 ---
 
 # 4. The capillary bed — Darcy porous medium
@@ -336,6 +361,17 @@ optimisation target in §9).
 > **Code.** `darcy.upwind_operator` (shared connectivity),
 > `timeofflight.flux_magnitude`, `timeofflight.time_of_flight`.
 
+## 7.3 In three dimensions
+
+The 3-D hybrid computes the same quantities on the voxel bed: interior face fluxes
+(zero across the mask boundary, so no flow leaks out of an organ-shaped tissue), the
+cell-centred magnitude $|\mathbf v| = \sqrt{q_x^2+q_y^2+q_z^2}$, and the upwind
+time-of-flight with pore volume $h_x h_y h_z\,\varphi$.
+
+> **Code.** `darcy3d.face_fluxes_3d`, `darcy3d.flux_magnitude_3d`,
+> `darcy3d.upwind_operator_3d`, `timeofflight.time_of_flight_3d`; returned by
+> `pipeline3d.run_hybrid_3d` as `flux`, `tof`.
+
 ---
 
 # 8. Tracer transport and tracer-kinetic models
@@ -429,6 +465,9 @@ under two families of objective:
 | Fåhræus–Lindqvist viscosity | §2.2 | `viscosity.apparent_viscosity` |
 | Bifurcation geometry (Murray) | §3.1 | `parameters.bifurcation_geometry` |
 | Fractal tree growth | §3 | `geometry.grow_tree` |
+| 3-D trees (twisting planes) | §3.2 | `geometry.grow_tree_3d` |
+| Space filling, pruning | §3.3 | `growth.grow_network`, `growth.cco_grow`, `geometry.prune_terminal_branches` |
+| Organ domains + vessel entries | §3.3 | `organs.polygon`, `organs.mask_3d`, `organs.roots` |
 | Darcy + TPFA | §4.1–4.2 | `darcy.transmissibilities`, `darcy.tpfa_operator` |
 | Domain mask | §4.3 | `darcy.transmissibilities`, `darcy.tpfa_operator` |
 | Mollifier point source | $f=Ce^{-1/(1-|x|^2)}$ | `darcy.mollifier` |
@@ -438,6 +477,7 @@ under two families of objective:
 | Fixed-point nonlinear solve | §5.4 | `network.solve_nonlinear` |
 | Direct connections + $\gamma$ | §6 | `direct.*` |
 | Flux & time-of-flight | §7 | `timeofflight.*`, `darcy.upwind_operator` |
+| 3-D flux & time-of-flight | §7.3 | `darcy3d.flux_magnitude_3d`, `timeofflight.time_of_flight_3d` |
 | Tracer transport (theta rule) | §8.1 | `transport.transport_forward` |
 | Tracer-kinetic models | §8.2 | `tkm.*` |
 | Optimisation objectives | §9 | `optimize.objective` |
