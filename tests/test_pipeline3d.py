@@ -132,3 +132,76 @@ def test_3d_monolithic_coupling_matches_schur():
     assert np.allclose(res_s.tof[mask], res_m.tof[mask], rtol=1e-8)
     assert np.allclose(res_s.solution.terminal_flux, res_m.solution.terminal_flux,
                        rtol=1e-9, atol=1e-14)
+
+
+# --- 3-D analyses: tracer transport, oxygen, kinetic maps, radius adaptation ---------
+
+def _solved_3d():
+    art, ven, grid, dom = _system(max_gen=4)
+    res = run_hybrid_3d(Parameters(p_in=10.0, p_out=0.0, mu=1.0), grid, art, ven, dom, eps=2.0)
+    return res
+
+
+def test_3d_tracer_transport_conserves_and_washes_out():
+    from perfusion.core import tkm, transport
+
+    res = _solved_3d()
+    q = res.solution.terminal_flux
+    finite = res.tof[np.isfinite(res.tof)]
+    dur = 6.0 * float(np.percentile(finite, 80))
+    t = np.linspace(0.0, dur, 300)
+    aif = tkm.gamma_variate_aif(t, t0=0.05 * dur, A=3.0, B=0.05 * dur)
+    frames = transport.transport_forward(res.grid, res.fx, res.fy, res.sources, q, aif,
+                                         t[1] - t[0], theta=1.0, fz=res.fz)
+    assert frames.shape == (len(t), res.grid.nx, res.grid.ny, res.grid.nz)
+    assert np.all(frames >= 0.0)
+    mass = frames.reshape(len(t), -1).sum(axis=1)
+    assert mass.max() > 0
+    assert mass[-1] < 0.5 * mass.max()              # the bolus washes out through the veins
+    # explicit-Euler CFL bound is finite and positive in 3-D too
+    assert 0 < transport.cfl_limit(res.grid, res.fx, res.fy, res.sources, q, fz=res.fz) < np.inf
+
+    # model-free kinetic maps work voxel-wise in 3-D
+    maps = tkm.kinetic_maps(frames, t, aif, mask=res.grid.mask)
+    dec = tkm.deconvolution_maps(frames[::6], t[::6], aif[::6], mask=res.grid.mask)
+    for m in (maps["Fp"], dec["CBV"]):
+        assert m.shape == res.grid.mask.shape
+        assert np.isfinite(m[res.grid.mask]).all()
+
+
+def test_3d_oxygen_extraction():
+    from perfusion.core.oxygen import oxygen_from_result
+
+    res = _solved_3d()
+    ox = oxygen_from_result(res, k=1.0)
+    sat = ox.saturation[res.grid.mask]
+    assert ox.concentration.shape == res.grid.mask.shape
+    assert np.all((sat >= 0) & (sat <= 1 + 1e-9))
+    assert 0.0 < ox.oef < 1.0
+    assert oxygen_from_result(res, k=3.0).oef > ox.oef     # faster uptake extracts more
+    # diffusion uses the 3-D TPFA Laplacian and stays well-posed
+    assert 0.0 < oxygen_from_result(res, k=1.0, diffusivity=0.5).oef < 1.0
+
+
+def test_3d_adaptation_moves_toward_murray():
+    from perfusion.core.pipeline import run_adaptation
+
+    art, ven, grid, dom = _system(max_gen=4)
+    ad = run_adaptation(Parameters(p_in=10.0, p_out=0.0, mu=1.0), grid, target_exponent=3.0,
+                        domain_limit=dom, art=art, ven=ven, n_iter=25)
+    assert ad.art.is_3d
+    assert ad.ven.is_3d
+    assert abs(ad.murray_exponent - 3.0) <= abs(ad.murray_start - 3.0)
+    assert not np.allclose(ad.art.seg_radius, art.seg_radius)      # radii remodelled
+
+
+def test_3d_reused_coupling_matches_fresh_solve():
+    from perfusion.core.pipeline3d import darcy_coupling_3d
+
+    art, ven, grid, dom = _system(max_gen=4)
+    prm = Parameters(p_in=10.0, p_out=0.0, mu=1.0)
+    for coupling in ("schur", "monolithic"):
+        d = darcy_coupling_3d(grid, art, ven, dom, 2.0, coupling)
+        a = run_hybrid_3d(prm, grid, art, ven, dom, eps=2.0, darcy=d)
+        b = run_hybrid_3d(prm, grid, art, ven, dom, eps=2.0, coupling=coupling)
+        assert np.allclose(a.pressure, b.pressure, equal_nan=True)

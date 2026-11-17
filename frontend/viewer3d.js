@@ -35,16 +35,29 @@ async function load() {
   setData(await r.json());
 }
 
+const OXYGEN = new Set(["saturation", "consumption"]);
+const anim = { idx: 0, playing: true, last: 0 };     // tracer (flow video) playback
+
 async function loadProject() {
   $("model-row").style.display = "none";     // project mode: no demo picker
   $("gen-row").style.display = "none";
-  $("status").textContent = "loading project…";
-  const r = await fetch(`/projects/${PROJECT}/view3d?field=${$("v3-field").value}`);
+  const field = $("v3-field").value;
+  $("v3-k-row").hidden = !OXYGEN.has(field);
+  $("status").textContent = OXYGEN.has(field) ? "solving oxygen…" : "loading project…";
+  const r = await fetch(`/projects/${PROJECT}/view3d?field=${field}&k=${$("v3-k").value || 1}`);
+  if (r.status === 409 && field !== "pressure") {   // tracer field before the flow exists
+    $("status").textContent = "compute the 🌊 flow first for tracer fields";
+    $("status").className = "status err";
+    $("v3-field").value = "pressure";
+    return loadProject();
+  }
   if (!r.ok) {
     $("status").textContent = r.status === 404 ? "project not found" : "3-D view unavailable";
     $("status").className = "status err"; return;
   }
   setData(await r.json());
+  if (data.tracer) startAnimation();
+  else $("v3-play-row").hidden = true;
   if (data.dim === 3) show3dProject();
   $("status").textContent = data.has_result
     ? "showing solved result" : "showing vessels — run a simulation for the 3-D field";
@@ -65,24 +78,116 @@ function show3dProject() {
        ["MTT", s.mtt], ["CTH", s.cth]]
       .map(([k, v]) => `<div class="stat"><b>${f(v)}</b><span>${k}</span></div>`).join("")
     : "";
+  if (data.oef != null) {
+    $("v3-summary").innerHTML += `<div class="stat"><b>${f(data.oef)}</b><span>O₂ extraction (OEF)</span></div>`;
+  }
   $("v3-run").textContent = data.has_result ? "↻ Re-run 3-D simulation" : "▶ Run 3-D simulation";
+  $("v3-flow-card").hidden = !data.has_result;    // flow needs a solved field
+  $("v3-tree-card").hidden = false;
+}
+
+function startAnimation() {
+  const t = data.tracer;
+  $("v3-play-row").hidden = false;
+  $("v3-scrub").max = t.frames.length - 1;
+  anim.idx = Math.min(anim.idx, t.frames.length - 1);
+  showFrame();
+}
+
+function showFrame() {
+  const t = data.tracer;
+  if (!t) return;
+  $("v3-scrub").value = anim.idx;
+  $("v3-time").textContent = `t = ${t.times[anim.idx].toFixed(2)}`;
+}
+
+// POST a job (run / tracer) and wait for it; returns the final job record.
+async function runJob(path, body = {}) {
+  const job = await (await fetch(`/projects/${PROJECT}/${path}`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).json();
+  let st = job;
+  while (st.state !== "done" && st.state !== "error") {
+    await new Promise((r) => setTimeout(r, 400));
+    st = await (await fetch(`/jobs/${job.id}`)).json();
+  }
+  return st;
+}
+
+async function postJSON(path, body) {
+  const r = await fetch(`/projects/${PROJECT}/${path}`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : `${path} failed (${r.status})`);
+  return j;
 }
 
 async function run3d() {
   const btn = $("v3-run"); btn.disabled = true;
   $("v3-run-info").textContent = "solving…";
   try {
-    const job = await (await fetch(`/projects/${PROJECT}/run`, {
-      method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json();
-    let st = job;
-    while (st.state !== "done" && st.state !== "error") {
-      await new Promise((r) => setTimeout(r, 400));
-      st = await (await fetch(`/jobs/${job.id}`)).json();
-    }
+    const st = await runJob("run");
     $("v3-run-info").textContent = st.state === "done" ? "" : (st.error || "run failed");
+    $("v3-kin").textContent = "";
+    if (!["pressure", "flux", "tof"].includes($("v3-field").value)) $("v3-field").value = "pressure";
     await loadProject();
   } finally { btn.disabled = false; }
 }
+
+async function flow3d() {
+  const btn = $("v3-flow"); btn.disabled = true;
+  $("v3-kin").textContent = "advecting the bolus through the 3-D bed…";
+  try {
+    const st = await runJob("tracer", { n_frames: 40 });
+    if (st.state !== "done") { $("v3-kin").textContent = st.error || "flow failed"; return; }
+    $("v3-field").value = "tracer";
+    anim.idx = 0; anim.playing = true; $("v3-play").textContent = "⏸";
+    await loadProject();
+    const k = await (await fetch(`/projects/${PROJECT}/kinetics?model=1CM`)).json();
+    const f = (v) => (v == null ? "–" : Math.abs(v) < 1e-3 || Math.abs(v) > 1e4 ? v.toExponential(2) : v.toFixed(3));
+    $("v3-kin").textContent = `1-compartment fit of the tissue curve: Fp = ${f(k.Fp)}, vp = ${f(k.vp)}`
+      + " · pick Fp / vp / CBV / MTT for voxel maps";
+  } finally { btn.disabled = false; }
+}
+
+// grow / prune / adapt the 3-D trees, then re-show (the old result is invalidated)
+async function treeOp(kind) {
+  const info = $("v3-tree-info");
+  const target = $("v3-target").value;
+  ["v3-grow", "v3-prune", "v3-adapt"].forEach((id) => ($(id).disabled = true));
+  info.textContent = { grow: "growing…", prune: "pruning…", adapt: "remodelling radii (solves repeatedly)…" }[kind];
+  try {
+    let msg;
+    if (kind === "grow") {
+      const r = await postJSON("grow", { target, method: $("v3-method").value,
+                                         n_points: Number($("v3-npts").value) || 60 });
+      msg = `${target}: ${r.n_segments} segments, ${r.n_terminals} terminals`;
+    } else if (kind === "prune") {
+      const r = await postJSON("prune", { target, steps: 1 });
+      msg = `${target}: removed ${r.n_removed} segments → ${r.n_segments} left`;
+    } else {
+      const r = await postJSON("adapt", {});
+      msg = `Murray exponent ${r.murray_start.toFixed(2)} → ${r.murray_final.toFixed(2)} in ${r.n_iter} steps`;
+    }
+    info.textContent = msg + " · re-run to solve the new trees";
+    $("v3-field").value = "pressure"; $("v3-kin").textContent = "";
+    await loadProject();
+  } catch (e) {
+    info.textContent = e.message;
+  } finally {
+    ["v3-grow", "v3-prune", "v3-adapt"].forEach((id) => ($(id).disabled = false));
+  }
+}
+$("v3-flow").addEventListener("click", () => flow3d().catch((e) => { $("v3-kin").textContent = e.message; }));
+$("v3-grow").addEventListener("click", () => treeOp("grow"));
+$("v3-prune").addEventListener("click", () => treeOp("prune"));
+$("v3-adapt").addEventListener("click", () => treeOp("adapt"));
+$("v3-k").addEventListener("change", () => loadProject().catch(() => {}));
+$("v3-play").addEventListener("click", () => {
+  anim.playing = !anim.playing; $("v3-play").textContent = anim.playing ? "⏸" : "▶";
+});
+$("v3-scrub").addEventListener("input", (e) => {
+  anim.idx = Number(e.target.value); anim.playing = false; $("v3-play").textContent = "▶"; showFrame();
+});
 $("v3-run").addEventListener("click", () => run3d().catch((e) => { $("v3-run-info").textContent = e.message; }));
 $("v3-field").addEventListener("change", () => loadProject().catch(() => {}));
 
@@ -91,7 +196,8 @@ function setData(d) {
   const [x0, x1, y0, y1, z0, z1] = data.domain;
   center = [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2];
   span = Math.max(x1 - x0, y1 - y0, z1 - z0);
-  $("info").textContent = `${data.segments.length} segments · ${data.pressure.voxels.length} field points · grid ${data.shape.join("×")}`;
+  const nPts = data.tracer ? data.tracer.xyz.length : data.pressure.voxels.length;
+  $("info").textContent = `${data.segments.length} segments · ${nPts} field points · grid ${data.shape.join("×")}`;
   if (!PROJECT) { $("status").textContent = "ready"; $("status").className = "status ok"; }
 }
 
@@ -113,7 +219,25 @@ function render() {
   const zs = vp.scale / 500;                      // size factor that follows the zoom
   if (!data) return;
 
-  if ($("show-field").checked) {
+  if ($("show-field").checked && data.tracer) {          // flow video: one frame of the bolus
+    const t = data.tracer, vals = t.frames[anim.idx], vmax = t.vmax || 1;
+    const alpha = Number($("opacity").value) / 100;
+    const pts = [];
+    for (let i = 0; i < t.xyz.length; i++) {
+      const c = vals[i] / vmax;
+      if (c < 0.02) continue;                          // empty tissue stays transparent
+      const [sx, sy, depth] = project(t.xyz[i][0], t.xyz[i][1], t.xyz[i][2]);
+      pts.push({ sx, sy, depth, t: Math.min(1, c) });
+    }
+    pts.sort((a, b) => a.depth - b.depth);
+    for (const p of pts) {
+      ctx.globalAlpha = alpha * (0.35 + 0.65 * p.t);
+      ctx.fillStyle = viridisCss(p.t);
+      const r = Math.max(1.2, 2.6 * zs);
+      ctx.fillRect(p.sx - r, p.sy - r, 2 * r, 2 * r);
+    }
+    ctx.globalAlpha = 1;
+  } else if ($("show-field").checked) {
     const { min, max, voxels } = data.pressure;
     const span = (max - min) || 1;
     const alpha = Number($("opacity").value) / 100;
@@ -130,7 +254,7 @@ function render() {
     ctx.globalAlpha = 1;
   }
 
-  if (!data.pressure.voxels.length && data.tissue_points) {   // unsolved 3-D project
+  if (!data.pressure.voxels.length && data.tissue_points && !data.tracer) {   // unsolved 3-D project
     ctx.fillStyle = "rgba(52,211,153,.35)";
     for (const v of data.tissue_points) {
       const [sx, sy] = project(v[0], v[1], v[2]);
@@ -150,8 +274,13 @@ function render() {
   }
 }
 
-function loop() {
+function loop(now) {
   if (view.spin && data) view.yaw += 0.006;
+  if (data && data.tracer && anim.playing && now - anim.last > 110) {   // ~9 frames/s
+    anim.last = now;
+    anim.idx = (anim.idx + 1) % data.tracer.frames.length;
+    showFrame();
+  }
   render();
   requestAnimationFrame(loop);
 }
@@ -176,4 +305,4 @@ $("model").addEventListener("change", () => load().catch(() => {}));
 const initModel = new URLSearchParams(location.search).get("model");
 if (initModel === "frog" || initModel === "synthetic") $("model").value = initModel;
 load().catch((e) => { $("status").textContent = e.message; });
-loop();
+requestAnimationFrame(loop);

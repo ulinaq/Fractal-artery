@@ -206,7 +206,9 @@ upwind system on `darcy3d.upwind_operator_3d` with pore volume `V = hx·hy·hz·
 longer at the venous drains, longest in stagnant tissue.
 
 **Tracer transport** (`transport`, θ-rule, Eq. 5.7) — advection of a contrast bolus,
-diffusion neglected:
+diffusion neglected (2-D, or 3-D by passing the z-face fluxes `fz=` with a `Grid3D` —
+the same operator over `darcy3d.upwind_operator_3d`; oxygen, `tkm.kinetic_maps` /
+`deconvolution_maps` and `run_adaptation` are likewise dimension-agnostic):
 
 ```
 V_pore dC/dt = A C + inject·c_a(t) − extract·C
@@ -274,7 +276,7 @@ flow-scaled residue `k = Fp·R`:
 
 Discretised on the upwind connectivity: `(A − diag(extract) − k_eff·diag(V) − D·L) C =
 −inject·c_art`. `k` is a **dimensionless Damköhler number**: `k_eff = k · (inflow/volume)
-= k/MTT`, so the sink scales with flow and the global extraction spans `(0,1)`. With
+= k/MTT` (volume = the *active* tissue, so an organ mask does not dilute the rate), so the sink scales with flow and the global extraction spans `(0,1)`. With
 `k>0` the operator is a non-singular M-matrix → `C ≥ 0`, mass-conservative:
 
 ```

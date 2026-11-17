@@ -248,13 +248,15 @@ async def upload_image(request: Request, kind: str = "artery", min_size: int = 2
 
 
 @router.post("/projects/{pid}/grow", response_model=GrowInfo)
-def grow_vessels(body: GrowRequest | None = None, project: Project = Depends(get_project_2d),
+def grow_vessels(body: GrowRequest | None = None, project: Project = Depends(get_project),
                  store: ProjectStore = Depends(get_store)) -> GrowInfo:
     """Grow the arterial *or* venous tree into the tissue (``target``).
 
     The base is the drawn/segmented vessels of that tree (shape preserved, so
     branches extend the existing vessels rather than a straight trunk), else
-    the default fractal tree. Artery and vein grow independently.
+    the default fractal tree. Artery and vein grow independently. On a **3-D
+    project** the tree grows through the 3-D tissue mask (colonisation and CCO are
+    dimension-agnostic); hotspot density maps are 2-D only.
     """
     req = body or GrowRequest()
     if req.method not in ("colonization", "cco"):
@@ -263,11 +265,15 @@ def grow_vessels(body: GrowRequest | None = None, project: Project = Depends(get
         raise HTTPException(422, "target must be 'artery' or 'vein'")
     domain_limit = project.grid.domain_limit
     nx, ny = project.grid.nx, project.grid.ny
-    mask = (rasterize_mask(nx, ny, domain_limit, project.regions)
-            if project.regions else np.ones((nx, ny), bool))
-    # data-constrained growth: a demand map from the drawn hotspots (baseline 1)
     density = None
-    if project.hotspots:
+    if project.grid.is_3d:                          # the 3-D raster tissue
+        grid3, domain_limit = runner.build_grid3d(project)
+        mask = grid3.mask
+    else:
+        mask = (rasterize_mask(nx, ny, domain_limit, project.regions)
+                if project.regions else np.ones((nx, ny), bool))
+    # data-constrained growth: a demand map from the drawn hotspots (baseline 1)
+    if project.hotspots and not project.grid.is_3d:
         from ..core.geometry import rasterize_permeability
         density = rasterize_permeability(
             nx, ny, domain_limit,
@@ -334,14 +340,14 @@ def prune_vessels(body: PruneRequest | None = None, project: Project = Depends(g
 
 
 @router.post("/projects/{pid}/adapt", response_model=AdaptInfo)
-def adapt_vessels(body: AdaptRequest | None = None, project: Project = Depends(get_project_2d),
+def adapt_vessels(body: AdaptRequest | None = None, project: Project = Depends(get_project),
                   store: ProjectStore = Depends(get_store)) -> AdaptInfo:
     """Structurally adapt the vessel radii toward Murray's law (Pries–Secomb).
 
     Wall-shear-driven remodelling evolves the arterial + venous radii until the
     ``|Q| ∝ r^k`` exponent reaches ``target_exponent`` (early-stopping at the closest
     approach). The remodelled trees replace the project's networks; any stale result
-    is invalidated."""
+    is invalidated. Works on 2-D and 3-D projects."""
     req = body or AdaptRequest()
     try:
         ad = runner.adapt_network(project, target_exponent=req.target_exponent,

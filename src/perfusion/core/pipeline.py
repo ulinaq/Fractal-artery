@@ -286,11 +286,11 @@ class AdaptationResult:
     n_iter: int
 
 
-def run_adaptation(prm: Parameters, grid: Grid, target_exponent: float = 3.0,
-                   domain_limit: tuple[float, float, float, float] = (-70, 70, 0, 160),
+def run_adaptation(prm: Parameters, grid, target_exponent: float = 3.0,
+                   domain_limit: tuple = (-70, 70, 0, 160),
                    rate: float = 0.05, n_iter: int = 60,
                    art: Network | None = None, ven: Network | None = None,
-                   eps: float = 4.0) -> AdaptationResult:
+                   eps: float | None = None) -> AdaptationResult:
     """Structurally adapt vessel radii toward Murray's law (reduced Pries–Secomb).
 
     Iterates: solve the hybrid flow → compute each segment's wall shear → nudge radii
@@ -300,6 +300,10 @@ def run_adaptation(prm: Parameters, grid: Grid, target_exponent: float = 3.0,
     emergent optimum; since the pure-shear stimulus keeps over-differentiating past it,
     the loop **early-stops at the closest approach** to ``target_exponent`` and returns
     that Murray-optimal network. Radii are bounded to ``[0.1, 10]×`` their initial value.
+
+    ``grid`` may be a 2-D :class:`Grid` or a :class:`~perfusion.core.darcy3d.Grid3D`
+    (then ``art``/``ven`` are 3-D trees and ``domain_limit`` the 6-value window);
+    ``eps`` defaults to each path's mollifier radius (4 in 2-D, 2 in 3-D).
     """
     art = geometry.arterial_tree(prm) if art is None else art
     ven = geometry.venous_tree(prm) if ven is None else ven
@@ -313,12 +317,24 @@ def run_adaptation(prm: Parameters, grid: Grid, target_exponent: float = 3.0,
     # Adaptation only changes radii, never terminal positions, so the Darcy terminal
     # response is constant across every iteration — compute it once and reuse it (the
     # dominant per-solve cost); only the network resistances change and are re-solved.
-    tcells = _terminal_cells(grid, art, ven, domain_limit)
-    resp = darcy.terminal_response(grid, tcells, eps)
+    if isinstance(grid, Grid):
+        eps = 4.0 if eps is None else eps
+        resp = darcy.terminal_response(grid, _terminal_cells(grid, art, ven, domain_limit), eps)
+
+        def solve(a, v):
+            return run_hybrid(prm, grid, domain_limit=domain_limit, eps=eps, art=a, ven=v,
+                              darcy_response=resp)
+    else:                                            # 3-D: same loop, 3-D Darcy coupling
+        from .pipeline3d import darcy_coupling_3d, run_hybrid_3d
+
+        eps = 2.0 if eps is None else eps
+        coupling = darcy_coupling_3d(grid, art, ven, domain_limit, eps)
+
+        def solve(a, v):
+            return run_hybrid_3d(prm, grid, a, v, domain_limit, eps=eps, darcy=coupling)
 
     # fixed shear set-point = the initial mean wall shear (on-scale, so radii don't drift uniformly)
-    first = run_hybrid(prm, grid, domain_limit=domain_limit, eps=eps, art=art, ven=ven,
-                       darcy_response=resp)
+    first = solve(art, ven)
     tau0 = adaptation.wall_shear_stress(art.seg_radius, first.solution.q_a, prm.mu)
     tau_ref = float(tau0[tau0 > 0].mean()) if np.any(tau0 > 0) else 1.0
 
@@ -327,8 +343,7 @@ def run_adaptation(prm: Parameters, grid: Grid, target_exponent: float = 3.0,
     best_err = np.inf
     result = first
     for it in range(max(1, n_iter)):
-        result = run_hybrid(prm, grid, domain_limit=domain_limit, eps=eps, art=art, ven=ven,
-                            darcy_response=resp)
+        result = solve(art, ven)
         k = exponent(art, ven, result.solution)
         history.append(k)
         err = abs(k - target_exponent)

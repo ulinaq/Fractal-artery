@@ -35,7 +35,7 @@ def run_project(body: RunRequest | None = None, project: Project = Depends(get_p
 
 
 @router.post("/projects/{pid}/tracer", response_model=JobInfo)
-def run_tracer(body: TracerRequest | None = None, project: Project = Depends(get_project_2d),
+def run_tracer(body: TracerRequest | None = None, project: Project = Depends(get_project),
                jobs=Depends(get_jobs)) -> JobInfo:
     req = body or TracerRequest()
     jid = jobs.submit(project.id, "tracer", req.model_dump())
@@ -114,7 +114,7 @@ def transit_distribution(pid: str, bins: int = 40, k: float = 0.0,
 
 @router.get("/projects/{pid}/kinetics")
 def tracer_kinetics(pid: str, model: str = "1CM",
-                    project: Project = Depends(get_project_2d),
+                    project: Project = Depends(get_project),
                     store: ProjectStore = Depends(get_store)) -> dict:
     """Fit a tracer-kinetic model to the computed tracer's tissue curve.
 
@@ -129,12 +129,7 @@ def tracer_kinetics(pid: str, model: str = "1CM",
     d = store.load_tracer(pid)
     frames, mask, times = d["frames"], d["mask"], d["times"]
     conc = np.array([float(np.nanmean(f[mask])) if mask.any() else 0.0 for f in frames])
-    if "aif" in d:
-        ca = np.asarray(d["aif"], float)
-    else:                                             # old blob: reconstruct the bolus shape
-        dur = float(times[-1]) if len(times) else 1.0
-        ca = tkm.gamma_variate_aif(times, t0=0.08 * dur, A=3.0, B=max(0.06 * dur, 1e-6))
-        ca = ca / ca.max() if ca.max() > 0 else ca
+    ca = helpers.tracer_aif(d)
     try:
         r = tkm.fit(times, ca, conc, model=model)
     except ValueError as exc:
@@ -161,7 +156,7 @@ _DECONV_FIELDS = ("Fp", "CBV", "MTT")
 @router.get("/projects/{pid}/kinetics/maps", response_model=FieldResponse)
 def kinetic_map(pid: str, field: str = "Fp", method: str = "semi",
                 oi: float = 0.1, osvd: bool = False,
-                project: Project = Depends(get_project_2d),
+                project: Project = Depends(get_project),
                 store: ProjectStore = Depends(get_store)) -> FieldResponse:
     """Voxel-wise parametric map from the tracer.
 
@@ -172,8 +167,6 @@ def kinetic_map(pid: str, field: str = "Fp", method: str = "semi",
     uses the block-circulant, delay-insensitive **oSVD** variant. Absolute deconvolution
     accuracy needs the transit time well-sampled (raise the tracer's ``n_frames``);
     relative maps (rCBF/rCBV/rMTT) are robust — the clinical norm."""
-    from ..core import tkm
-
     if not project.has_tracer:
         raise HTTPException(409, "no tracer yet; POST to /tracer first")
     allowed = _DECONV_FIELDS if method == "deconv" else _SEMI_FIELDS
@@ -181,18 +174,7 @@ def kinetic_map(pid: str, field: str = "Fp", method: str = "semi",
         raise HTTPException(404, "method must be 'semi' or 'deconv'")
     if field not in allowed:
         raise HTTPException(404, f"field must be one of {allowed} for method='{method}'")
-    d = store.load_tracer(pid)
-    times, frames, mask = d["times"], d["frames"], d["mask"]
-    if "aif" in d:
-        ca = np.asarray(d["aif"], float)
-    else:
-        dur = float(times[-1]) if len(times) else 1.0
-        ca = tkm.gamma_variate_aif(times, t0=0.08 * dur, A=3.0, B=max(0.06 * dur, 1e-6))
-    if method == "deconv":
-        m = tkm.deconvolution_maps(frames, times, ca, mask=mask, oi=float(oi),
-                                   circulant=bool(osvd))[field]
-    else:
-        m = tkm.kinetic_maps(frames, times, ca, mask=mask)[field]
+    m = helpers.tracer_map(store.load_tracer(pid), field, method, oi, osvd)
     data = np.where(np.isfinite(m), m, None)
     return FieldResponse(name=field, shape=m.shape, data=data.tolist())
 
@@ -202,7 +184,7 @@ _OXYGEN_FIELDS = ("saturation", "consumption", "concentration")
 
 @router.get("/projects/{pid}/oxygen")
 def oxygen_map(pid: str, field: str = "saturation", k: float = 1.0, c_art: float = 1.0,
-               diffusivity: float = 0.0, project: Project = Depends(get_project_2d),
+               diffusivity: float = 0.0, project: Project = Depends(get_project),
                store: ProjectStore = Depends(get_store)) -> dict:
     """Steady oxygen / solute map on the Darcy field (Krogh-style advection–reaction).
 
@@ -348,14 +330,18 @@ def network_tracer(pid: str, project: Project = Depends(get_project_2d),
 
 
 @router.get("/projects/{pid}/view3d")
-def project_view3d(pid: str, field: str = "pressure", project: Project = Depends(get_project),
+def project_view3d(pid: str, field: str = "pressure", k: float = 1.0,
+                   project: Project = Depends(get_project),
                    store: ProjectStore = Depends(get_store)) -> dict:
     """This project's result as a 3-D scene. A 2-D project: pressure as a relief
     surface (z ∝ pressure) with the vessel trees at the base. A **3-D project**: its
-    3-D trees and the solved ``field`` (pressure / flux / tof) as voxels — or the
-    tissue as a point cloud before the first run."""
+    3-D trees and a voxel ``field`` — or the tissue as a point cloud before the first
+    run. 3-D fields: ``pressure`` / ``flux`` / ``tof`` (the solve), ``saturation`` /
+    ``consumption`` (oxygen, Damköhler number ``k``), ``Fp`` / ``vp`` / ``CBV`` /
+    ``MTT`` (kinetic maps from the tracer) and ``tracer`` (the bolus animation:
+    per-frame voxel values in ``tracer.frames``)."""
     if project.grid.is_3d:
-        return _view3d_volume(project, store, field)
+        return _view3d_volume(project, store, field, k=k)
     grid, dom = runner.build_grid(project)
     x0, x1, y0, y1 = dom
     art, ven = runner.build_networks(project, use_vessels=True, defaults=True)
@@ -392,10 +378,16 @@ def project_view3d(pid: str, field: str = "pressure", project: Project = Depends
             "pressure": {"min": pmin, "max": pmax, "voxels": voxels}}
 
 
-def _view3d_volume(project, store, field: str) -> dict:
+_V3_RESULT = ("pressure", "flux", "tof")
+_V3_OXYGEN = ("saturation", "consumption")
+_V3_TRACER = {"Fp": "semi", "vp": "semi", "CBV": "deconv", "MTT": "deconv"}
+V3_FIELDS = (*_V3_RESULT, *_V3_OXYGEN, *_V3_TRACER, "tracer")
+
+
+def _view3d_volume(project, store, field: str, k: float = 1.0) -> dict:
     """The 3-D scene of a 3-D project (same payload shape as ``/demo3d``)."""
-    if field not in ("pressure", "flux", "tof"):
-        raise HTTPException(422, "field must be 'pressure', 'flux' or 'tof'")
+    if field not in V3_FIELDS:
+        raise HTTPException(422, f"field must be one of {list(V3_FIELDS)}")
     grid, dom = runner.build_grid3d(project)
     art, ven = runner.build_networks(project, use_vessels=True, defaults=True)
     segments = [[*map(lambda v: round(v, 2), sg[:6]), round(sg[6], 3), k]
@@ -410,8 +402,25 @@ def _view3d_volume(project, store, field: str) -> dict:
            "tissue": project.grid.tissue, "field": field,
            "pressure": {"min": 0.0, "max": 0.0, "voxels": []},
            "tissue_points": xyz.tolist()}
-    if project.has_result:
-        f = store.result_field(project.id, field)
+    needs_tracer = field in _V3_TRACER or field == "tracer"
+    if needs_tracer and not project.has_tracer:
+        raise HTTPException(409, "no tracer yet; run the flow (POST /tracer) first")
+    if project.has_result and field == "tracer":
+        d = store.load_tracer(project.id)
+        frames = d["frames"][:, idx[:, 0], idx[:, 1], idx[:, 2]]       # (n_t, n_vox)
+        vmax = float(d["vmax"]) or 1.0
+        out["pressure"] = {"min": 0.0, "max": vmax, "name": field, "voxels": []}
+        out["tracer"] = {"xyz": xyz.tolist(), "times": d["times"].tolist(), "vmax": vmax,
+                         "frames": np.round(np.nan_to_num(frames), 4).tolist()}
+        out["summary"] = project.summary
+    elif project.has_result:
+        if field in _V3_RESULT:
+            f = store.result_field(project.id, field)
+        elif field in _V3_OXYGEN:
+            f, oef = runner.oxygen_field(project, field, k=k)
+            out["oef"] = oef
+        else:
+            f = helpers.tracer_map(store.load_tracer(project.id), field, _V3_TRACER[field])
         vals = f[tuple(idx.T)]
         ok = np.isfinite(vals)
         fin = f[grid.mask & np.isfinite(f)]

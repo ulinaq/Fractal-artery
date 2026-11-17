@@ -477,5 +477,5 @@ class JobInfo(BaseModel):
 
 class FieldResponse(BaseModel):
     name: str
-    shape: tuple[int, int]
-    data: list[list[float | None]]   # NaN (masked) cells serialise as null
+    shape: tuple[int, ...]           # (nx, ny) or (nx, ny, nz) for a 3-D project
+    data: list                       # nested per axis; NaN (masked) cells serialise as null

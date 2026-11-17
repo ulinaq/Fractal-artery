@@ -90,3 +90,36 @@ def test_2d_explorer_result_opens_in_the_workspace(page, server):
     assert "artery segments" in ws.inner_text("#node-info")
     ws.keyboard.press("2")
     assert ws.inner_text("#tissue-info").startswith("1 organ")
+
+
+def test_3d_project_grow_flow_kinetics_and_oxygen_in_the_viewer(page, server):
+    """The 3-D viewer's project tools: grow a tree, run, play the bolus, fit
+    kinetics, switch to an oxygen map — with no page errors."""
+    import httpx
+
+    pid = httpx.post(server + "/explore/project", timeout=60, json={
+        "dim": 3, "shape": "heart", "fill": "cco", "n_terminals": 12, "generations": 3,
+        "nx": 16, "name": "ui-3d"}).json()["id"]
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(f"{server}/viewer3d.html?project={pid}")
+    page.wait_for_selector("#v3-tree-card:not([hidden])")
+    assert page.is_hidden("#v3-flow-card")             # no flow before a solve
+    page.fill("#v3-npts", "20")
+    page.click("#v3-grow")
+    page.wait_for_function("document.querySelector('#v3-tree-info').textContent"
+                           ".includes('terminals')", timeout=60000)
+    page.click("#v3-run")
+    page.wait_for_selector("#v3-flow-card:not([hidden])", timeout=120000)
+    page.click("#v3-flow")
+    page.wait_for_function("document.querySelector('#v3-kin').textContent.includes('Fp =')",
+                           timeout=120000)
+    assert page.is_visible("#v3-play-row")
+    assert page.input_value("#v3-field") == "tracer"
+    assert page.is_hidden("#v3-k-row")
+    page.select_option("#v3-field", "saturation")
+    page.wait_for_function("document.querySelector('#v3-summary').textContent"
+                           ".includes('O₂ extraction')", timeout=60000)
+    assert page.is_visible("#v3-k-row")
+    assert page.is_hidden("#v3-play-row")
+    assert not errors

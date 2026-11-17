@@ -1,3 +1,4 @@
+[hidden] { display: none !important; }   /* the attribute must win over display rules */
 /* perfusion 2-D workspace — no build step, plain CSS. */
 :root {
   --ink: #0f172a;

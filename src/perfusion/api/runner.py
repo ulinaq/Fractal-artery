@@ -390,9 +390,9 @@ def adapt_network(project, target_exponent: float = 3.0, rate: float = 0.05,
     from ..core.pipeline import run_adaptation
 
     prm = project.params.to_core()
-    grid, art, ven = validate_run(project, use_vessels=True)
+    grid, art, ven = validate_run(project, use_vessels=True)    # 2-D Grid or 3-D Grid3D
     ad = run_adaptation(prm, grid, target_exponent=target_exponent, rate=rate,
-                        n_iter=n_iter, domain_limit=project.grid.domain_limit,
+                        n_iter=n_iter, domain_limit=tuple(project.grid.domain_limit),
                         art=art, ven=ven)
     return ad
 
@@ -470,7 +470,7 @@ def run_tracer(store, project, req: TracerRequest) -> None:
         aif = aif / peak                        # unit-peak bolus -> concentrations O(1)
     full = transport.transport_forward(
         result.grid, result.fx, result.fy, result.sources,
-        result.solution.terminal_flux, aif, dt, theta=1.0)
+        result.solution.terminal_flux, aif, dt, theta=1.0, fz=getattr(result, "fz", None))
     stride = max(1, n_steps // req.n_frames)
     frames, times = full[::stride][:req.n_frames], t[::stride][:req.n_frames]
     aif_frames = aif[::stride][:req.n_frames]        # AIF at the frame times, for TKM fitting
