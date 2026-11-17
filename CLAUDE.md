@@ -42,13 +42,14 @@ imports use `perfusion.core.*`.
   - `uv sync` / `uv sync --extra image` / `uv sync --extra api` — install.
   - `uv run pytest` — tests (api/image/mcp tests `importorskip` and are skipped
     unless their extras are synced; for the full suite:
-    `uv run --extra api --extra image --extra mcp pytest`). `uv run ruff check src tests scripts` — lint.
+    `uv run --extra api --extra image --extra mcp --extra video pytest`). `uv run ruff check src tests scripts` — lint.
   - `uv run perfusion-api` — start the FastAPI back-end.
   - `uv run <cmd>` — run anything inside the project venv.
 - Target Python ≥ 3.10. The package is importable as `perfusion` (src layout).
 - **Optional extras keep the core light**: `image` (scikit-image, for
   `segmentation`), `api` (fastapi/uvicorn/pydantic, for `perfusion.api`), `mcp`
-  (the MCP SDK, for `perfusion.mcp_server`). Import these lazily; never import
+  (the MCP SDK, for `perfusion.mcp_server`), `video` (imageio-ffmpeg, for the
+  server-side `tracer.mp4` export). Import these lazily; never import
   them from `core`. Tests that need them use `pytest.importorskip`.
 - **MCP server**: `perfusion.mcp_server` exposes the engine as MCP tools
   (`run_simulation`, `describe_model`) — run with `uv run --extra mcp perfusion-mcp`;

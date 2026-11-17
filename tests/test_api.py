@@ -171,6 +171,19 @@ def test_tracer_gif_export(client):
     assert gif.content[:6] in (b"GIF87a", b"GIF89a")
 
 
+def test_tracer_mp4_export(client):
+    pid = client.post("/projects", json={"name": "mp4", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    assert client.get(f"/projects/{pid}/tracer.mp4").status_code == 409   # no tracer yet
+    pytest.importorskip("imageio_ffmpeg")
+    jid = client.post(f"/projects/{pid}/tracer", json={"n_frames": 8}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    mp4 = client.get(f"/projects/{pid}/tracer.mp4")
+    assert mp4.status_code == 200
+    assert mp4.headers["content-type"] == "video/mp4"
+    assert mp4.content[4:8] == b"ftyp"                 # ISO base-media container
+
+
 def test_image_upload_segments_a_network(client):
     pytest.importorskip("skimage")
     pytest.importorskip("imageio")

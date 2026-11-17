@@ -48,7 +48,7 @@ stays out of it. `core` must stay import-clean without any extra installed.
 
 ```bash
 uv run pytest                              # core + always-available tests
-uv run --extra api --extra image --extra mcp pytest   # the FULL suite
+uv run --extra api --extra image --extra mcp --extra video pytest   # the FULL suite
 uv run --extra api --extra image --extra mcp ruff check src tests scripts
 ```
 

@@ -65,7 +65,8 @@ no separate dev server.
   `?project=` link.
 - **Flow video** — play/scrub an animation of a contrast bolus washing through
   the tissue (`POST/GET /projects/{id}/tracer`), and download it as an animated
-  GIF (`tracer.gif`, needs the `image` extra).
+  GIF (`tracer.gif`, needs the `image` extra) or MP4 (`tracer.mp4`, needs the
+  `video` extra — `imageio-ffmpeg` bundles its own ffmpeg).
 - **Share** — `?project=<id>` opens an existing project (and its result) by id.
 
 - **Tree explorer** (`explorer.html`) — grow an artery + vein into a tissue, in
