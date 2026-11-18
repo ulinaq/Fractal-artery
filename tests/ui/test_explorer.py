@@ -165,6 +165,50 @@ def test_3d_viewer_multicompartment_uncertainty_and_calibration(page, server):
     assert not errors
 
 
+def test_3d_viewer_direct_connection_model(page, server):
+    """Run the direct-connection model on a 3-D project in the viewer: the field picker
+    and the hybrid-only analyses hide, the summary counts the links, and the network
+    bolus plays — then switching back to the hybrid restores the field."""
+    import httpx
+
+    pid = httpx.post(server + "/explore/project", timeout=60, json={
+        "dim": 3, "shape": "heart", "fill": "cco", "n_terminals": 12, "generations": 3,
+        "nx": 16, "name": "ui-3d-direct"}).json()["id"]
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(f"{server}/viewer3d.html?project={pid}")
+    page.wait_for_selector("#v3-an-card:not([hidden])")
+    assert page.is_hidden("#v3-rhoc-row")
+    page.select_option("#v3-model", "direct")
+    assert page.is_visible("#v3-rhoc-row")
+    page.fill("#v3-rhoc", "3")
+    page.click("#v3-run")
+    page.wait_for_function("document.querySelector('#v3-summary').textContent"
+                           ".includes('connections')", timeout=120000)
+    assert page.is_hidden("#v3-field-row")
+    assert page.is_hidden("#v3-an-card")
+    assert "terminal connections" in page.inner_text("#info")
+    page.click("#v3-flow")
+    page.wait_for_selector("#v3-play-row:not([hidden])", timeout=120000)
+    assert page.inner_text("#v3-time").startswith("t = ")
+    page.wait_for_function("document.querySelector('#v3-kin').textContent.includes('reaches')")
+    import re
+
+    links = re.search(r"([0-9.]+)connections", page.text_content("#v3-summary")).group(1)
+    assert links.isdigit()                                 # a count, not "45.000"
+
+    page.reload()                                  # the stored model is reflected on load
+    page.wait_for_selector("#v3-flow-card:not([hidden])")
+    assert page.input_value("#v3-model") == "direct"
+    page.select_option("#v3-model", "hybrid")
+    page.click("#v3-run")
+    page.wait_for_function("document.querySelector('#v3-summary').textContent"
+                           ".includes('MTT')", timeout=120000)
+    assert page.is_visible("#v3-field-row")
+    assert page.is_visible("#v3-an-card")
+    assert not errors
+
+
 def test_3d_viewer_hand_edits_the_trees(page, server):
     """Edit a 3-D project's trees in the viewer: select + resize a vessel, drag a
     node, branch with Shift+click, toggle an outlet, delete, undo — then solve."""

@@ -290,8 +290,13 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   3-D project, rejected on 2-D), `helpers.rebuild_network(node_z=)` keeps z and 3-D
   lengths (`helpers.segment_lengths`); the viewer's editor is `frontend/edit3d.js`
   (screen-plane drags via `viewer3d.unproject`, which must stay the exact inverse of
-  `project`). Still 2-D-only (`deps.get_project_2d` → 409): masks/lesions/hotspots,
-  the direct model, GIF/MP4 and field CSV/VTK. New
+  `project`). The **direct-connection model** runs on 3-D projects too:
+  `direct.connect_terminals` links terminals by 3-D distance (`Network.positions`;
+  mixing a 2-D and a 3-D tree raises), the direct blob / network-tracer lines carry z
+  (`Network.segment_lines`: 7-col rows `[x,y,z,x,y,z,flow]`, 6-col tracer lines), and
+  `view3d` returns `direct` (+ `net_tracer` for `field=tracer`) instead of a voxel field
+  — any other field is a 409. Still 2-D-only (`deps.get_project_2d` → 409):
+  masks/lesions/hotspots, GIF/MP4 and field CSV/VTK. New
   project features must either work in 3-D or be guarded. Oxygen's Damköhler rate is
   scaled by the *active* tissue volume (`oxygen.solve_oxygen`) — keep it that way.
 - **Default trees** (no vessels drawn): `runner.default_trees` fits the thesis trees

@@ -295,16 +295,20 @@ def transient_response(pid: str, period: float = 1.0, pulse: float = 0.5,
 
 
 @router.get("/projects/{pid}/direct")
-def direct_result(pid: str, project: Project = Depends(get_project_2d),
+def direct_result(pid: str, project: Project = Depends(get_project),
                   store: ProjectStore = Depends(get_store)) -> dict:
     """Render data for a direct-connection result: arterial/venous vessel
-    segments and the terminal-connection links, each ``[x0,y0,x1,y1,flow]``."""
+    segments and the terminal-connection links, each ``[x0,y0,x1,y1,flow]``
+    (``[x0,y0,z0,x1,y1,z1,flow]`` on a 3-D project, ``dim`` = 3)."""
     if not store._direct_path(pid).exists():
         raise HTTPException(409, "no direct-connection result; run with model='direct'")
-    d = store.load_direct(pid)
-    flows = (np.concatenate([d["artery"][:, 4], d["vein"][:, 4]])
-             if d["artery"].size else np.array([0.0]))
+    return _direct_payload(store.load_direct(pid))
+
+
+def _direct_payload(d: dict) -> dict:
+    flows = np.concatenate([d["artery"][:, -1], d["vein"][:, -1]])
     return {
+        "dim": 3 if d["artery"].shape[1] == 7 else 2,
         "artery": d["artery"].tolist(), "vein": d["vein"].tolist(),
         "connections": d["conn"].tolist(),
         "flow_max": float(flows.max()) if flows.size else 0.0,
@@ -312,14 +316,18 @@ def direct_result(pid: str, project: Project = Depends(get_project_2d),
 
 
 @router.get("/projects/{pid}/network-tracer")
-def network_tracer(pid: str, project: Project = Depends(get_project_2d),
+def network_tracer(pid: str, project: Project = Depends(get_project),
                    store: ProjectStore = Depends(get_store)) -> dict:
-    """Direct-model bolus animation: each vascular element ``[x0,y0,x1,y1]`` with a
-    per-frame concentration (0 arterial / 1 venous / 2 connection), computed from
-    network transit times. POST /tracer on a direct result produces it."""
+    """Direct-model bolus animation: each vascular element ``[x0,y0,x1,y1]``
+    (``[x0,y0,z0,x1,y1,z1]`` in 3-D) with a per-frame concentration (0 arterial /
+    1 venous / 2 connection), computed from network transit times. POST /tracer on
+    a direct result produces it."""
     if not store._nettracer_path(pid).exists():
         raise HTTPException(409, "no network tracer; run the direct model then POST /tracer")
-    d = store.load_network_tracer(pid)
+    return _net_tracer_payload(pid, store.load_network_tracer(pid))
+
+
+def _net_tracer_payload(pid: str, d: dict) -> dict:
     return {
         "id": pid, "n_frames": int(d["frames"].shape[0]),
         "lines": d["lines"].tolist(), "kind": d["kind"].astype(int).tolist(),
@@ -417,6 +425,8 @@ def _view3d_volume(project, store, field: str, k: float = 1.0, n: int = 3,
            "tissue": project.grid.tissue, "field": field,
            "pressure": {"min": 0.0, "max": 0.0, "voxels": []},
            "tissue_points": xyz.tolist()}
+    if store._direct_path(project.id).exists():         # a direct-connection result
+        return _view3d_direct(project, store, field, out)
     needs_tracer = field in _V3_TRACER or field == "tracer"
     if needs_tracer and not project.has_tracer:
         raise HTTPException(409, "no tracer yet; run the flow (POST /tracer) first")
@@ -447,6 +457,23 @@ def _view3d_volume(project, store, field: str, k: float = 1.0, n: int = 3,
         out["pressure"] = {"min": float(lo_v), "max": float(hi_v), "name": field,
                            "voxels": np.column_stack([xyz[ok], np.round(vals[ok], 6)]).tolist()}
         out["summary"] = project.summary
+    return out
+
+
+def _view3d_direct(project, store, field: str, out: dict) -> dict:
+    """A 3-D direct-connection result: no tissue field — the trees and their resistive
+    terminal links coloured by flow (``direct``) and, after POST /tracer, the bolus
+    timed along the network (``net_tracer``: per-element frames)."""
+    if field not in ("pressure", "tracer"):
+        raise HTTPException(409, "the direct-connection model has no tissue field; "
+                                 "re-run with the hybrid (Darcy) model for this map")
+    out["direct"] = _direct_payload(store.load_direct(project.id))
+    out["summary"] = project.summary
+    if field == "tracer":
+        if not store._nettracer_path(project.id).exists():
+            raise HTTPException(409, "no tracer yet; run the flow (POST /tracer) first")
+        out["net_tracer"] = _net_tracer_payload(project.id,
+                                                store.load_network_tracer(project.id))
     return out
 
 

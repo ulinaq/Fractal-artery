@@ -61,3 +61,55 @@ def test_solve_direct_pressure_bounds(art, ven):
     # all pressures lie within the driving range
     assert sol.p_a.max() <= 75.0 + 1e-6
     assert sol.p_v.min() >= 20.0 - 1e-6
+
+
+def _trees_3d():
+    from perfusion.core.geometry import grow_tree_3d
+
+    art = grow_tree_3d((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), root_radius=1.0,
+                       min_radius=0.3, max_generations=4)
+    ven = grow_tree_3d((6.0, 0.0, 0.0), (0.0, 0.0, 1.0), root_radius=1.2,
+                       min_radius=0.3, max_generations=4, twist=1.0)
+    return art, ven
+
+
+def test_connect_terminals_uses_3d_distance():
+    """3-D trees link by Euclidean distance in x, y *and* z (a planar distance would
+    pair terminals that are far apart in depth)."""
+    import numpy as np
+
+    art, ven = _trees_3d()
+    conns = direct.connect_terminals(art, ven, rho_c=0.0)
+    vxyz = ven.positions(ven.terminal_nodes)
+    for c in conns:
+        a = art.positions([c.arterial_terminal])[0]
+        d = np.linalg.norm(vxyz - a, axis=1)
+        assert c.length == pytest.approx(d.min())          # the nearest in 3-D
+        assert c.length == pytest.approx(
+            np.linalg.norm(a - ven.positions([c.venous_terminal])[0]))
+
+
+def test_solve_direct_conserves_mass_in_3d():
+    art, ven = _trees_3d()
+    conns = direct.connect_terminals(art, ven, rho_c=8.0)
+    sol = direct.solve_direct(art, ven, conns, p_in=10.0, p_out=0.0)
+    assert sol.q_a[0] > 0
+    assert sol.q_a[0] == pytest.approx(sol.q_c.sum(), rel=1e-6)
+    assert sol.q_a[0] == pytest.approx(sol.q_v[0], rel=1e-6)
+
+
+def test_connect_terminals_rejects_mixed_dimensions(art):
+    _, ven3 = _trees_3d()
+    with pytest.raises(ValueError, match="both be 2-D or both 3-D"):
+        direct.connect_terminals(art, ven3, rho_c=1.0)
+
+
+def test_network_transit_animation_in_3d():
+    from perfusion.core import network_transit as nt
+
+    art, ven = _trees_3d()
+    conns = direct.connect_terminals(art, ven, rho_c=0.0)
+    sol = direct.solve_direct(art, ven, conns, p_in=10.0, p_out=0.0)
+    anim = nt.transit_animation(art, ven, conns, sol, n_frames=6)
+    assert anim["lines"].shape == (art.n_segments + ven.n_segments + len(conns), 6)
+    assert anim["frames"].shape == (6, anim["lines"].shape[0])

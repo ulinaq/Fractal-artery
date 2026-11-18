@@ -79,7 +79,8 @@ def test_server_registers_expected_tools():
             "adapt_vessel_network", "uncertainty_quantification",
             "sobol_sensitivity_indices", "calibrate_parameter_to_flow",
             "tissue_perfusion_analysis", "optimize_trees_in_tissue",
-            "tissue_uncertainty_calibration", "describe_model"} <= tools
+            "tissue_uncertainty_calibration", "direct_model_in_tissue",
+            "describe_model"} <= tools
 
 
 def test_calibrate_to_flow_recovers_value():
@@ -306,3 +307,18 @@ def test_optimize_tissue_trees_improves_in_the_organ(dim):
     assert r["best"] <= r["start"]
     assert ("twist" in r["free"]) == (dim == 3)
     assert 1.0 <= r["values"]["a_gamma"] <= 1.9
+
+
+@pytest.mark.parametrize("dim", [2, 3])
+def test_direct_model_in_tissue(dim):
+    """The direct-connection model on organ-grown trees (2-D and 3-D): mass balance,
+    every arterial terminal linked, and the bolus reaches the venous outlet."""
+    out = mcp_server.tissue_direct(dim=dim, shape="kidney", generations=3,
+                                   n_terminals=15, rho_c=0.0)
+    assert out["dim"] == dim
+    assert out["model"] == "direct"
+    assert out["arterial_inflow"] > 0
+    assert out["venous_outflow"] == pytest.approx(out["arterial_inflow"], rel=1e-6)
+    assert out["n_connections"] == out["n_terminals"]["artery"]
+    assert out["connection_length"]["mean"] > 0
+    assert out["transit"]["mtt_to_outlet"] > 0

@@ -289,18 +289,17 @@ class ProjectStore:
 
     def save_direct_result(self, project: Project, art, ven, sol) -> None:
         """Persist a direct-connection result: a summary + a render blob (vessel
-        segments and terminal-connection links, with flow magnitudes)."""
+        segments and terminal-connection links, with flow magnitudes). Rows are
+        ``[x0, y0, x1, y1, flow]`` — ``[x0, y0, z0, x1, y1, z1, flow]`` for 3-D trees."""
         def seg_lines(net, q):
-            return np.column_stack([
-                net.node_x[net.seg_start], net.node_y[net.seg_start],
-                net.node_x[net.seg_end], net.node_y[net.seg_end], np.abs(q),
-            ]).astype(float)
+            return np.column_stack([net.segment_lines(), np.abs(q)]).astype(float)
 
-        conn = np.array([[art.node_x[c.arterial_terminal], art.node_y[c.arterial_terminal],
-                          ven.node_x[c.venous_terminal], ven.node_y[c.venous_terminal], abs(qc)]
-                         for c, qc in zip(sol.connections, sol.q_c, strict=True)], dtype=float)
-        if conn.size == 0:
-            conn = np.zeros((0, 5))
+        width = 7 if art.is_3d else 5
+        conns = sol.connections
+        conn = (np.column_stack([art.positions([c.arterial_terminal for c in conns]),
+                                 ven.positions([c.venous_terminal for c in conns]),
+                                 np.abs(sol.q_c)]).astype(float)
+                if conns else np.zeros((0, width)))
         np.savez(self._direct_path(project.id), artery=seg_lines(art, sol.q_a),
                  vein=seg_lines(ven, sol.q_v), conn=conn)
         self.result_path(project.id).unlink(missing_ok=True)   # not a field result
@@ -311,7 +310,7 @@ class ProjectStore:
         project.summary = {
             "model": "direct", "arterial_inflow": perfusion, "venous_outflow": perfusion,
             "n_connections": len(sol.connections), "pressure_max": float(p_all.max()),
-            "flux_mean": float(conn[:, 4].mean() if len(conn) else 0.0),
+            "flux_mean": float(conn[:, -1].mean() if len(conn) else 0.0),
         }
         project.has_result = True
         project.has_tracer = False

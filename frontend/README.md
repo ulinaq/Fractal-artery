@@ -103,7 +103,10 @@ no separate dev server.
   to a measured value — it warns when the fit stops at a search bound). **✏️ edit the
   trees by hand** (`edit3d.js`): click to select a node or vessel, drag a node (it moves
   in the screen plane — rotate to reach depth), Shift+click to branch, S split, I
-  inlet/outlet, Del delete, ⌘/Ctrl+Z undo; each edit saves via `PUT /editable`.
+  inlet/outlet, Del delete, ⌘/Ctrl+Z undo; each edit saves via `PUT /editable`. The
+  **model** picker also runs the **direct — terminal connections** model (ρc search
+  radius): links (green) and vessels are drawn by flow, and 🌊 flow plays the bolus
+  timed along the network.
 
 The left-panel **tools are contextual**: picking a tab above the canvas
 (Vessels · Tissue · Result, keys 1–3) shows just that tool card; Project,

@@ -47,7 +47,16 @@
       <section class="card" id="proj-card" hidden>
         <h2>3-D project</h2>
         <p class="muted" id="proj-desc"></p>
-        <label>field
+        <label>model
+          <select id="v3-model">
+            <option value="hybrid">hybrid — Darcy capillary bed</option>
+            <option value="direct">direct — terminal connections</option>
+          </select>
+        </label>
+        <label id="v3-rhoc-row" hidden>connection radius ρc (0 = nearest vein)
+          <input id="v3-rhoc" type="number" value="0" min="0" step="1" />
+        </label>
+        <label id="v3-field-row">field
           <select id="v3-field">
             <optgroup label="solve">
               <option value="pressure">pressure</option>
@@ -85,7 +94,7 @@
       </section>
       <section class="card" id="v3-flow-card" hidden>
         <h2>Flow &amp; kinetics</h2>
-        <p class="muted">Advect a contrast bolus through the 3-D bed, then play it or map its kinetics.</p>
+        <p class="muted" id="v3-flow-desc">Advect a contrast bolus through the 3-D bed, then play it or map its kinetics.</p>
         <button id="v3-flow">🌊 Compute flow</button>
         <div class="row" id="v3-play-row" hidden>
           <button id="v3-play" class="ghost">⏸</button>

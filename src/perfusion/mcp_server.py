@@ -198,7 +198,6 @@ def direct_transit(rho_c: float = 0.0, p_in: float = 10.0, p_out: float = 0.0,
     vasculature (``τ = volume/|flow|`` accumulated arterial → connection → venous).
     Returns transit-time statistics: mean arrival by element class and the overall
     mean transit time (MTT) to the venous outlet."""
-    from .core import network_transit as nt
     from .core.direct import connect_terminals, solve_direct
     from .core.geometry import arterial_tree, venous_tree
 
@@ -206,6 +205,13 @@ def direct_transit(rho_c: float = 0.0, p_in: float = 10.0, p_out: float = 0.0,
     art, ven = arterial_tree(prm), venous_tree(prm)
     conns = connect_terminals(art, ven, rho_c=float(rho_c), viscosity=prm.mu)
     sol = solve_direct(art, ven, conns, prm.p_in, prm.p_out, viscosity=prm.mu)
+    return _transit_stats(art, ven, conns, sol)
+
+
+def _transit_stats(art, ven, conns, sol) -> dict:
+    """Bolus arrival statistics of a direct-model solution (by element class + MTT)."""
+    from .core import network_transit as nt
+
     anim = nt.transit_animation(art, ven, conns, sol, n_frames=2)
     arr, kind = anim["arrivals"], anim["kind"]
     t_ven = nt.arrival_times(art, ven, conns, sol)[1]
@@ -223,6 +229,39 @@ def direct_transit(rho_c: float = 0.0, p_in: float = 10.0, p_out: float = 0.0,
             "mean_arrival_connection": mean_arr(kind == 2),
             "mean_arrival_venous": mean_arr(kind == 1),
             "mtt_to_outlet": float(mtt.mean()) if mtt.size else None}
+
+
+def tissue_direct(dim: int = 3, shape: str = "kidney", generations: int = 4,
+                  fill: str = "cco", n_terminals: int = 40, rho_c: float = 0.0,
+                  p_in: float = 10.0, p_out: float = 0.0, seed: int = 0,
+                  extent: float = 1.0) -> dict:
+    """The direct-connection model (Paper C) in an organ, 2-D or 3-D: grow artery + vein
+    trees into ``shape``, close them with resistive terminal links (each arterial
+    terminal → every venous terminal within ``rho_c``, in 3-D distance on a 3-D organ;
+    0 = the nearest) and solve. Returns flow, mass balance, the links' lengths and
+    flows, and bolus transit times timed along the network."""
+    from .core.direct import connect_terminals, solve_direct
+
+    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
+                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
+                           _return_model=True)
+    spec, art, ven, _, _ = grown["_model"]
+    prm = Parameters(p_in=p_in, p_out=p_out)
+    conns = connect_terminals(art, ven, rho_c=float(rho_c), viscosity=prm.mu)
+    sol = solve_direct(art, ven, conns, prm.p_in, prm.p_out, viscosity=prm.mu)
+    lengths = np.array([c.length for c in conns])
+    q_in = float(np.abs(sol.q_c).sum())
+    return {"dim": spec.dim, "shape": shape, "model": "direct",
+            "n_terminals": {"artery": int(art.terminal_nodes.size),
+                            "vein": int(ven.terminal_nodes.size)},
+            "arterial_inflow": q_in,
+            # net flow through the venous outlet nodes (incidence: S.T @ q = net outflow)
+            "venous_outflow": float(np.abs(ven.incidence().T @ sol.q_v)[ven.inlet_nodes].sum()),
+            "n_connections": len(conns),
+            "connection_length": {"mean": float(lengths.mean()), "max": float(lengths.max())},
+            "connection_flow": {"mean": float(np.abs(sol.q_c).mean()),
+                                "max": float(np.abs(sol.q_c).max())},
+            "transit": _transit_stats(art, ven, conns, sol)}
 
 
 def calibrate_to_flow(target_inflow: float, param: str = "permeability",
@@ -777,6 +816,20 @@ def build_server():
         Returns the mean bolus arrival time by element class and the overall mean
         transit time to the venous outlet. `rho_c` is the connection search radius."""
         return direct_transit(rho_c=rho_c, p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+
+    @server.tool()
+    def direct_model_in_tissue(dim: int = 3, shape: str = "kidney", generations: int = 4,
+                               fill: str = "cco", n_terminals: int = 40, rho_c: float = 0.0,
+                               p_in: float = 10.0, p_out: float = 0.0, seed: int = 0,
+                               extent: float = 1.0) -> dict:
+        """Direct-connection model in an organ, 2-D or 3-D (`dim`): grow artery + vein
+        trees into `shape` (kidney, heart, liver, brain, …), link each arterial terminal
+        to the venous terminals within `rho_c` (3-D distance on a 3-D organ; 0 = the
+        nearest) and solve — no Darcy bed. Returns inflow/outflow, the links' lengths
+        and flows, and network bolus transit times (mean arrival by class, MTT)."""
+        return tissue_direct(dim=dim, shape=shape, generations=generations, fill=fill,
+                             n_terminals=n_terminals, rho_c=rho_c, p_in=p_in, p_out=p_out,
+                             seed=seed, extent=extent)
 
     @server.tool()
     def calibrate_parameter_to_flow(target_inflow: float, param: str = "permeability",
