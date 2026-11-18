@@ -411,6 +411,9 @@ $("btn-tissue-revert").addEventListener("click", guarded(async () => {
 $("btn-clear-tissue").addEventListener("click", clearTarget);
 
 // grow / analyse / run
+$("grow-method").addEventListener("change", (e) => {   // loops close during colonisation only
+  $("grow-loops-row").style.display = e.target.value === "colonization" ? "" : "none";
+});
 $("btn-grow").addEventListener("click", guarded(grow));
 $("btn-prune").addEventListener("click", guarded(prune));
 $("btn-loops").addEventListener("click", guarded(addLoops));

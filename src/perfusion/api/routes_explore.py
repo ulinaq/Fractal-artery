@@ -170,7 +170,8 @@ def grow_spec(req: ExploreGrowRequest):
         generations=req.generations, length_to_radius=req.length_to_radius,
         exponent=req.exponent, fill=req.fill, fill_target=req.fill_target,
         fill_steps=req.fill_steps, n_points=req.n_points, step=req.step,
-        influence=req.influence, n_terminals=req.n_terminals, leaf_radius=req.leaf_radius,
+        influence=req.influence, close_loops=req.close_loops,
+        n_terminals=req.n_terminals, leaf_radius=req.leaf_radius,
         seed=req.seed, nx=nx, ny=req.ny)
 
 

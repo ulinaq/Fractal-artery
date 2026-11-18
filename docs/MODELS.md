@@ -362,6 +362,21 @@ r_parent^γ = Σ r_child^γ           (γ = exponent, default 3)
 
 **Data-constrained growth**: attraction points sampled with probability ∝ a target
 density map (`sample_points_in_mask(density=)`); **obstacles** deactivate no-grow cells.
+A sprout landing within `step/2` of an existing node is skipped (a node pulled from
+opposite sides would otherwise re-sprout onto the same spot forever).
+
+**Loop closure during growth** (inosculation, `grow_network(close_loops=True)`): after
+each colonisation step, a new tip `v` fuses with the nearest older node `u` when
+
+```
+|v − u| ≤ r_fuse (= 2·step),   L_tree(v, u) ≥ δ · |v − u|,   hops(v, u) ≥ h_min (4)
+```
+
+(tree path on the growing spanning tree; never onto an inlet; each node fuses once). The
+fusing segment gets `r = f · min(r_v, r_u)` after Murray tapering of the tree, and the
+tip stops growing — arcades form where branches meet, as in the mesentery or the venous
+plexus. Loops already in the base are kept (spanning tree chosen widest-first, so the
+thin collaterals are the extra edges).
 
 **Anastomoses (loops)** — `core/anastomosis.py`. Side-to-side collaterals: two segment
 midpoints `m₁, m₂` on different branches are joined when

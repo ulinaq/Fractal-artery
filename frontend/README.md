@@ -66,7 +66,9 @@ no separate dev server.
   CSV, or ParaView `.vti` (format picker next to Export), or grab a **PNG** of the
   current view (📷). Actions lock while a job runs; the project id is a shareable
   `?project=` link.
-- **Loops & occlusion** — the Vessels tab's *Grow / prune / loops* card has ⟳ Add loops
+- **Loops & occlusion** — space colonisation can *close loops while growing* (a tip that
+  meets another branch fuses with it; also in the explorer and the 3-D viewer); the
+  Vessels tab's *Grow / prune / loops* card has ⟳ Add loops
   (collateral anastomoses between nearby branches of the chosen tree; terminals kept)
   and a selected vessel has ⛔ Occlude (radius × 0.001, an embolus); the 3-D viewer has
   ⟳ Loops and ⛔ Occlude too. Pair with Compare runs to see the collateral rescue.

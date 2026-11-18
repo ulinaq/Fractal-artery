@@ -235,9 +235,12 @@ async function treeOp(kind) {
   try {
     let msg;
     if (kind === "grow") {
-      const r = await postJSON("grow", { target, method: $("v3-method").value,
-                                         n_points: Number($("v3-npts").value) || 60 });
-      msg = `${target}: ${r.n_segments} segments, ${r.n_terminals} terminals`;
+      const method = $("v3-method").value;
+      const r = await postJSON("grow", { target, method,
+                                         n_points: Number($("v3-npts").value) || 60,
+                                         close_loops: method === "colonization" && $("v3-grow-loops").checked });
+      msg = `${target}: ${r.n_segments} segments, ${r.n_terminals} terminals`
+        + (r.n_loops ? `, ${r.n_loops} loops` : "");
     } else if (kind === "prune") {
       const r = await postJSON("prune", { target, steps: 1 });
       msg = `${target}: removed ${r.n_removed} segments → ${r.n_segments} left`;
@@ -322,6 +325,9 @@ for (const id of ["v3-mc-n", "v3-mc-beta"]) {
 }
 $("v3-flow").addEventListener("click", () => flow3d().catch((e) => { $("v3-kin").textContent = e.message; }));
 $("v3-grow").addEventListener("click", () => treeOp("grow"));
+$("v3-method").addEventListener("change", (e) => {   // loops close during colonisation only
+  $("v3-grow-loops-row").hidden = e.target.value !== "colonization";
+});
 $("v3-prune").addEventListener("click", () => treeOp("prune"));
 $("v3-adapt").addEventListener("click", () => treeOp("adapt"));
 $("v3-loops").addEventListener("click", () => treeOp("loops"));

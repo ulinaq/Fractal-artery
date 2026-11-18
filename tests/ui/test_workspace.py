@@ -242,3 +242,21 @@ def test_two_input_grid_experiment(page, server):
     page.wait_for_selector("#cmp-out table.cmp")
     assert "p_in = 20, permeability = 2" in page.inner_text("#cmp-out")
     assert not page.errors
+
+
+def test_grow_with_loop_closure(page, server):
+    """Space colonisation with "close loops while growing": the grow info counts the
+    loops and the looped tree solves; the option hides for CCO."""
+    _new_project(page, server)
+    page.click("summary:has-text('Grow / prune')")
+    page.select_option("#grow-method", "cco")
+    assert page.is_hidden("#grow-loops-row")
+    page.select_option("#grow-method", "colonization")
+    page.check("#grow-loops")
+    page.click("#btn-grow")
+    page.wait_for_function("document.querySelector('#grow-info').textContent.includes('loops')",
+                           timeout=60000)
+    page.click("#btn-run")
+    wait_status(page, "solved", "failed", timeout=120000)
+    assert "solved" in page.inner_text("#status")
+    assert not page.errors

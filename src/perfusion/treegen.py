@@ -80,6 +80,8 @@ class GenSpec:
     n_points: int = 400                   # colonisation attraction points
     step: float | None = None             # colonisation segment length (None = auto)
     influence: float | None = None        # colonisation influence radius (None = auto)
+    close_loops: bool = False             # colonisation: tips fuse with other branches
+    fuse_radius: float | None = None      # ... within this distance (None = 2 × step)
     n_terminals: int = 60                 # CCO terminals per tree
     leaf_radius: float | None = None      # Murray leaf radius for filled trees
     seed: int = 0
@@ -155,7 +157,8 @@ def fill_tree(net: Network, mask, domain, spec: GenSpec, seed: int) -> Network:
         pts = growth.sample_points_in_mask(mask, domain, spec.n_points, seed=seed)
         return growth.grow_network(net, pts, step=spec.step, influence_radius=spec.influence,
                                    max_iter=int(spec.fill_steps), exponent=spec.exponent,
-                                   leaf_radius=leaf)
+                                   leaf_radius=leaf, close_loops=spec.close_loops,
+                                   fuse_radius=spec.fuse_radius)
     raise ValueError(f"unknown fill {spec.fill!r}; choose from {FILLS}")
 
 
@@ -174,10 +177,11 @@ def build(spec: GenSpec):
 
 
 def tree_stats(net: Network) -> dict:
+    from .core.anastomosis import n_loops
     from .core.morphometry import strahler_summary
 
     return {"segments": int(net.n_segments), "terminals": int(net.terminal_nodes.size),
-            "total_length": float(net.seg_length.sum()),
+            "total_length": float(net.seg_length.sum()), "loops": n_loops(net),
             "max_order": int(strahler_summary(net)["max_order"]) if net.n_segments else 0}
 
 

@@ -697,7 +697,15 @@ Editing 3-D trees by hand is now done too (§11.4).
   criteria), 2-D and 3-D; `POST …/anastomose`, ⟳ Add loops (Grow / prune / loops card and
   the 3-D viewer), ⛔ Occlude on a selected vessel in both editors (embolus → compare with
   a kept baseline), MCP `anastomosis_rescue` (flow reaching a blocked territory, tree vs
-  loops). *Next:* loop-closure during growth (looped venous growth).
+  loops). ✅ **Loop closure during growth** — `growth.grow_network(close_loops=True)`: a
+  freshly grown tip within `fuse_radius` (2 × step) of a node on another branch (same
+  detour / hop criteria) fuses with it and stops growing, so arcades form *as* the tree
+  grows (2-D and 3-D; inlets never fused onto; loops already in the base survive growth
+  via a maximum spanning tree by radius). "close loops while growing" in the 2-D Grow
+  card, the explorer and the 3-D viewer; `GrowInfo.n_loops`, explorer/MCP stats `loops`;
+  MCP `grow_trees_in_tissue(close_loops=)`. Also fixed: colonisation re-sprouted a node
+  pulled from opposite sides onto the same spot every iteration (often > half the nodes
+  were stacked duplicates and growth never terminated) — occupied spots are now skipped.
 - **Data-constrained growth matched to Strahler statistics** (follow-up in §9.3). *M.*
 - ✅ ~~**Inverse estimation from real DCE-MRI curves**~~ — `inverse.fit_dce`: several
   inputs at once (p_in ~ flow, porosity ~ blood volume, K, μ) fitted to a measured tissue
