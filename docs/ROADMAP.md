@@ -270,7 +270,10 @@ imports move to `perfusion.core.*`.
 - ✅ **VTK / CSV export** — `GET /projects/{id}/export?fmt=npz|csv|vtk`: the
   fields as ParaView-readable VTK ImageData (`.vti`) or a long-format CSV (one
   row per active cell), alongside the raw `.npz` (`io.fields_to_vtk/_to_csv`).
-  The UI has a format picker next to Export.
+  The UI has a format picker next to Export. **3-D projects** export too: CSV
+  `x,y,z,…` per active voxel, a VTI voxel volume, the bundle (with `tracer.npz`) and the
+  vessels as `.vtp` — from the 3-D viewer's export row (+ 📷 PNG); MCP
+  `export_tissue_fields` writes the same files for an organ model.
 - ✅ **CCO growth variant** — `growth.cco_grow` (constrained constructive
   optimisation): terminals added one at a time by nearest-segment splitting,
   spaced ≥ `d_min`, Murray radii. Selectable via `POST /grow` `method=cco` and a

@@ -75,6 +75,33 @@ def test_save_results_vtk_is_valid_imagedata(tmp_path, hybrid_result):
     assert len(pressure.text.split()) == nx * ny    # one value per cell
 
 
+def test_fields_export_in_3d(tmp_path):
+    """3-D fields: CSV rows are x-fastest voxel centres + values for active voxels;
+    the VTI is a voxel volume with the right origin / spacing."""
+    import xml.etree.ElementTree as ET
+
+    import numpy as np
+
+    shape, dl = (4, 3, 2), (0.0, 8.0, -3.0, 3.0, 10.0, 14.0)
+    p = np.arange(24, dtype=float).reshape(shape, order="F")    # value == flat index
+    mask = np.ones(shape, bool)
+    mask[0, 0, 0] = False
+    path = io.fields_to_csv(tmp_path / "f.csv", dl, pressure=p, flux=p, tof=p, mask=mask)
+    rows = np.loadtxt(path, delimiter=",", skiprows=1)
+    assert path.read_text().splitlines()[0] == "x,y,z,pressure,flux,tof"
+    assert len(rows) == 23
+    assert rows[0].tolist() == [3.0, -2.0, 11.0, 1.0, 1.0, 1.0]   # voxel (1,0,0)
+    assert rows[-1].tolist() == [7.0, 2.0, 13.0, 23.0, 23.0, 23.0]
+
+    vti = io.fields_to_vtk(tmp_path / "f.vti", dl, pressure=p, flux=p, tof=p, mask=mask)
+    img = ET.fromstring(vti.read_text()).find("ImageData")
+    assert img.attrib["WholeExtent"] == "0 4 0 3 0 2"
+    assert img.attrib["Origin"] == "0 -3 10"
+    assert img.attrib["Spacing"] == "2 2 2"
+    with pytest.raises(ValueError, match="needs 6 domain_limit"):
+        io.fields_to_csv(tmp_path / "x.csv", dl[:4], pressure=p, flux=p, tof=p)
+
+
 def test_save_results_npz(tmp_path, hybrid_result):
     path = io.save_results(hybrid_result, tmp_path / "result.npz")
     assert path.exists()

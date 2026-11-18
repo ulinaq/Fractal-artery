@@ -91,6 +91,17 @@
         <button id="v3-run" class="primary">▶ Run 3-D simulation</button>
         <p class="muted" id="v3-run-info"></p>
         <div class="summary v3sum" id="v3-summary"></div>
+        <div class="row" id="v3-export-row">
+          <select id="v3-export-fmt" title="export format">
+            <option value="npz">fields .npz</option>
+            <option value="csv">fields .csv</option>
+            <option value="vtk">fields .vti (ParaView)</option>
+            <option value="vtp">vessels .vtp (ParaView)</option>
+          </select>
+          <button id="v3-export" class="ghost">Export</button>
+          <button id="v3-bundle" class="ghost" title="fields + summary + tracer frames as a zip">⬇ All</button>
+          <button id="v3-png" class="ghost" title="save the current view as a PNG">📷 PNG</button>
+        </div>
       </section>
       <section class="card" id="v3-flow-card" hidden>
         <h2>Flow &amp; kinetics</h2>

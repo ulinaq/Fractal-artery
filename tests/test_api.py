@@ -1362,7 +1362,56 @@ def test_explorer_3d_result_becomes_a_runnable_3d_project(client):
         assert v["pressure"]["voxels"]
         assert all(len(x) == 4 for x in v["pressure"]["voxels"][:5])
     assert client.get(f"/projects/{pid}/export?fmt=npz").status_code == 200
-    assert client.get(f"/projects/{pid}/export?fmt=csv").status_code == 409
+
+
+def test_3d_project_field_exports(client):
+    """A 3-D result exports its voxel fields as CSV (x,y,z + fields per active voxel)
+    and VTK ImageData (a voxel volume), and as one zip with the tracer frames; a
+    direct-connection result has no field to export (but its vessels do)."""
+    import io as stdio
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    pid = _explorer_project(client, 3)["id"]
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    shape = client.get(f"/projects/{pid}/view3d").json()["shape"]
+
+    r = client.get(f"/projects/{pid}/export?fmt=csv")
+    assert r.status_code == 200, r.text
+    lines = r.text.splitlines()
+    assert lines[0] == "x,y,z,pressure,flux,tof"
+    rows = np.loadtxt(stdio.StringIO(r.text), delimiter=",", skiprows=1)
+    with np.load(stdio.BytesIO(client.get(f"/projects/{pid}/export?fmt=npz").content)) as d:
+        mask, dl = d["mask"], d["domain_limit"]
+    assert len(rows) == int(mask.sum())                         # one row per active voxel
+    for k in range(3):                                          # centres inside the box
+        assert dl[2 * k] < rows[:, k].min()
+        assert rows[:, k].max() < dl[2 * k + 1]
+
+    r = client.get(f"/projects/{pid}/export?fmt=vtk")
+    assert r.status_code == 200
+    img = ET.fromstring(r.text).find("ImageData")
+    assert img.attrib["WholeExtent"] == " ".join(f"0 {n}" for n in shape)
+    p = next(da for da in ET.fromstring(r.text).iter("DataArray")
+             if da.attrib["Name"] == "pressure")
+    assert len(p.text.split()) == int(np.prod(shape))
+
+    jid = client.post(f"/projects/{pid}/tracer", json={"n_frames": 8}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    r = client.get(f"/projects/{pid}/bundle")
+    assert r.status_code == 200, r.text
+    names = set(zipfile.ZipFile(stdio.BytesIO(r.content)).namelist())
+    assert {"results.npz", "fields.csv", "fields.vti", "summary.json", "tracer.npz"} <= names
+    assert "tracer.gif" not in names                            # GIF/MP4 are 2-D renders
+
+    jid = client.post(f"/projects/{pid}/run", json={"model": "direct"}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    for path in ("export?fmt=csv", "export?fmt=npz", "bundle"):
+        r = client.get(f"/projects/{pid}/{path}")
+        assert r.status_code == 409, path
+        assert "no tissue field" in r.json()["detail"]
+    assert client.get(f"/projects/{pid}/export?fmt=vtp").status_code == 200
 
 
 def test_2d_only_features_say_so_on_a_3d_project(client):

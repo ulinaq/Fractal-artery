@@ -488,15 +488,12 @@ def export(pid: str, fmt: str = "npz", project: Project = Depends(get_project),
         out = Path(tempfile.gettempdir()) / f"perfusion_{pid}.vtp"
         perfio.network_to_vtp(net, out)
         return FileResponse(out, media_type="application/xml", filename=f"{name}.vtp")
-    if not project.has_result:
-        raise HTTPException(409, "no result yet; run the simulation first")
+    _require_field_result(project, store)
     if fmt == "npz":       # the stored blob is already the npz export
         return FileResponse(store.result_path(pid), media_type="application/octet-stream",
                             filename=f"{name}.npz")
     if fmt not in ("csv", "vtk"):
         raise HTTPException(422, "fmt must be 'npz', 'csv', 'vtk' or 'vtp'")
-    if project.grid.is_3d:
-        raise HTTPException(409, "a 3-D result exports as npz (fields) or vtp (vessels)")
     with np.load(store.result_path(pid)) as d:
         dl, mask = tuple(d["domain_limit"]), d["mask"]
         fields = {"pressure": d["pressure"], "flux": d["flux"], "tof": d["tof"]}
@@ -510,19 +507,29 @@ def export(pid: str, fmt: str = "npz", project: Project = Depends(get_project),
     return FileResponse(out, media_type=media, filename=f"{name}.{fmt}")
 
 
+def _require_field_result(project, store) -> None:
+    """409 unless the project holds a solved *field* (the hybrid result blob)."""
+    if not project.has_result:
+        raise HTTPException(409, "no result yet; run the simulation first")
+    if not store.result_path(project.id).exists():
+        raise HTTPException(409, "the direct-connection model has no tissue field to "
+                                 "export; export the vessels (fmt=vtp) or re-run the "
+                                 "hybrid model")
+
+
 @router.get("/projects/{pid}/bundle")
-def export_bundle(pid: str, project: Project = Depends(get_project_2d),
+def export_bundle(pid: str, project: Project = Depends(get_project),
                   store: ProjectStore = Depends(get_store)):
-    """One zip with everything: npz + CSV + VTK fields, summary/meta JSON, and
-    the tracer GIF / MP4 if one exists."""
+    """One zip with everything: npz + CSV + VTK fields (2-D or 3-D), summary/meta
+    JSON, and — if a tracer exists — its frames (``tracer.npz``) plus, in 2-D, the
+    tracer GIF / MP4."""
     import contextlib
     import json
     import zipfile
 
     from fastapi.responses import FileResponse
 
-    if not project.has_result:
-        raise HTTPException(409, "no result yet; run the simulation first")
+    _require_field_result(project, store)
     name = project.name or project.id
     with np.load(store.result_path(pid)) as d:
         dl, mask = tuple(d["domain_limit"]), d["mask"]
@@ -544,6 +551,8 @@ def export_bundle(pid: str, project: Project = Depends(get_project_2d),
         z.writestr("summary.json", json.dumps(project.summary, indent=2))
         z.writestr("meta.json", json.dumps(meta, indent=2))
         if project.has_tracer:
+            z.write(store.tracer_path(pid), "tracer.npz")
+        if project.has_tracer and not project.grid.is_3d:     # GIF / MP4 are 2-D renders
             tracer = store.load_tracer(pid)
             with contextlib.suppress(ImportError):   # GIF needs the image extra
                 z.writestr("tracer.gif", helpers.render_gif(tracer))

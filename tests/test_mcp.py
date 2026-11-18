@@ -4,6 +4,8 @@ The tool *logic* (``simulate`` / ``model_info``) needs no ``mcp`` package; the
 server construction does (``pytest.importorskip``).
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -80,7 +82,7 @@ def test_server_registers_expected_tools():
             "sobol_sensitivity_indices", "calibrate_parameter_to_flow",
             "tissue_perfusion_analysis", "optimize_trees_in_tissue",
             "tissue_uncertainty_calibration", "direct_model_in_tissue",
-            "describe_model"} <= tools
+            "export_tissue_fields", "describe_model"} <= tools
 
 
 def test_calibrate_to_flow_recovers_value():
@@ -322,3 +324,14 @@ def test_direct_model_in_tissue(dim):
     assert out["n_connections"] == out["n_terminals"]["artery"]
     assert out["connection_length"]["mean"] > 0
     assert out["transit"]["mtt_to_outlet"] > 0
+
+
+@pytest.mark.parametrize("dim", [2, 3])
+def test_export_tissue_fields(tmp_path, dim):
+    out = mcp_server.tissue_export(str(tmp_path), dim=dim, shape="kidney", generations=3,
+                                   n_terminals=10)
+    assert out["inflow"] > 0
+    for path in out["files"].values():
+        assert Path(path).stat().st_size > 0
+    header = Path(out["files"]["fields.csv"]).read_text().splitlines()[0]
+    assert header == ("x,y,z," if dim == 3 else "x,y,") + "pressure,flux,tof"

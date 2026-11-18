@@ -295,8 +295,12 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   mixing a 2-D and a 3-D tree raises), the direct blob / network-tracer lines carry z
   (`Network.segment_lines`: 7-col rows `[x,y,z,x,y,z,flow]`, 6-col tracer lines), and
   `view3d` returns `direct` (+ `net_tracer` for `field=tracer`) instead of a voxel field
-  — any other field is a 409. Still 2-D-only (`deps.get_project_2d` → 409):
-  masks/lesions/hotspots, GIF/MP4 and field CSV/VTK. New
+  — any other field is a 409. **Field exports** (`export?fmt=csv|vtk`, `/bundle`) work in
+  3-D: `io.fields_to_csv/_to_vtk` take a 2-D or 3-D field (4/6-value `domain_limit`;
+  CSV `x,y[,z],…` rows x-fastest, VTI a voxel volume); a direct result has no field →
+  409 (`_require_field_result`), its vessels still export as `vtp`. The 3-D bundle ships
+  `tracer.npz` instead of a GIF/MP4. Still 2-D-only (`deps.get_project_2d` → 409):
+  masks/lesions/hotspots and the GIF/MP4 renders. New
   project features must either work in 3-D or be guarded. Oxygen's Damköhler rate is
   scaled by the *active* tissue volume (`oxygen.solve_oxygen`) — keep it that way.
 - **Default trees** (no vessels drawn): `runner.default_trees` fits the thesis trees

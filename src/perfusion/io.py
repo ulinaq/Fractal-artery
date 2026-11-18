@@ -107,30 +107,41 @@ def save_results(result: HybridResult, path: str | Path) -> Path:
     return path if path.suffix else path.with_suffix(".npz")
 
 
-def _cell_centres(nx: int, ny: int, domain_limit):
-    """Column-major (x-fastest) cell-centre coordinates over the domain window."""
-    xmin, xmax, ymin, ymax = domain_limit
-    xc = xmin + (np.arange(nx) + 0.5) * (xmax - xmin) / nx
-    yc = ymin + (np.arange(ny) + 0.5) * (ymax - ymin) / ny
-    x, y = np.meshgrid(xc, yc, indexing="ij")
-    return x, y
+def _cell_centres(shape, domain_limit):
+    """Column-major (x-fastest) cell-centre coordinates over the domain window —
+    ``(x, y)`` for a 2-D ``shape`` with a 4-value ``domain_limit``, ``(x, y, z)`` for
+    a 3-D one with 6 values."""
+    lim = np.asarray(domain_limit, dtype=float)
+    axes = [lo + (np.arange(n) + 0.5) * (hi - lo) / n
+            for n, lo, hi in zip(shape, lim[0::2], lim[1::2], strict=True)]
+    return np.meshgrid(*axes, indexing="ij")
+
+
+def _check_frame(pressure, domain_limit) -> tuple[int, ...]:
+    shape = np.shape(pressure)
+    if len(shape) not in (2, 3) or len(domain_limit) != 2 * len(shape):
+        raise ValueError(f"a {len(shape)}-D field needs {2 * len(shape)} domain_limit "
+                         f"values, got {len(domain_limit)}")
+    return shape
 
 
 def fields_to_csv(path: str | Path, domain_limit, *, pressure, flux, tof,
                   mask=None) -> Path:
     """Write the fields as a long-format CSV: one row per (active) cell.
 
-    Columns ``x,y,pressure,flux,tof`` at cell centres in the ``domain_limit``
-    frame. With ``mask`` given, only active cells are written (organ-shaped).
+    Columns ``x,y,pressure,flux,tof`` (``x,y,z,…`` for a 3-D field) at cell centres in
+    the ``domain_limit`` frame. With ``mask`` given, only active cells are written
+    (organ-shaped). Rows run x-fastest (column-major), in 2-D and 3-D alike.
     """
-    nx, ny = pressure.shape
-    x, y = _cell_centres(nx, ny, domain_limit)
-    cols = [x, y, pressure, flux, tof]
-    flat = np.column_stack([c.ravel(order="F") for c in cols])
+    shape = _check_frame(pressure, domain_limit)
+    coords = _cell_centres(shape, domain_limit)
+    cols = [*coords, pressure, flux, tof]
+    flat = np.column_stack([np.asarray(c, dtype=float).ravel(order="F") for c in cols])
     if mask is not None:
         flat = flat[np.asarray(mask, dtype=bool).ravel(order="F")]
+    names = "xyz"[:len(shape)]
     path = Path(path)
-    np.savetxt(path, flat, delimiter=",", header="x,y,pressure,flux,tof",
+    np.savetxt(path, flat, delimiter=",", header=",".join([*names, "pressure", "flux", "tof"]),
                comments="", fmt="%.6g")
     return path
 
@@ -139,14 +150,18 @@ def fields_to_vtk(path: str | Path, domain_limit, *, pressure, flux, tof,
                   mask=None) -> Path:
     """Write a VTK ImageData (``.vti``) file (ASCII) that opens in ParaView.
 
-    Fields become cell data on a uniform grid over ``domain_limit``; non-finite
-    values are zeroed and an ``active`` array (from ``mask``) marks the organ so
-    inactive cells can be thresholded out.
+    Fields become cell data on a uniform grid over ``domain_limit`` — a one-cell-thick
+    slab for a 2-D field, a voxel volume for a 3-D one; non-finite values are zeroed
+    and an ``active`` array (from ``mask``) marks the organ so inactive cells can be
+    thresholded out.
     """
-    nx, ny = pressure.shape
-    xmin, _, ymin, _ = domain_limit
-    sx, sy = (domain_limit[1] - xmin) / nx, (domain_limit[3] - ymin) / ny
-    active = (np.ones((nx, ny), bool) if mask is None else np.asarray(mask, bool))
+    shape = _check_frame(pressure, domain_limit)
+    lim = np.asarray(domain_limit, dtype=float)
+    dims = [*shape, 1] if len(shape) == 2 else list(shape)
+    origin = [*lim[0::2], 0.0][:3]
+    spacing = [(hi - lo) / n for n, lo, hi in zip(shape, lim[0::2], lim[1::2], strict=True)]
+    spacing = [*spacing, 1.0][:3]
+    active = (np.ones(shape, bool) if mask is None else np.asarray(mask, bool))
 
     def _array(name, a, dtype="Float64"):
         vals = np.nan_to_num(np.asarray(a, dtype=float), nan=0.0, posinf=0.0, neginf=0.0)
@@ -158,12 +173,14 @@ def fields_to_vtk(path: str | Path, domain_limit, *, pressure, flux, tof,
         _array("pressure", pressure), _array("flux", flux), _array("tof", tof),
         _array("active", active.astype(int), "Int32"),
     ])
+    extent = " ".join(f"0 {n}" for n in dims)
     xml = (
         '<?xml version="1.0"?>\n'
         '<VTKFile type="ImageData" version="1.0" byte_order="LittleEndian">\n'
-        f'  <ImageData WholeExtent="0 {nx} 0 {ny} 0 1" '
-        f'Origin="{xmin} {ymin} 0" Spacing="{sx:.6g} {sy:.6g} 1">\n'
-        f'    <Piece Extent="0 {nx} 0 {ny} 0 1">\n'
+        f'  <ImageData WholeExtent="{extent}" '
+        f'Origin="{" ".join(f"{v:.6g}" for v in origin)}" '
+        f'Spacing="{" ".join(f"{v:.6g}" for v in spacing)}">\n'
+        f'    <Piece Extent="{extent}">\n'
         '      <CellData Scalars="pressure">\n'
         f"{body}\n"
         "      </CellData>\n"

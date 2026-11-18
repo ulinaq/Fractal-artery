@@ -102,7 +102,8 @@ function show3dProject() {
   if (s && data.has_result && !$("v3-cal-target").value) {   // a sensible default target
     $("v3-cal-target").value = Number((1.2 * s.arterial_inflow).toPrecision(3));
   }
-  $("v3-an-card").hidden = direct;
+  $("v3-an-card").hidden = direct;                 // UQ / calibration re-solve the hybrid
+  syncExport();
   $("v3-flow-desc").textContent = direct
     ? "Time a contrast bolus along the vessels and their terminal links, then play it."
     : "Advect a contrast bolus through the 3-D bed, then play it or map its kinetics.";                 // UQ / calibration re-solve the hybrid
@@ -113,6 +114,16 @@ function show3dProject() {
 
 // the active bolus animation: tissue voxels (hybrid) or network elements (direct)
 const tracerOf = (d) => (d && (d.tracer || d.net_tracer)) || null;
+
+// Export: field formats need a solved hybrid field; the vessels (.vtp) always export.
+function syncExport() {
+  const fmt = $("v3-export-fmt");
+  const hasField = !!(data && data.has_result && !data.direct);
+  for (const o of fmt.options) o.disabled = o.value !== "vtp" && !hasField;
+  if (fmt.selectedOptions[0].disabled) { fmt.value = "vtp"; fmt.dataset.forced = "1"; }
+  else if (hasField && fmt.dataset.forced) { fmt.value = "npz"; delete fmt.dataset.forced; }
+  $("v3-bundle").disabled = !hasField;
+}
 
 function startAnimation() {
   const t = tracerOf(data);
@@ -292,6 +303,17 @@ $("v3-scrub").addEventListener("input", (e) => {
 });
 $("v3-run").addEventListener("click", () => run3d().catch((e) => { $("v3-run-info").textContent = e.message; }));
 $("v3-field").addEventListener("change", () => loadProject().catch(() => {}));
+$("v3-export-fmt").addEventListener("change", (e) => { delete e.target.dataset.forced; });
+$("v3-export").addEventListener("click", () => {
+  window.location = `/projects/${PROJECT}/export?fmt=${$("v3-export-fmt").value}`;
+});
+$("v3-bundle").addEventListener("click", () => { window.location = `/projects/${PROJECT}/bundle`; });
+$("v3-png").addEventListener("click", () => {
+  const a = document.createElement("a");
+  a.href = canvas.toDataURL("image/png");
+  a.download = `${(data && data.tissue) || "perfusion"}-3d.png`;
+  a.click();
+});
 $("v3-model").addEventListener("change", (e) => {
   $("v3-rhoc-row").hidden = e.target.value !== "direct";
   const stored = data && data.has_result ? (data.direct ? "direct" : "hybrid") : null;

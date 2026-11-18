@@ -1,5 +1,7 @@
 """The Tree explorer: anatomical roots per organ, manual roots, 3-D fields."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -188,6 +190,8 @@ def test_3d_viewer_direct_connection_model(page, server):
     assert page.is_hidden("#v3-field-row")
     assert page.is_hidden("#v3-an-card")
     assert "terminal connections" in page.inner_text("#info")
+    assert page.input_value("#v3-export-fmt") == "vtp"      # no tissue field to export
+    assert page.is_disabled("#v3-bundle")
     page.click("#v3-flow")
     page.wait_for_selector("#v3-play-row:not([hidden])", timeout=120000)
     assert page.inner_text("#v3-time").startswith("t = ")
@@ -206,6 +210,16 @@ def test_3d_viewer_direct_connection_model(page, server):
                            ".includes('MTT')", timeout=120000)
     assert page.is_visible("#v3-field-row")
     assert page.is_visible("#v3-an-card")
+    assert page.is_enabled("#v3-bundle")
+    assert page.input_value("#v3-export-fmt") == "npz"      # back from the forced .vtp
+    page.select_option("#v3-export-fmt", "csv")
+    with page.expect_download() as dl:
+        page.click("#v3-export")
+    assert dl.value.suggested_filename.endswith(".csv")
+    assert Path(dl.value.path()).read_text().startswith("x,y,z,pressure")
+    with page.expect_download() as dl:
+        page.click("#v3-png")
+    assert dl.value.suggested_filename.endswith("-3d.png")
     assert not errors
 
 
