@@ -146,8 +146,8 @@ def demo3d_payload(gen: int = 6) -> dict:
 
 
 def rebuild_network(template, node_x, node_y, seg_start, seg_end, seg_radius,
-                    inlet_nodes, root_node):
-    """Rebuild a 2-D :class:`Network` from edited nodes + topology.
+                    inlet_nodes, root_node, node_z=None):
+    """Rebuild a :class:`Network` from edited nodes + topology (3-D with ``node_z``).
 
     Validates indices, drops isolated (degree-0) non-inlet nodes left by
     deletions, reindexes, re-derives ``node_role`` by degree and recomputes
@@ -164,8 +164,9 @@ def rebuild_network(template, node_x, node_y, seg_start, seg_end, seg_radius,
     se = np.asarray(seg_end, int)
     radius = np.maximum(np.asarray(seg_radius, float), 1e-3)
     n = len(nx)
-    if len(ny) != n:
-        raise HTTPException(422, "node_x and node_y must be the same length")
+    nz = None if node_z is None else np.asarray(node_z, float)
+    if len(ny) != n or (nz is not None and len(nz) != n):
+        raise HTTPException(422, "node_x, node_y (and node_z) must be the same length")
     if len(ss) != len(se) or len(radius) != len(ss):
         raise HTTPException(422, "seg_start, seg_end and seg_radius must align")
     if len(ss) and (ss.min() < 0 or se.min() < 0 or ss.max() >= n or se.max() >= n):
@@ -194,6 +195,7 @@ def rebuild_network(template, node_x, node_y, seg_start, seg_end, seg_radius,
     ss2, se2 = old2new[ss[seg_ok]], old2new[se[seg_ok]]
     r2 = radius[seg_ok]
     nx2, ny2 = nx[keep], ny[keep]
+    nz2 = None if nz is None else nz[keep]
     inl2 = old2new[inl] if inl.size else np.array([0], int)
 
     root2 = 0
@@ -210,10 +212,18 @@ def rebuild_network(template, node_x, node_y, seg_start, seg_end, seg_radius,
     role[inl2] = int(NodeRole.ROOT)
     return Network(
         node_x=nx2, node_y=ny2, node_role=role, seg_start=ss2, seg_end=se2,
-        seg_length=np.hypot(nx2[se2] - nx2[ss2], ny2[se2] - ny2[ss2]),
+        seg_length=segment_lengths(nx2, ny2, nz2, ss2, se2),
         seg_radius=r2, seg_angle=np.arctan2(ny2[se2] - ny2[ss2], nx2[se2] - nx2[ss2]),
-        root_node=root2, inlet_nodes=inl2,
+        root_node=root2, inlet_nodes=inl2, node_z=nz2,
     )
+
+
+def segment_lengths(nx, ny, nz, ss, se) -> np.ndarray:
+    """Euclidean segment lengths in 2-D, or 3-D when ``nz`` is given."""
+    d2 = (nx[se] - nx[ss]) ** 2 + (ny[se] - ny[ss]) ** 2
+    if nz is not None:
+        d2 = d2 + (nz[se] - nz[ss]) ** 2
+    return np.sqrt(d2)
 
 
 def tracer_aif(d: dict) -> np.ndarray:

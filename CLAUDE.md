@@ -286,7 +286,11 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   `hematocrit` don't enter the 3-D solve and are rejected, never silently ignored. The
   multicompartment bed is dimension-agnostic (`multicompartment._tpfa/_source`, fields
   keep `grid.mask.shape`; N=1 ≡ `run_hybrid_3d`), shown as `view3d?field=mc_*`.
-  Still 2-D-only (`deps.get_project_2d` → 409): hand editing, masks/lesions/hotspots,
+  **Hand editing** works on 3-D trees too: `PUT /editable` takes `node_z` (required on a
+  3-D project, rejected on 2-D), `helpers.rebuild_network(node_z=)` keeps z and 3-D
+  lengths (`helpers.segment_lengths`); the viewer's editor is `frontend/edit3d.js`
+  (screen-plane drags via `viewer3d.unproject`, which must stay the exact inverse of
+  `project`). Still 2-D-only (`deps.get_project_2d` → 409): masks/lesions/hotspots,
   the direct model, GIF/MP4 and field CSV/VTK. New
   project features must either work in 3-D or be guarded. Oxygen's Damköhler rate is
   scaled by the *active* tissue volume (`oxygen.solve_oxygen`) — keep it that way.

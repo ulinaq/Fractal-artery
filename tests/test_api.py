@@ -1469,6 +1469,63 @@ def test_3d_project_multicompartment_bed(client):
     assert mean(a) > mean(vn)                            # arteriole → venule cascade
 
 
+def test_3d_project_trees_are_hand_editable(client):
+    """PUT /editable on a 3-D project: add a branch, move a node in z, resize, toggle an
+    inlet — z survives the rebuild, lengths are 3-D, and the edited trees solve."""
+    pid = _explorer_project(client, 3)["id"]
+    a = client.get(f"/projects/{pid}/editable").json()["artery"]
+    assert a["node_z"] is not None
+    n0, s0 = len(a["node_x"]), len(a["seg_start"])
+    tip = a["seg_end"][-1]
+    a["node_x"].append(a["node_x"][tip] + 3)
+    a["node_y"].append(a["node_y"][tip])
+    a["node_z"].append(a["node_z"][tip] + 4)
+    a["seg_start"].append(tip)
+    a["seg_end"].append(n0)
+    a["seg_radius"].append(0.5)
+    a["node_z"][1] += 1.5
+    a["seg_radius"][0] *= 1.3
+    a["inlet_nodes"] = [a["root_node"], 3]
+    keys = ("node_x", "node_y", "node_z", "seg_start", "seg_end", "seg_radius",
+            "inlet_nodes", "root_node")
+    r = client.put(f"/projects/{pid}/editable", json={"artery": {k: a[k] for k in keys}})
+    assert r.status_code == 200, r.text
+    b = client.get(f"/projects/{pid}/editable").json()["artery"]
+    assert len(b["node_x"]) == n0 + 1
+    assert len(b["seg_start"]) == s0 + 1
+    assert b["seg_length"][-1] == pytest.approx(5.0)               # √(3² + 4²): 3-D length
+    assert b["node_z"][1] == pytest.approx(a["node_z"][1])
+    assert b["seg_radius"][0] == pytest.approx(a["seg_radius"][0])
+    assert sorted(b["inlet_nodes"]) == [a["root_node"], 3]
+
+    # a pure move keeps the topology and refreshes the 3-D lengths
+    mv = {"node_x": b["node_x"], "node_y": b["node_y"],
+          "node_z": [z + (2.0 if i == n0 else 0.0) for i, z in enumerate(b["node_z"])],
+          "seg_radius": b["seg_radius"]}
+    assert client.put(f"/projects/{pid}/editable", json={"artery": mv}).status_code == 200
+    c = client.get(f"/projects/{pid}/editable").json()["artery"]
+    assert c["seg_length"][-1] == pytest.approx(np.sqrt(9 + 36))
+
+    no_z = {k: a[k] for k in keys if k != "node_z"}
+    r = client.put(f"/projects/{pid}/editable", json={"artery": no_z})
+    assert r.status_code == 422
+    assert "node_z" in r.json()["detail"]
+
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    res = client.get(f"/projects/{pid}/results").json()
+    assert res["arterial_inflow"] == pytest.approx(res["venous_outflow"], rel=1e-6)
+
+
+def test_2d_project_edits_reject_node_z(client):
+    pid = client.post("/projects", json={"name": "e2", "grid": SMALL_GRID}).json()["id"]
+    body = {"node_x": [0, 10], "node_y": [0, 10], "node_z": [0, 1], "seg_start": [0],
+            "seg_end": [1], "seg_radius": [1.0]}
+    r = client.put(f"/projects/{pid}/editable", json={"artery": body})
+    assert r.status_code == 422
+    assert "only for 3-D" in r.json()["detail"]
+
+
 @pytest.mark.parametrize("method", ["colonization", "cco"])
 def test_3d_project_grows_into_its_tissue(client, method):
     pid = _explorer_project(client, 3)["id"]

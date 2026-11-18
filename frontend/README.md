@@ -100,7 +100,10 @@ no separate dev server.
   Opened on a **3-D project** (`?project=<id>`) it is a workbench: run, grow / prune /
   adapt, 🌊 flow + kinetics, oxygen and multi-compartment fields, and an
   **Uncertainty & calibration** card (Pearson / Sobol UQ over p_in, μ, K; fit one input
-  to a measured value — it warns when the fit stops at a search bound).
+  to a measured value — it warns when the fit stops at a search bound). **✏️ edit the
+  trees by hand** (`edit3d.js`): click to select a node or vessel, drag a node (it moves
+  in the screen plane — rotate to reach depth), Shift+click to branch, S split, I
+  inlet/outlet, Del delete, ⌘/Ctrl+Z undo; each edit saves via `PUT /editable`.
 
 The left-panel **tools are contextual**: picking a tab above the canvas
 (Vessels · Tissue · Result, keys 1–3) shows just that tool card; Project,
@@ -122,11 +125,12 @@ are vectorised into the network and points snap onto the nearest end nodes.
 | `viewport.js`| shared canvas sizing (fills the stage, HiDPI) + zoom/pan/fit for every view |
 | `run.js`     | solve, results, tracer, analyses |
 | `viewer3d.html` / `viewer3d.js` | standalone rotatable 3-D result viewer |
+| `edit3d.js` | hand-editing the 3-D trees in the viewer (pick, drag, branch, undo) |
 | `uqview.js` | UQ result tables (Pearson / Sobol bars), shared by workspace + viewer |
 | `explorer.html` / `explorer.js` | tree explorer: roots, tissue shape, 2-D/3-D growth |
 
 ## Roadmap
 
 The zero-build stack stays deliberately small. Still open for the UI (see
-`docs/ROADMAP.md` §11): hand-editing 3-D trees, a run-comparison view, and an
+`docs/ROADMAP.md` §11): a run-comparison view, and an
 optional React/Vite + vtk.js rebuild against the same API.
