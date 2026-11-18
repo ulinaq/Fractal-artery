@@ -205,7 +205,7 @@ def oxygen_map(pid: str, field: str = "saturation", k: float = 1.0, c_art: float
 
 
 @router.post("/projects/{pid}/calibrate")
-def calibrate_parameter(body: CalibrateRequest, project: Project = Depends(get_project_2d)) -> dict:
+def calibrate_parameter(body: CalibrateRequest, project: Project = Depends(get_project)) -> dict:
     """Inverse problem: recover ``param`` so the model's ``qoi`` matches ``target``
     (bounded 1-D search over forward solves). Useful to fit permeability or inlet
     pressure to a measured flow."""
@@ -218,7 +218,7 @@ def calibrate_parameter(body: CalibrateRequest, project: Project = Depends(get_p
 
 
 @router.post("/projects/{pid}/uq")
-def uncertainty_quantification(body: UQRequest, project: Project = Depends(get_project_2d)) -> dict:
+def uncertainty_quantification(body: UQRequest, project: Project = Depends(get_project)) -> dict:
     """Monte-Carlo uncertainty quantification: sample the given input ranges
     (Latin-hypercube), re-solve, and return each quantity of interest's
     mean/std/5-95 percentiles plus first-order sensitivities (Pearson r). Runs
@@ -234,7 +234,7 @@ def uncertainty_quantification(body: UQRequest, project: Project = Depends(get_p
 
 @router.get("/projects/{pid}/multicompartment")
 def multicompartment_map(pid: str, field: str = "perfusion", n: int = 3, beta: float = 1.0,
-                         project: Project = Depends(get_project_2d)) -> dict:
+                         project: Project = Depends(get_project)) -> dict:
     """Multi-compartment Darcy bed (arteriole→…→venule) with inter-compartment
     exchange ``beta``. ``field='perfusion'`` returns the arteriole→next exchange (the
     capillary perfusion map); ``field='comp0'..'comp{n-1}'`` a compartment pressure.
@@ -330,8 +330,8 @@ def network_tracer(pid: str, project: Project = Depends(get_project_2d),
 
 
 @router.get("/projects/{pid}/view3d")
-def project_view3d(pid: str, field: str = "pressure", k: float = 1.0,
-                   project: Project = Depends(get_project),
+def project_view3d(pid: str, field: str = "pressure", k: float = 1.0, n: int = 3,
+                   beta: float = 1.0, project: Project = Depends(get_project),
                    store: ProjectStore = Depends(get_store)) -> dict:
     """This project's result as a 3-D scene. A 2-D project: pressure as a relief
     surface (z ∝ pressure) with the vessel trees at the base. A **3-D project**: its
@@ -339,9 +339,11 @@ def project_view3d(pid: str, field: str = "pressure", k: float = 1.0,
     run. 3-D fields: ``pressure`` / ``flux`` / ``tof`` (the solve), ``saturation`` /
     ``consumption`` (oxygen, Damköhler number ``k``), ``Fp`` / ``vp`` / ``CBV`` /
     ``MTT`` (kinetic maps from the tracer) and ``tracer`` (the bolus animation:
-    per-frame voxel values in ``tracer.frames``)."""
+    per-frame voxel values in ``tracer.frames``), and ``mc_perfusion`` /
+    ``mc_arteriole`` / ``mc_venule`` (an ``n``-compartment bed with exchange ``beta``:
+    the capillary exchange, or the first / last compartment pressure)."""
     if project.grid.is_3d:
-        return _view3d_volume(project, store, field, k=k)
+        return _view3d_volume(project, store, field, k=k, n=n, beta=beta)
     grid, dom = runner.build_grid(project)
     x0, x1, y0, y1 = dom
     art, ven = runner.build_networks(project, use_vessels=True, defaults=True)
@@ -381,10 +383,23 @@ def project_view3d(pid: str, field: str = "pressure", k: float = 1.0,
 _V3_RESULT = ("pressure", "flux", "tof")
 _V3_OXYGEN = ("saturation", "consumption")
 _V3_TRACER = {"Fp": "semi", "vp": "semi", "CBV": "deconv", "MTT": "deconv"}
-V3_FIELDS = (*_V3_RESULT, *_V3_OXYGEN, *_V3_TRACER, "tracer")
+_V3_MC = ("mc_perfusion", "mc_arteriole", "mc_venule")
+V3_FIELDS = (*_V3_RESULT, *_V3_OXYGEN, *_V3_TRACER, "tracer", *_V3_MC)
 
 
-def _view3d_volume(project, store, field: str, k: float = 1.0) -> dict:
+def _mc_field(project, field: str, n: int, beta: float):
+    """A multi-compartment field for the viewer (``mc_*`` → runner field name)."""
+    n = int(np.clip(n, 2, 5))
+    name = {"mc_perfusion": "perfusion", "mc_arteriole": "comp0",
+            "mc_venule": f"comp{n - 1}"}[field]
+    try:
+        return runner.multicompartment_field(project, field=name, n=n, beta=beta)[0]
+    except runner.InputError as e:
+        raise HTTPException(400, str(e)) from None
+
+
+def _view3d_volume(project, store, field: str, k: float = 1.0, n: int = 3,
+                   beta: float = 1.0) -> dict:
     """The 3-D scene of a 3-D project (same payload shape as ``/demo3d``)."""
     if field not in V3_FIELDS:
         raise HTTPException(422, f"field must be one of {list(V3_FIELDS)}")
@@ -419,6 +434,10 @@ def _view3d_volume(project, store, field: str, k: float = 1.0) -> dict:
         elif field in _V3_OXYGEN:
             f, oef = runner.oxygen_field(project, field, k=k)
             out["oef"] = oef
+        elif field in _V3_MC:
+            f = _mc_field(project, field, n, beta)
+            out["mc"] = {"n": int(np.clip(n, 2, 5)), "beta": beta,
+                         "perfusion": float(np.nansum(f)) if field == "mc_perfusion" else None}
         else:
             f = helpers.tracer_map(store.load_tracer(project.id), field, _V3_TRACER[field])
         vals = f[tuple(idx.T)]

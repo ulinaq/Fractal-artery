@@ -171,7 +171,10 @@ def build_networks(project, use_vessels, defaults=False):
 def tree_builder(project):
     """For sweeps (UQ / calibration): ``prm -> (art, ven)`` rebuilding the default
     trees per sample when the project has none (so ``r_min_frac`` matters), else
-    ``None`` (the project's own trees are used as-is)."""
+    ``None`` (the project's own trees are used as-is). A 3-D project's trees don't
+    depend on the parameters, so it always returns ``None``."""
+    if is_3d(project):
+        return None
     art, ven = build_networks(project, use_vessels=True)
     if art is not None and ven is not None:
         return None
@@ -337,16 +340,28 @@ def run_project(store, project, req: RunRequest) -> None:
     store.save_result(project, result, notes=notes or None)
 
 
+def _check_sweep_params(project, names) -> None:
+    """A 3-D project's sweeps can only vary what the 3-D hybrid depends on."""
+    from ..uq import PARAMS_3D
+
+    bad = [n for n in names if n not in PARAMS_3D]
+    if is_3d(project) and bad:
+        raise InputError(f"{', '.join(bad)} cannot vary on a 3-D project: its trees are "
+                         "fixed and the 3-D solve uses one viscosity. Vary "
+                         f"{', '.join(PARAMS_3D)} instead.")
+
+
 def calibrate(project, target: float, param: str, bounds, qoi: str = "arterial_inflow") -> dict:
     """Recover ``param`` so the project model's ``qoi`` matches ``target`` (inverse
     problem). Returns the recovered value + achieved QoI as a JSON-ready dict."""
     from .. import inverse
 
+    _check_sweep_params(project, [param])
     grid, art, ven = validate_run(project, use_vessels=True)
     base = project.params.model_dump()
     build = tree_builder(project)           # default trees rebuilt per sample if used
     res = inverse.calibrate(float(target), param, grid, tuple(bounds), qoi=qoi, base=base,
-                            domain_limit=project.grid.domain_limit,
+                            domain_limit=tuple(project.grid.domain_limit),
                             art=None if build else art, ven=None if build else ven,
                             trees=build)
     return {"param": res.param, "value": res.value, "target": res.target,
@@ -362,21 +377,23 @@ def uncertainty(project, param_ranges: dict, n_samples: int = 32, seed: int = 0,
     indices (with the surrogate fit R²). JSON-ready dict either way."""
     from .. import uq
 
+    _check_sweep_params(project, list(param_ranges))
     grid, art, ven = validate_run(project, use_vessels=True)
     base = project.params.model_dump()          # fixed Parameters fields
     ranges = {k: tuple(v) for k, v in param_ranges.items()}
+    domain_limit = tuple(project.grid.domain_limit)
     build = tree_builder(project)           # default trees rebuilt per sample if used
     if build:
         art = ven = None
     if method == "sobol":
         res = uq.sobol_indices(ranges, grid, n_samples=n_samples, base=base, seed=seed,
-                               domain_limit=project.grid.domain_limit, art=art, ven=ven,
+                               domain_limit=domain_limit, art=art, ven=ven,
                                trees=build)
         return {"method": "sobol", "names": res.names, "qoi_names": res.qoi_names,
                 "n_samples": res.n_samples, "first_order": res.first_order,
                 "total_effect": res.total_effect, "fit_r2": res.fit_r2}
     res = uq.monte_carlo(ranges, grid, n_samples=n_samples, base=base, seed=seed,
-                         domain_limit=project.grid.domain_limit, art=art, ven=ven,
+                         domain_limit=domain_limit, art=art, ven=ven,
                          trees=build)
     return {"method": "correlation", "names": res.names, "qoi_names": res.qoi_names,
             "n_samples": int(n_samples), "mean": res.mean, "std": res.std,
@@ -401,7 +418,8 @@ def multicompartment_field(project, field: str = "perfusion", n: int = 3,
                            beta: float = 1.0):
     """Solve an ``n``-compartment Darcy bed (arteriole→…→venule, uniform exchange
     ``beta``) and return one field: ``perfusion`` (the arteriole→next exchange, i.e.
-    the capillary perfusion) or ``comp{c}`` (compartment ``c`` pressure)."""
+    the capillary perfusion) or ``comp{c}`` (compartment ``c`` pressure). A 3-D
+    project stacks 3-D compartments, so the field is ``(nx, ny, nz)``."""
     from ..core.pipeline import run_multicompartment
 
     n = int(np.clip(n, 2, 5))
@@ -409,7 +427,7 @@ def multicompartment_field(project, field: str = "perfusion", n: int = 3,
     prm = project.params.to_core()
     res = run_multicompartment(prm, grid, permeabilities=tuple([1.0] * n),
                                betas=tuple([float(beta)] * (n - 1)),
-                               domain_limit=project.grid.domain_limit, art=art, ven=ven)
+                               domain_limit=tuple(project.grid.domain_limit), art=art, ven=ven)
     if field == "perfusion":
         return res.perfusion[0], n
     if field.startswith("comp"):

@@ -280,8 +280,14 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   tracer (+ kinetics, kinetic maps) and oxygen work on 3-D projects: `HybridResult3D`
   carries `fx/fy/fz` + `sources`, and `transport`/`oxygen` take `fz=`; the viewer shows
   them via `GET /projects/{id}/view3d?field=` (incl. `tracer` per-frame voxels).
+  UQ / Sobol / calibration run on 3-D too: `uq._sample_solver` dispatches a `Grid3D` to
+  `run_hybrid_3d` with fixed trees and one reused `darcy_coupling_3d` (unless K varies);
+  only `uq.PARAMS_3D` (p_in, p_out, mu, permeability) may vary — `r_min_frac`/
+  `hematocrit` don't enter the 3-D solve and are rejected, never silently ignored. The
+  multicompartment bed is dimension-agnostic (`multicompartment._tpfa/_source`, fields
+  keep `grid.mask.shape`; N=1 ≡ `run_hybrid_3d`), shown as `view3d?field=mc_*`.
   Still 2-D-only (`deps.get_project_2d` → 409): hand editing, masks/lesions/hotspots,
-  the direct model, UQ/calibration, multicompartment, GIF/MP4 and field CSV/VTK. New
+  the direct model, GIF/MP4 and field CSV/VTK. New
   project features must either work in 3-D or be guarded. Oxygen's Damköhler rate is
   scaled by the *active* tissue volume (`oxygen.solve_oxygen`) — keep it that way.
 - **Default trees** (no vessels drawn): `runner.default_trees` fits the thesis trees

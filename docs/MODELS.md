@@ -166,6 +166,9 @@ perfusion_c(x) = β_c · V · (p_c(x) − p_{c+1}(x))
 ```
 
 At steady state `Σ perfusion₀ = arterial inflow = venous outflow` (conservation).
+The same block construction works on a 3-D grid (`Grid3D`: 3-D TPFA blocks and bump
+sources, scalar viscosity as in `run_hybrid_3d`); `N = 1` again reduces exactly to the
+single-bed 3-D hybrid.
 
 ---
 

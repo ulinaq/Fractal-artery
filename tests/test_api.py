@@ -1369,7 +1369,7 @@ def test_2d_only_features_say_so_on_a_3d_project(client):
     pid = _explorer_project(client, 3)["id"]
     for method, path, body in [
         ("put", "mask", {"regions": []}), ("get", "results/field/pressure", None),
-        ("get", "tracer", None), ("post", "uq", {"params": {"p_in": [9, 11]}}),
+        ("get", "tracer", None), ("get", "tracer.gif", None),
     ]:
         r = getattr(client, method)(f"/projects/{pid}/{path}",
                                     **({"json": body} if body is not None else {}))
@@ -1412,6 +1412,61 @@ def test_3d_project_flow_kinetics_and_oxygen(client):
         assert v["pressure"]["voxels"], field
     assert 0 < client.get(f"/projects/{pid}/view3d?field=saturation&k=2").json()["oef"] < 1
     assert client.get(f"/projects/{pid}/view3d?field=nope").status_code == 422
+
+
+def test_3d_project_uncertainty_and_calibration(client):
+    """UQ (Pearson + Sobol) and calibration re-solve a 3-D project's own model."""
+    pid = _explorer_project(client, 3)["id"]
+    r = client.post(f"/projects/{pid}/uq", json={"params": {"p_in": [5, 15], "mu": [0.8, 1.5]},
+                                                 "n_samples": 6})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["mean"]["arterial_inflow"] > 0
+    assert d["sensitivity"]["arterial_inflow"]["p_in"] > 0.5
+    r = client.post(f"/projects/{pid}/uq", json={"params": {"p_in": [5, 15],
+                                                            "permeability": [0.5, 2]},
+                                                 "n_samples": 10, "method": "sobol"})
+    assert r.status_code == 200, r.text
+    assert r.json()["fit_r2"]["arterial_inflow"] > 0.9
+
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    base = client.get(f"/projects/{pid}/results").json()["arterial_inflow"]
+    r = client.post(f"/projects/{pid}/calibrate",
+                    json={"target": 1.5 * base, "param": "p_in", "bounds": [1, 40]})
+    assert r.status_code == 200, r.text
+    cal = r.json()
+    assert cal["value"] == pytest.approx(1.5 * 10.0, rel=1e-3)   # inflow is linear in p_in
+    assert cal["achieved"] == pytest.approx(1.5 * base, rel=1e-5)
+
+    # tree depth / hematocrit don't enter the 3-D solve → a clear 400, not a silent no-op
+    r = client.post(f"/projects/{pid}/uq",
+                    json={"params": {"r_min_frac": [0.3, 0.6]}, "n_samples": 4})
+    assert r.status_code == 400
+    assert "3-D project" in r.json()["detail"]
+    r = client.post(f"/projects/{pid}/calibrate",
+                    json={"target": 1.0, "param": "hematocrit", "bounds": [0.2, 0.6]})
+    assert r.status_code == 400
+
+
+def test_3d_project_multicompartment_bed(client):
+    pid = _explorer_project(client, 3)["id"]
+    perf = client.get(f"/projects/{pid}/multicompartment", params={"n": 3, "beta": 1.0}).json()
+    assert perf["shape"] == [16, 16, 16]
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    inflow = client.get(f"/projects/{pid}/results").json()["arterial_inflow"]
+    v = client.get(f"/projects/{pid}/view3d", params={"field": "mc_perfusion", "n": 3}).json()
+    assert v["pressure"]["voxels"]
+    assert v["mc"]["n"] == 3
+    # every unit of blood crosses the arteriole→capillary interface (≈ the 1-bed inflow)
+    assert v["mc"]["perfusion"] == pytest.approx(inflow, rel=0.2)
+    a = client.get(f"/projects/{pid}/view3d", params={"field": "mc_arteriole"}).json()
+    vn = client.get(f"/projects/{pid}/view3d", params={"field": "mc_venule"}).json()
+
+    def mean(view):
+        return np.mean([x[3] for x in view["pressure"]["voxels"]])
+    assert mean(a) > mean(vn)                            # arteriole → venule cascade
 
 
 @pytest.mark.parametrize("method", ["colonization", "cco"])

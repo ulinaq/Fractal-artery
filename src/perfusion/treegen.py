@@ -181,23 +181,30 @@ def tree_stats(net: Network) -> dict:
             "max_order": int(strahler_summary(net)["max_order"]) if net.n_segments else 0}
 
 
+def grid_for(spec: GenSpec, mask, domain):
+    """The tissue's Darcy grid: a ``Grid3D`` over the 3-D window, else a 2-D ``Grid``."""
+    if spec.dim == 3:
+        from .core.darcy3d import Grid3D
+
+        lo, hi = np.asarray(domain[0::2]), np.asarray(domain[1::2])
+        nx, ny, nz = mask.shape
+        return Grid3D(nx=nx, ny=ny, nz=nz, lx=hi[0] - lo[0], ly=hi[1] - lo[1],
+                      lz=hi[2] - lo[2], mask=mask)
+    return Grid(nx=spec.nx, ny=spec.ny, lx=domain[1] - domain[0], ly=domain[3] - domain[2],
+                mask=mask)
+
+
 def solve(spec: GenSpec, art: Network, ven: Network, mask, domain,
           p_in: float = 10.0, p_out: float = 0.0):
     """Solve the hybrid perfusion model on the tissue (2-D or 3-D)."""
     prm = Parameters(p_in=p_in, p_out=p_out)
+    grid = grid_for(spec, mask, domain)
     if spec.dim == 3:
-        from .core.darcy3d import Grid3D
         from .core.pipeline3d import run_hybrid_3d
 
-        lo, hi = np.asarray(domain[0::2]), np.asarray(domain[1::2])
-        n = mask.shape[0]
-        grid = Grid3D(nx=n, ny=n, nz=n, lx=hi[0] - lo[0], ly=hi[1] - lo[1], lz=hi[2] - lo[2],
-                      mask=mask)
         return run_hybrid_3d(prm, grid, art, ven, domain, eps=2.0)
     from .core.pipeline import run_hybrid
 
-    grid = Grid(nx=spec.nx, ny=spec.ny, lx=domain[1] - domain[0], ly=domain[3] - domain[2],
-                mask=mask)
     return run_hybrid(prm, grid, domain, art=art, ven=ven)
 
 

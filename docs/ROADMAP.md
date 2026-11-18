@@ -660,6 +660,14 @@ Effort: **S** ≲ a day, **M** a few days, **L** a week+, **XL** research.
   (`view3d?field=`), and the MCP tool `tissue_perfusion_analysis` (2-D or 3-D). Also
   fixed: oxygen's Damköhler rate now uses the *active* tissue volume (a masked organ
   had a diluted rate → OEF ≈ 0.07 instead of ≈ 0.5 at k = 1).
+- ✅ **UQ, calibration and multi-compartment on 3-D projects** — `uq._sample_solver`
+  runs a `Grid3D` through `run_hybrid_3d` on the fixed 3-D trees, reusing one
+  `darcy_coupling_3d` unless K varies (so a 3-D sweep costs ~one LU); inputs limited to
+  p_in / p_out / μ / K (`uq.PARAMS_3D`, others → clear 400). `core.multicompartment`
+  is dimension-agnostic (N=1 ≡ `run_hybrid_3d`, mass conserved across every interface).
+  3-D viewer: `mc_perfusion` / `mc_arteriole` / `mc_venule` fields and an
+  *Uncertainty & calibration* card; MCP `tissue_uncertainty_calibration` and
+  `tissue_perfusion_analysis(compartments=)`.
 
 Still open from this tier: editing 3-D trees by hand.
 
@@ -700,8 +708,9 @@ Still open from this tier: editing 3-D trees by hand.
   imageio-ffmpeg bundles ffmpeg), ↓ MP4 next to ↓ GIF, also in the export bundle.
 - ✅ ~~**3-D flow video**~~ — tracer transport on the voxel bed, played back in the
   3-D viewer (`view3d?field=tracer`). An MP4 of the 3-D view is not exported yet.
-- ✅ ~~**Workspace result analyses for 3-D**~~ — tracer, kinetics, oxygen, grow, adapt.
-  Still 2-D-only: UQ / calibration, multicompartment, the direct model. *M.*
+- ✅ ~~**Workspace result analyses for 3-D**~~ — tracer, kinetics, oxygen, grow, adapt,
+  and now UQ / Sobol / calibration and the multi-compartment bed (see below). Still
+  2-D-only: hand editing, the direct model. *M.*
 - Optional **React/Vite** rebuild and **vtk.js/WebGL** volume rendering behind the same
   API data — §5, §8. *L.*
 

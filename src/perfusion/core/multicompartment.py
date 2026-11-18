@@ -15,6 +15,9 @@ matrix the network solver already consumes — cross terms now travel through th
 compartment exchange rather than a single bed. With ``N = 1`` it is identical to the
 single-bed :func:`perfusion.darcy.terminal_response`, so the hybrid model is the
 one-compartment special case.
+
+Every function is dimension-agnostic: a 3-D :class:`~perfusion.core.darcy3d.Grid3D`
+uses the 3-D TPFA operator and bump source, and fields keep the mask's shape.
 """
 
 from __future__ import annotations
@@ -28,6 +31,28 @@ import scipy.sparse.linalg as spla
 from .darcy import Grid, mollifier, reconstruct_field, tpfa_operator
 
 
+def _is_3d(grid) -> bool:
+    return getattr(grid, "nz", None) is not None
+
+
+def _tpfa(grid) -> sp.csr_matrix:
+    """The single-compartment TPFA operator for a 2-D or 3-D grid."""
+    if _is_3d(grid):
+        from .darcy3d import tpfa_operator_3d
+
+        return tpfa_operator_3d(grid)
+    return tpfa_operator(grid)[0]
+
+
+def _source(grid, center: int, eps: float):
+    """The mollified terminal source for a 2-D or 3-D grid."""
+    if _is_3d(grid):
+        from .darcy3d import point_source_3d
+
+        return point_source_3d(grid, center, eps)
+    return mollifier(grid, center, eps)
+
+
 def multicompartment_operator(grid: Grid, permeabilities, betas) -> sp.csc_matrix:
     """Block ``(N·n) × (N·n)`` operator for ``N`` exchange-coupled Darcy compartments.
 
@@ -39,7 +64,7 @@ def multicompartment_operator(grid: Grid, permeabilities, betas) -> sp.csc_matri
     n = grid.n_cells
     active = grid.mask.ravel(order="F").astype(float)
     vol = grid.cell_volume
-    ls = [tpfa_operator(replace(grid, permeability=float(k)))[0] for k in permeabilities]
+    ls = [_tpfa(replace(grid, permeability=float(k))) for k in permeabilities]
 
     n_comp = len(permeabilities)
     diag_add = [np.zeros(n) for _ in range(n_comp)]
@@ -81,7 +106,7 @@ def terminal_response_multi(grid: Grid, art_cells: np.ndarray, ven_cells: np.nda
 
     all_cells = np.concatenate([np.asarray(art_cells, int), np.asarray(ven_cells, int)])
     read = np.array([0] * len(art_cells) + [n_comp - 1] * len(ven_cells))
-    sources = [mollifier(grid, int(c), eps) for c in all_cells]
+    sources = [_source(grid, int(c), eps) for c in all_cells]
 
     t = len(all_cells)
     rhs = np.zeros((n_comp * n, t))
@@ -107,7 +132,7 @@ def compartment_fields(mcr: MultiCompartmentResponse, terminal_flux: np.ndarray,
 def exchange_field(grid: Grid, comp_press: np.ndarray, betas) -> np.ndarray:
     """Inter-compartment perfusion ``β (p_c − p_{c+1})`` per cell, per interface.
 
-    Returns ``(N−1, nx, ny)``: the volumetric flow (per unit volume × cell volume)
+    Returns ``(N−1, *grid.mask.shape)``: the volumetric flow (per unit volume × cell volume)
     percolating from each compartment to the next — the capillary perfusion field.
     """
     active = grid.mask.ravel(order="F")
@@ -115,5 +140,5 @@ def exchange_field(grid: Grid, comp_press: np.ndarray, betas) -> np.ndarray:
     for c, beta in enumerate(betas):
         e = float(beta) * grid.cell_volume * (comp_press[c] - comp_press[c + 1])
         e = np.where(active, e, np.nan)
-        out.append(e.reshape(grid.nx, grid.ny, order="F"))
+        out.append(e.reshape(grid.mask.shape, order="F"))
     return np.array(out)

@@ -125,6 +125,45 @@ def test_3d_project_grow_flow_kinetics_and_oxygen_in_the_viewer(page, server):
     assert not errors
 
 
+def test_3d_viewer_multicompartment_uncertainty_and_calibration(page, server):
+    """The 3-D viewer's analyses: a multi-compartment field, an uncertainty run and a
+    calibration — all on the 3-D project, with no page errors."""
+    import httpx
+
+    pid = httpx.post(server + "/explore/project", timeout=60, json={
+        "dim": 3, "shape": "heart", "fill": "cco", "n_terminals": 12, "generations": 3,
+        "nx": 16, "name": "ui-3d-an"}).json()["id"]
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(f"{server}/viewer3d.html?project={pid}")
+    page.wait_for_selector("#v3-an-card:not([hidden])")
+    page.click("#v3-run")
+    page.wait_for_selector("#v3-flow-card:not([hidden])", timeout=120000)
+    assert page.is_hidden("#v3-mc-row")
+    page.select_option("#v3-field", "mc_perfusion")
+    page.wait_for_function("document.querySelector('#v3-summary').textContent"
+                           ".includes('capillary exchange')", timeout=60000)
+    assert page.is_visible("#v3-mc-row")
+
+    page.click("#v3-an-card summary")
+    page.fill("#v3-uq-n", "6")
+    page.click("#v3-uq")
+    page.wait_for_function("document.querySelector('#v3-uq-out').textContent"
+                           ".includes('sensitivity')", timeout=120000)
+    assert "arterial_inflow" in page.inner_text("#v3-uq-out")
+    assert page.input_value("#v3-cal-target")          # prefilled from the solved inflow
+    assert page.input_value("#v3-cal-param") == "p_in"   # the default: inflow ∝ p_in
+    page.select_option("#v3-cal-param", "permeability")
+    assert page.input_value("#v3-cal-hi") == "10"
+    page.select_option("#v3-cal-param", "p_in")
+    assert page.input_value("#v3-cal-hi") == "50"
+    page.click("#v3-cal")
+    page.wait_for_function("document.querySelector('#v3-cal-out').textContent"
+                           ".includes('solves')", timeout=120000)
+    assert page.inner_text("#v3-cal-out").startswith("p_in = 12.")   # 1.2 × the inflow
+    assert not errors
+
+
 @pytest.mark.parametrize("dim", [2, 3])
 def test_optimise_in_the_organ_then_use_it_in_the_simulation(page, server, dim):
     """Optimise tunes the current organ setup (2-D or 3-D), loads the best values,

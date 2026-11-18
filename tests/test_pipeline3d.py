@@ -205,3 +205,84 @@ def test_3d_reused_coupling_matches_fresh_solve():
         a = run_hybrid_3d(prm, grid, art, ven, dom, eps=2.0, darcy=d)
         b = run_hybrid_3d(prm, grid, art, ven, dom, eps=2.0, coupling=coupling)
         assert np.allclose(a.pressure, b.pressure, equal_nan=True)
+
+
+# ── multi-compartment bed, UQ and calibration on 3-D ──────────────────────────
+def _masked_system():
+    res, _ = _masked_3d_result()
+    return res.art, res.ven, res.grid, res.domain_limit
+
+def test_3d_single_compartment_reduces_to_the_hybrid():
+    from perfusion.core.pipeline import run_multicompartment
+
+    art, ven, grid, dom = _masked_system()
+    prm = Parameters(p_in=10.0, p_out=0.0, mu=1.0)
+    ref = run_hybrid_3d(prm, grid, art, ven, dom, eps=2.0, coupling="schur")
+    one = run_multicompartment(prm, grid, permeabilities=(1.0,), betas=(), domain_limit=dom,
+                               art=art, ven=ven)
+    assert one.compartments.shape == (1, grid.nx, grid.ny, grid.nz)
+    np.testing.assert_allclose(one.solution.terminal_flux, ref.solution.terminal_flux,
+                               atol=1e-12)
+    np.testing.assert_allclose(one.compartments[0], ref.pressure, atol=1e-10)
+
+
+def test_3d_multicompartment_percolates_and_conserves():
+    from perfusion.core.pipeline import run_multicompartment
+
+    art, ven, grid, dom = _masked_system()
+    m = run_multicompartment(Parameters(p_in=10.0, p_out=0.0, mu=1.0), grid,
+                             permeabilities=(1.0, 0.7, 0.4), betas=(1.0, 1.0),
+                             domain_limit=dom, art=art, ven=ven)
+    q = m.solution.terminal_flux
+    inflow = q[q > 0].sum()
+    assert inflow > 0
+    assert -q[q < 0].sum() == pytest.approx(inflow, rel=1e-8)
+    assert m.perfusion.shape == (2, grid.nx, grid.ny, grid.nz)
+    for c in range(2):                       # all the flow crosses every interface
+        assert np.nansum(m.perfusion[c]) == pytest.approx(inflow, rel=1e-6)
+    assert np.isnan(m.perfusion[0][~grid.mask]).all()
+    means = [np.nanmean(np.where(grid.mask, p, np.nan)) for p in m.compartments]
+    assert means[0] > means[1] > means[2]    # arteriole → venule pressure cascade
+
+
+def test_3d_uq_reuses_the_coupling_and_matches_fresh_solves():
+    from perfusion import uq
+
+    art, ven, grid, dom = _masked_system()
+    r = uq.monte_carlo({"p_in": (5.0, 15.0), "mu": (0.8, 1.5)}, grid, n_samples=6,
+                       base={"p_out": 0.0}, domain_limit=dom, art=art, ven=ven)
+    assert r.outputs.shape == (6, 3)
+    assert r.sensitivity["arterial_inflow"]["p_in"] > 0.5
+    assert r.sensitivity["arterial_inflow"]["mu"] < 0
+    p_in, mu = r.samples[0]
+    fresh = run_hybrid_3d(Parameters(p_in=p_in, p_out=0.0, mu=mu), grid, art, ven, dom)
+    tf = fresh.solution.terminal_flux
+    assert r.outputs[0, 0] == pytest.approx(tf[tf > 0].sum(), rel=1e-10)
+    s = uq.sobol_indices({"p_in": (5.0, 15.0), "permeability": (0.5, 2.0)}, grid,
+                         n_samples=10, base={"p_out": 0.0}, domain_limit=dom, art=art, ven=ven)
+    assert s.fit_r2["arterial_inflow"] > 0.9
+    with pytest.raises(ValueError, match="cannot vary on a 3-D model"):
+        uq.monte_carlo({"r_min_frac": (0.3, 0.6)}, grid, n_samples=4, domain_limit=dom,
+                       art=art, ven=ven)
+
+
+@pytest.mark.parametrize(("param", "truth", "bounds"),
+                         [("p_in", 13.0, (1.0, 40.0)), ("permeability", 2.5, (0.2, 8.0))])
+def test_3d_calibration_recovers_the_input(param, truth, bounds):
+    from dataclasses import replace
+
+    from perfusion import inverse
+
+    art, ven, grid, dom = _masked_system()
+    kw = {"p_in": 10.0, "p_out": 0.0}
+    g = grid
+    if param == "permeability":
+        g = replace(grid, permeability=truth)
+    else:
+        kw[param] = truth
+    tf = run_hybrid_3d(Parameters(**kw), g, art, ven, dom).solution.terminal_flux
+    target = float(tf[tf > 0].sum())
+    c = inverse.calibrate(target, param, grid, bounds, base={"p_in": 10.0, "p_out": 0.0},
+                          domain_limit=dom, art=art, ven=ven)
+    assert c.value == pytest.approx(truth, rel=1e-3)
+    assert c.achieved == pytest.approx(target, rel=1e-5)

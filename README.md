@@ -106,7 +106,10 @@ field) in a rotatable, dependency-free canvas. For a **3-D project** it is a ful
 workbench: run the 3-D solve; grow (CCO / colonisation), prune or Murray-adapt the 3-D
 trees; compute the **🌊 flow** (a contrast bolus advected through the voxel bed, played
 back in 3-D) with a tracer-kinetic fit; and map pressure / flux / time-of-flight,
-O₂ saturation / consumption, or the Fp / vp / CBV / MTT kinetic maps. Interactive API docs are at `/docs`.
+O₂ saturation / consumption, the Fp / vp / CBV / MTT kinetic maps, or a
+**multi-compartment** bed (capillary exchange, arteriole / venule pressure). Its
+**Uncertainty & calibration** card runs Monte-Carlo / Sobol UQ over p_in, μ and K and
+fits one input to a measured inflow / transit time — all on the 3-D model. Interactive API docs are at `/docs`.
 See [`frontend/`](frontend/README.md) for the UI in detail.
 
 ### Back-end API
@@ -144,7 +147,8 @@ tools, so any MCP client (Claude Desktop, Claude Code, an agent) can drive it:
 `run_simulation`, `run_sweep`, `describe_model`, `grow_trees_in_tissue` (organ,
 2-D/3-D, generations, fill), `optimize_trees_in_tissue` (organ-aware Paper-D
 optimisation), `tissue_perfusion_analysis` (2-D/3-D grow → solve → adapt / transit /
-O₂ / tracer fit), `prune_vessel_tree`, `data_constrained_tree_growth`,
+O₂ / tracer fit / multi-compartment), `tissue_uncertainty_calibration` (UQ, Sobol and
+calibration on an organ's 2-D/3-D model), `prune_vessel_tree`, `data_constrained_tree_growth`,
 `optimize_tree_config`, `adapt_vessel_network`, `strahler_morphometry`,
 `fit_tracer_kinetics`, `perfusion_parameter_maps`, `direct_transit_metrics`,
 `pulsatile_windkessel`, `multicompartment_perfusion`, `oxygen_extraction_map`,
