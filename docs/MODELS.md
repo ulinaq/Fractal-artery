@@ -343,6 +343,21 @@ r_parent^γ = Σ r_child^γ           (γ = exponent, default 3)
 **Data-constrained growth**: attraction points sampled with probability ∝ a target
 density map (`sample_points_in_mask(density=)`); **obstacles** deactivate no-grow cells.
 
+**Anastomoses (loops)** — `core/anastomosis.py`. Side-to-side collaterals: two segment
+midpoints `m₁, m₂` on different branches are joined when
+
+```
+|m₁ − m₂| ≤ d_max,   L_tree(m₁, m₂) ≥ δ · |m₁ − m₂|,   hops(m₁, m₂) ≥ h_min
+```
+
+(closest pairs first; `δ` = min detour, default 3; `h_min` = 3 junctions, so siblings
+never link). Each split keeps length; the link has `r = f · min(r₁, r₂)` (`f` =
+`radius_frac`) and Poiseuille resistance `8μL/(πr⁴)`. The tree's cyclomatic number
+`E − V + C` counts the loops. Nothing in the solver changes — conservation is assembled
+from the incidence matrix, which handles cycles. **Collateral rescue**: occluding a
+segment (`r → 10⁻³ r`, resistance × 10¹²) starves its territory (the terminals beyond it)
+in a tree; with loops part of the flow arrives round the block, roughly ∝ `f⁴`.
+
 **Dimension-agnostic.** Sampling, colonisation and CCO work on 2-D *or* 3-D trees: the
 dimension follows the base network (`node_z`) and the mask (`(nx, ny)` with a 4-value
 window, or `(nx, ny, nz)` with a 6-value window); distances use `‖·‖₂` and the CCO

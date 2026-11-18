@@ -138,6 +138,7 @@
           <button id="v3-grow">🌱 Grow</button>
           <button id="v3-prune" class="ghost" title="remove the outermost branch generation">✂ Prune 1</button>
           <button id="v3-adapt" class="ghost" title="wall-shear remodelling toward Murray's law">⚖ Adapt</button>
+          <button id="v3-loops" class="ghost" title="join nearby branches with collateral links (anastomoses)">⟳ Loops</button>
         </div>
         <p class="muted" id="v3-tree-info"></p>
         <label class="check"><input id="v3-edit" type="checkbox" /> ✏️ edit the trees by hand</label>
@@ -150,6 +151,7 @@
             <input id="v3-rad" type="number" min="0.01" step="any" /></label>
           <div class="row">
             <button id="v3-split" class="ghost" hidden>Split</button>
+            <button id="v3-occlude" class="ghost" hidden title="block this vessel (radius × 0.001)">⛔ Occlude</button>
             <button id="v3-inlet" class="ghost" hidden>Make inlet</button>
             <button id="v3-del" class="ghost" hidden>Delete</button>
             <button id="v3-undo" class="ghost" disabled>↶ Undo</button>

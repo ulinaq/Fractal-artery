@@ -661,6 +661,46 @@ def test_dce_fit_recovers_the_project_from_its_own_tracer(client):
     assert client.post(f"/projects/{pid}/fit-dce", json=short).status_code == 422
 
 
+def test_anastomose_adds_loops_to_the_stored_tree(client):
+    """POST /anastomose adds loops (terminals kept) to the stored tree; the looped
+    model solves and conserves mass; impossible / bad requests are refused."""
+    pid = client.post("/projects", json={"name": "loops", "grid": SMALL_GRID,
+                                         "params": {**FAST_PARAMS, "r_min_frac": 0.3}}
+                      ).json()["id"]
+    r = client.post(f"/projects/{pid}/anastomose", json={"target": "artery", "n_links": 6,
+                                                         "radius_frac": 1.0})
+    assert r.status_code == 200, r.text
+    info = r.json()
+    assert info["n_added"] == 6
+    assert info["n_loops"] == 6
+    after = client.get(f"/projects/{pid}/editable").json()["artery"]
+    assert len(after["seg_start"]) == info["n_segments"]       # stored: 2 splits + 1 link each
+    deg = np.bincount(after["seg_start"] + after["seg_end"])
+    assert np.sum(deg == 1) - len(after["inlet_nodes"]) == info["n_terminals"]
+
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    res = client.get(f"/projects/{pid}/results").json()
+    assert res["arterial_inflow"] == pytest.approx(res["venous_outflow"], rel=1e-6)
+
+    r = client.post(f"/projects/{pid}/anastomose", json={"target": "artery", "n_links": 3,
+                                                         "max_distance": 1e-3})
+    assert r.status_code == 409                                 # nothing that close
+    assert client.post(f"/projects/{pid}/anastomose",
+                       json={"target": "nerve"}).status_code == 422
+
+
+def test_3d_project_anastomoses(client):
+    pid = _explorer_project(client, 3)["id"]
+    r = client.post(f"/projects/{pid}/anastomose", json={"target": "artery", "n_links": 3})
+    assert r.status_code == 200, r.text
+    assert r.json()["n_loops"] == r.json()["n_added"] > 0
+    v = client.get(f"/projects/{pid}/editable").json()["artery"]
+    assert v["node_z"] is not None
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+
+
 def test_batch_experiment_sweeps_p_in(client):
     """A p_in sweep as one job: one snapshot per value, grouped as an experiment; the
     linear model's inflow scales with the drop p_in − p_out; the current result and

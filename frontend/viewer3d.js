@@ -225,8 +225,9 @@ async function flow3d() {
 async function treeOp(kind) {
   const info = $("v3-tree-info");
   const target = $("v3-target").value;
-  ["v3-grow", "v3-prune", "v3-adapt"].forEach((id) => ($(id).disabled = true));
-  info.textContent = { grow: "growing…", prune: "pruning…", adapt: "remodelling radii (solves repeatedly)…" }[kind];
+  ["v3-grow", "v3-prune", "v3-adapt", "v3-loops"].forEach((id) => ($(id).disabled = true));
+  info.textContent = { grow: "growing…", prune: "pruning…", loops: "adding loops…",
+                       adapt: "remodelling radii (solves repeatedly)…" }[kind];
   try {
     let msg;
     if (kind === "grow") {
@@ -236,6 +237,9 @@ async function treeOp(kind) {
     } else if (kind === "prune") {
       const r = await postJSON("prune", { target, steps: 1 });
       msg = `${target}: removed ${r.n_removed} segments → ${r.n_segments} left`;
+    } else if (kind === "loops") {
+      const r = await postJSON("anastomose", { target, n_links: 4 });
+      msg = `${target}: ${r.n_added} anastomoses → ${r.n_loops} loops`;
     } else {
       const r = await postJSON("adapt", {});
       msg = `Murray exponent ${r.murray_start.toFixed(2)} → ${r.murray_final.toFixed(2)} in ${r.n_iter} steps`;
@@ -247,7 +251,7 @@ async function treeOp(kind) {
   } catch (e) {
     info.textContent = e.message;
   } finally {
-    ["v3-grow", "v3-prune", "v3-adapt"].forEach((id) => ($(id).disabled = false));
+    ["v3-grow", "v3-prune", "v3-adapt", "v3-loops"].forEach((id) => ($(id).disabled = false));
   }
 }
 // Monte-Carlo / Sobol uncertainty over the ticked input ranges (each sample a 3-D solve)
@@ -316,6 +320,7 @@ $("v3-flow").addEventListener("click", () => flow3d().catch((e) => { $("v3-kin")
 $("v3-grow").addEventListener("click", () => treeOp("grow"));
 $("v3-prune").addEventListener("click", () => treeOp("prune"));
 $("v3-adapt").addEventListener("click", () => treeOp("adapt"));
+$("v3-loops").addEventListener("click", () => treeOp("loops"));
 $("v3-k").addEventListener("change", () => loadProject().catch(() => {}));
 $("v3-play").addEventListener("click", () => {
   anim.playing = !anim.playing; $("v3-play").textContent = anim.playing ? "⏸" : "▶";

@@ -410,9 +410,9 @@ a research project. Each notes where it lands in the tree.
   dimension-agnostic (2-D or 3-D by the base network / mask); tested in 3-D and used by the
   explorer. ◑ *Staged / optimised CCO* (global re-optimisation of bifurcation positions)
   remains deferred; structural adaptation already optimises the Murray exponent (9.1).
-- ◑ Loopy venous networks / anastomoses — *partially covered.* The **solver** already handles
-  cyclic venous graphs (segmented veins contain loops); only the *growth* algorithms are
-  tree-only. Growing anastomoses is a research effort (loop-closure heuristics) — deferred.
+- ✅ Loopy networks / anastomoses — the **solver** handles cyclic graphs (segmented veins
+  contain loops) and `core.anastomosis` now adds collateral loops to any tree (2-D/3-D),
+  with an occlusion-rescue analysis. ◑ Loop closure *during* growth stays deferred.
 - ✅ **Data-constrained growth** — attraction points sampled ∝ a target perfusion-density
   map (`growth.sample_points_in_mask(density=)`, threaded through `grow_in_mask`/
   `cco_grow_in_mask`), so the tree grows denser where demand is high. Painted as **growth
@@ -684,8 +684,12 @@ Editing 3-D trees by hand is now done too (§11.4).
   Fåhræus–Lindqvist) — §4. *M.*
 - **MPFA-O** for full (off-diagonal) tensor permeability / skewed grids — §9.2, deferred. *L.*
 - **Staged / optimised CCO** (global re-optimisation of bifurcation positions) — §9.3. *L.*
-- **Growing anastomoses / loopy venous growth** (loop-closure heuristics; the solver
-  already handles loops) — §9.3. *XL.*
+- ✅ ~~**Anastomoses (vessel loops)**~~ — `core.anastomosis.add_anastomoses`: side-to-side
+  collaterals between nearby segments on different branches (detour + junction-distance
+  criteria), 2-D and 3-D; `POST …/anastomose`, ⟳ Add loops (Grow / prune / loops card and
+  the 3-D viewer), ⛔ Occlude on a selected vessel in both editors (embolus → compare with
+  a kept baseline), MCP `anastomosis_rescue` (flow reaching a blocked territory, tree vs
+  loops). *Next:* loop-closure during growth (looped venous growth).
 - **Data-constrained growth matched to Strahler statistics** (follow-up in §9.3). *M.*
 - ✅ ~~**Inverse estimation from real DCE-MRI curves**~~ — `inverse.fit_dce`: several
   inputs at once (p_in ~ flow, porosity ~ blood volume, K, μ) fitted to a measured tissue

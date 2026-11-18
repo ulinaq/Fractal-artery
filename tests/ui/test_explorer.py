@@ -349,6 +349,31 @@ def test_3d_viewer_fits_a_dce_curve(page, server):
     assert not errors
 
 
+def test_3d_viewer_loops_and_occlusion(page, server):
+    """3-D viewer: ⟳ Loops adds anastomoses; ⛔ Occlude narrows the selected vessel."""
+    import httpx
+
+    pid = _3d_project(server, "ui-3d-loops")
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(f"{server}/viewer3d.html?project={pid}")
+    page.wait_for_selector("#v3-tree-card:not([hidden])")
+    page.click("#v3-loops")
+    page.wait_for_function("document.querySelector('#v3-tree-info').textContent"
+                           ".includes('anastomoses')", timeout=60000)
+    page.check("#v3-edit")
+    page.wait_for_function("window.viewer3d.editor.active")
+    r0 = httpx.get(f"{server}/projects/{pid}/editable").json()["artery"]["seg_radius"][2]
+    page.evaluate("""() => { const ed = window.viewer3d.editor;
+      ed.sel = { kind: 'artery', type: 'seg', i: 2 }; ed.refreshPanel(); }""")
+    page.click("#v3-occlude")
+    page.wait_for_function("document.querySelector('#v3-tree-info').textContent"
+                           ".includes('radius')", timeout=60000)
+    r1 = httpx.get(f"{server}/projects/{pid}/editable").json()["artery"]["seg_radius"][2]
+    assert r1 == pytest.approx(max(1e-3, r0 * 1e-3), rel=1e-6)
+    assert not errors
+
+
 def test_3d_viewer_hand_edits_the_trees(page, server):
     """Edit a 3-D project's trees in the viewer: select + resize a vessel, drag a
     node, branch with Shift+click, toggle an outlet, delete, undo — then solve."""

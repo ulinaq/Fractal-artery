@@ -12,7 +12,7 @@ import { redraw } from "./render.js";
 import {
   adoptLegacyIO, clearEditDirty, clearKind, deleteSelectedNode, deselect, editPointerDown,
   editDoubleClick, editPointerMove, editPointerUp, flushEdits, insertNodeOnSelected,
-  loadEditable, markEditDirty, newKind, onRadiusInput, onRadiusSlider, revertEdits, saveEdits, syncEditPanel, toggleInlet, vectorizeLegacy,
+  loadEditable, markEditDirty, newKind, occludeSelected, onRadiusInput, onRadiusSlider, revertEdits, saveEdits, syncEditPanel, toggleInlet, vectorizeLegacy,
 } from "./edit.js";
 import {
   cancelOrDeselect, clearTarget, clearTissueDirty, closePolygon, deleteSelection, flushTissue,
@@ -20,7 +20,7 @@ import {
   syncTissuePanel, tissuePointerDown, tissuePointerMove, tissuePointerUp,
 } from "./tissue.js";
 import {
-  adapt, computeFlow, fitKinetics, grow, loadField, loadKineticMap, loadMorphometry,
+  adapt, addLoops, computeFlow, fitKinetics, grow, loadField, loadKineticMap, loadMorphometry,
   loadMulticompartment, loadNetwork, loadOxygen, loadResultView, pauseFlow, prune, run,
   runTransient, runUQ, stopFlow, stopTimer, syncFlowUI, toggleFlowPlay, loadDeltaField,
 } from "./run.js";
@@ -92,7 +92,7 @@ function historyRedo() {
 const NEEDS_PROJECT = [
   "btn-save-file", "btn-save-vessels", "btn-edit-revert", "btn-clear-kind", "img-file",
   "btn-save-mask", "btn-tissue-revert", "btn-tissue-close", "btn-clear-tissue", "btn-organ",
-  "btn-grow", "btn-prune", "btn-adapt", "btn-run", "btn-flow",
+  "btn-grow", "btn-prune", "btn-loops", "btn-adapt", "btn-run", "btn-flow",
 ];
 
 export function refreshUI() {
@@ -376,6 +376,7 @@ $("draw-radius").addEventListener("change", recordHistory);   // one history ent
 $("radius-slider").addEventListener("input", onRadiusSlider);
 $("radius-slider").addEventListener("change", recordHistory);
 $("btn-seg-split").addEventListener("click", insertNodeOnSelected);
+$("btn-seg-occlude").addEventListener("click", () => { occludeSelected(); recordHistory(); });
 document.querySelectorAll("input[name=vtype]").forEach((r) =>
   r.addEventListener("change", () => pickKind(r.value)));
 $("btn-node-io").addEventListener("click", toggleInlet);
@@ -412,6 +413,7 @@ $("btn-clear-tissue").addEventListener("click", clearTarget);
 // grow / analyse / run
 $("btn-grow").addEventListener("click", guarded(grow));
 $("btn-prune").addEventListener("click", guarded(prune));
+$("btn-loops").addEventListener("click", guarded(addLoops));
 $("btn-adapt").addEventListener("click", guarded(adapt));
 $("btn-morph-art").addEventListener("click", guarded(() => loadMorphometry("artery")));
 $("btn-morph-ven").addEventListener("click", guarded(() => loadMorphometry("vein")));

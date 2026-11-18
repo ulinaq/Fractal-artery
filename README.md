@@ -76,6 +76,9 @@ right-drag / Space+drag = pan, ＋ − ⤢ buttons).
 - **Tissue** — draw/edit the organ outline, low-K lesions and growth hotspots
   vertex by vertex (drag, insert, delete, move), or drop in an **organ preset**
   (heart, kidney, brain, liver, lung, …) and adjust it.
+- **Loops** — ⟳ Add loops joins nearby branches with collateral vessels (anastomoses);
+  ⛔ Occlude blocks a selected vessel — keep a baseline, occlude, re-run and compare to
+  see how much flow the loops carry round the block (also in the 3-D viewer).
 - **Result** — pressure / flux / time-of-flight heatmaps, a contrast-bolus **flow
   video** (+ GIF / MP4), transit-time distribution, tracer-kinetic fits and maps,
   pulsatile, multi-compartment, oxygen and uncertainty analyses, export, and **Compare
@@ -167,7 +170,8 @@ calibration on an organ's 2-D/3-D model), `prune_vessel_tree`, `data_constrained
 `direct_model_in_tissue` (the direct model in a 2-D/3-D organ), `export_tissue_fields`
 (an organ model's fields + vessels as CSV / VTI / VTP files, optionally the flow video),
 `pulsatile_windkessel`, `multicompartment_perfusion`, `oxygen_extraction_map`,
-`fit_dce_curve` (fit several inputs to a DCE-MRI curve), `compare_scenarios` (A/B: two
+`fit_dce_curve` (fit several inputs to a DCE-MRI curve), `anastomosis_rescue` (collateral
+flow round a blocked branch through vessel loops), `compare_scenarios` (A/B: two
 settings on the same organ trees), `experiment_in_tissue`
 (a parameter sweep in an organ), `heterogeneous_perfusion_lesion`, `lesion_in_tissue` (a lesion's perfusion deficit in a
 2-D/3-D organ), `anisotropic_perfusion_bed`,

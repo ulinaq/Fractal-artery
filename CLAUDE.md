@@ -341,6 +341,14 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   `runner.fit_dce_project`), `GET` returns the stored fit (`{pid}.dcefit.json`); fitting
   K on a project with lesions is rejected. UI `frontend/dcefit.js` (2-D Result card + 3-D
   analyses card); MCP `fit_dce_curve`.
+- **Anastomoses (loops)**: `core.anastomosis.add_anastomoses(net, n_links)` splits two
+  nearby segments on different branches at their midpoints and joins them (detour ≥
+  `min_detour`, ≥ `min_hops` junctions apart — never siblings; trunk generations
+  skipped). It only *appends* nodes/segments, so node indices and the terminal set are
+  unchanged — keep that (territories via `downstream_terminals` rely on it). `n_loops`
+  = E − V + C; `occlude` narrows segments (r × 10⁻³). `POST /projects/{id}/anastomose`
+  (409 when no pair qualifies); ⟳ Add loops in the 2-D Grow / prune / loops card and the
+  3-D tree card; ⛔ Occlude in both editors; MCP `anastomosis_rescue`.
 - **Browser tests**: `tests/ui/` (Playwright; `--extra ui`), run in the CI `ui` job.
 
 ## Gotchas

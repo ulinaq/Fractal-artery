@@ -179,3 +179,20 @@ def test_dce_fit_from_the_projects_own_tracer(page, server):
     assert "±" in out
     assert page.is_visible("#dce-chart")
     assert not page.errors
+
+
+def test_add_loops_then_solve(page, server):
+    """⟳ Add loops joins branches of the chosen tree (terminals kept) and the looped
+    model solves."""
+    pid = _new_project(page, server)
+    page.click("summary:has-text('Grow / prune')")
+    page.fill("#loop-n", "5")
+    page.click("#btn-loops")
+    page.wait_for_function("document.querySelector('#loop-info').textContent.includes('loops')")
+    assert "5 loops" in page.inner_text("#loop-info")
+    e = _editable(page, server, pid)
+    assert e["artery"] is not None
+    page.click("#btn-run")
+    wait_status(page, "solved", "failed", timeout=120000)
+    assert "solved" in page.inner_text("#status")
+    assert not page.errors

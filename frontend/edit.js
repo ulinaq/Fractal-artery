@@ -424,6 +424,16 @@ export function onRadiusInput() {
   markEditDirty(); syncEditPanel(); redraw();
 }
 
+// Block the selected vessel (an embolus): radius × 0.001 → Poiseuille resistance × 10¹².
+export function occludeSelected() {
+  const sel = state.editSel;
+  if (!sel || sel.seg < 0) return;
+  const r = state.editable[sel.kind].seg_radius;
+  r[sel.seg] = Math.max(1e-6, r[sel.seg] * 1e-3);
+  $("draw-radius").value = +r[sel.seg].toPrecision(3);
+  markEditDirty(); syncEditPanel(); redraw();
+}
+
 export function onRadiusSlider() {
   $("draw-radius").value = +numOf("radius-slider").toFixed(2);
   onRadiusInput();
@@ -447,6 +457,7 @@ export function syncEditPanel() {
   del.textContent = isSeg ? "🗑 Delete segment" : "🗑 Delete node";
   io.disabled = !sel || isSeg || state.busy;
   split.disabled = !isSeg || state.busy;
+  $("btn-seg-occlude").disabled = !isSeg || state.busy;
   $("radius-label").textContent = sel && sel.seg >= 0 ? "radius of selected segment" : "radius (new segments)";
   io.classList.remove("active");
   if (isSeg) {

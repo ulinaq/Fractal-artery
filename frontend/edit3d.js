@@ -341,6 +341,7 @@ export function createEditor3d(o) {
     $("v3-sel").textContent = text;
     $("v3-rad-row").hidden = !(s && s.type === "seg");
     $("v3-split").hidden = !(s && s.type === "seg");
+    $("v3-occlude").hidden = !(s && s.type === "seg");
     $("v3-inlet").hidden = !(s && s.type === "node");
     $("v3-del").hidden = !s;
     $("v3-undo").disabled = !ed.history.length;
@@ -348,6 +349,11 @@ export function createEditor3d(o) {
 
   $("v3-rad").addEventListener("change", (e) => ed.setRadius(Number(e.target.value)));
   $("v3-split").addEventListener("click", () => ed.split());
+  $("v3-occlude").addEventListener("click", () => {     // an embolus: radius × 0.001
+    if (ed.sel && ed.sel.type === "seg") {
+      ed.setRadius(Math.max(1e-6, ed.model[ed.sel.kind].seg_radius[ed.sel.i] * 1e-3));
+    }
+  });
   $("v3-inlet").addEventListener("click", () => ed.toggleInlet());
   $("v3-del").addEventListener("click", () => ed.remove());
   $("v3-undo").addEventListener("click", () => ed.undo());
