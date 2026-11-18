@@ -98,3 +98,39 @@ def test_prune_and_undo(page, server):
     assert len(_editable(page, server, pid)["artery"]["seg_start"]) == 1   # trunk kept
     page.keyboard.press("ControlOrMeta+z")
     assert "3 artery segments" in page.inner_text("#node-info")
+
+
+def test_compare_runs_with_a_kept_baseline(page, server):
+    """Run, keep the result as a baseline, add a lesion, re-run, compare: the table
+    shows the change and a Δ map is drawn with the diverging colour bar."""
+    import httpx
+
+    pid = _new_project(page, server)
+    page.click("#btn-run")
+    wait_status(page, "solved", "failed", timeout=120000)
+    page.fill("#cmp-name", "healthy")
+    page.click("#cmp-keep")
+    page.wait_for_function("document.querySelector('#cmp-info').textContent.includes('kept')")
+    assert page.inner_text("#cmp-snap") == "healthy"
+
+    dom = page.evaluate("[...document.querySelectorAll('#dom-w, #dom-h')].map(e => +e.value)")
+    w, h = dom
+    lesion = [[0.3 * w, 0.3 * h], [0.7 * w, 0.3 * h], [0.7 * w, 0.7 * h], [0.3 * w, 0.7 * h]]
+    httpx.put(f"{server}/projects/{pid}/lesions",
+              json={"lesions": [{"polygon": lesion, "permeability": 0.02}]})
+    page.goto(f"{server}/?project={pid}")                        # reopen with the lesion
+    wait_status(page, "opened")
+    page.click("#btn-run")
+    wait_status(page, "solved", "failed", timeout=120000)
+    page.wait_for_function("!document.querySelector('#cmp-run').disabled")
+    page.click("#cmp-run")
+    page.wait_for_selector("#cmp-out table.cmp")
+    out = page.inner_text("#cmp-out")
+    assert "healthy" in out
+    assert "arterial inflow" in out
+    assert page.is_visible("#cmp-maps")
+    page.click('#cmp-maps [data-delta="flux"]')
+    page.wait_for_function("document.querySelector('#cb-title').textContent === 'Δ flux'")
+    ramp = page.eval_on_selector("#cb-ramp", "e => e.style.background")
+    assert "rgb(33, 102, 172)" in ramp                           # the diverging ramp
+    assert not page.errors

@@ -318,6 +318,13 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   jointly into the project domain; every solve path uses
   `build_networks(defaults=True)`; sweeps rebuild them per sample via
   `runner.tree_builder` (so `r_min_frac` stays effective).
+- **Run comparison (A/B)**: `POST /projects/{id}/snapshots` keeps a copy of the current
+  *field* result blob (`{pid}.snap.{sid}.npz`) + its summary in the `snapshots` table;
+  `GET /compare?snapshot=` and `GET /compare/field/{name}?snapshot=` (2-D) / `view3d?field=
+  d_<name>&snapshot=` (3-D, symmetric range, `delta: true`) return Δ = current − baseline.
+  The maths is `core.compare` (pure NumPy, 2-D/3-D); a direct result has no field to keep
+  (409). UI: `frontend/compare.js` (shared panel; diverging ramp in `palette.js`) in the
+  2-D Result tab and the 3-D viewer; MCP `compare_scenarios` (same trees, two settings).
 - **Browser tests**: `tests/ui/` (Playwright; `--extra ui`), run in the CI `ui` job.
 
 ## Gotchas

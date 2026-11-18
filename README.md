@@ -78,7 +78,9 @@ right-drag / Space+drag = pan, ＋ − ⤢ buttons).
   (heart, kidney, brain, liver, lung, …) and adjust it.
 - **Result** — pressure / flux / time-of-flight heatmaps, a contrast-bolus **flow
   video** (+ GIF / MP4), transit-time distribution, tracer-kinetic fits and maps,
-  pulsatile, multi-compartment, oxygen and uncertainty analyses, and export.
+  pulsatile, multi-compartment, oxygen and uncertainty analyses, export, and **Compare
+  runs (A/B)**: keep a result as a baseline, change something, re-run, and see what
+  changed plus Δ maps (also in the 3-D viewer).
 
 🐸 **Frog** loads a real segmented frog-tongue system in one click. Set a New
 project's **domain size** and grid in Parameters. Projects are shareable by URL
@@ -162,7 +164,7 @@ calibration on an organ's 2-D/3-D model), `prune_vessel_tree`, `data_constrained
 `direct_model_in_tissue` (the direct model in a 2-D/3-D organ), `export_tissue_fields`
 (an organ model's fields + vessels as CSV / VTI / VTP files, optionally the flow video),
 `pulsatile_windkessel`, `multicompartment_perfusion`, `oxygen_extraction_map`,
-`heterogeneous_perfusion_lesion`, `lesion_in_tissue` (a lesion's perfusion deficit in a
+`compare_scenarios` (A/B: two settings on the same organ trees), `heterogeneous_perfusion_lesion`, `lesion_in_tissue` (a lesion's perfusion deficit in a
 2-D/3-D organ), `anisotropic_perfusion_bed`,
 `calibrate_parameter_to_flow`, `uncertainty_quantification`,
 `sobol_sensitivity_indices`. The bundled [`.mcp.json`](.mcp.json) registers it for

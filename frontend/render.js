@@ -3,7 +3,7 @@
 // drawing/tissue/IO overlays. Depends only on core.js + palette.js (no feature
 // logic), so the rest of the app just calls redraw().
 import { ctx, DOMAIN, W, H, toCanvas, getCss, state, $, editKinds, vp, zoomPx } from "./core.js";
-import { VIRIDIS, viridis } from "./palette.js";
+import { DIVERGING, VIRIDIS, diverging, viridis } from "./palette.js";
 
 export function redraw() {
   vp.begin();                    // HiDPI transform + clear
@@ -197,8 +197,11 @@ function drawLesions() {
     const poly = les.polygon || les;
     const k = les.permeability ?? 1;
     ctx.beginPath(); tracePath(poly); ctx.closePath();
-    ctx.fillStyle = `rgba(217,119,6,${(0.15 + 0.4 * (1 - Math.min(1, k))).toFixed(3)})`;
-    ctx.fill();
+    // over a Δ map only the outline: the change inside the lesion is the point
+    if (!(state.mode === "result" && state.fieldData && state.fieldData.delta)) {
+      ctx.fillStyle = `rgba(217,119,6,${(0.15 + 0.4 * (1 - Math.min(1, k))).toFixed(3)})`;
+      ctx.fill();
+    }
     ctx.strokeStyle = "rgba(180,83,9,.9)"; ctx.lineWidth = 1.5; ctx.stroke();
     if (poly.length) {
       const cx = poly.reduce((s, p) => s + p[0], 0) / poly.length;
@@ -211,7 +214,7 @@ function drawLesions() {
   }
 }
 
-function paintHeatmap(data, nx, ny, vmin, vmax) {
+function paintHeatmap(data, nx, ny, vmin, vmax, ramp = viridis) {
   const off = document.createElement("canvas");
   off.width = nx; off.height = ny;
   const octx = off.getContext("2d");
@@ -223,7 +226,7 @@ function paintHeatmap(data, nx, ny, vmin, vmax) {
       const px = ix, py = ny - 1 - iy;              // flip y (domain up → canvas up)
       const o = (py * nx + px) * 4;
       if (v === null) { img.data[o + 3] = 0; continue; }
-      const [r, g, b] = viridis((v - vmin) / span);
+      const [r, g, b] = ramp((v - vmin) / span);
       img.data[o] = r; img.data[o + 1] = g; img.data[o + 2] = b; img.data[o + 3] = 255;
     }
   }
@@ -234,9 +237,9 @@ function paintHeatmap(data, nx, ny, vmin, vmax) {
 }
 
 function drawField() {
-  const { shape, data, vmin, vmax } = state.fieldData;
-  paintHeatmap(data, shape[0], shape[1], vmin, vmax);
-  updateColorbar(vmin, vmax, state.field);
+  const { shape, data, vmin, vmax, delta } = state.fieldData;
+  paintHeatmap(data, shape[0], shape[1], vmin, vmax, delta ? diverging : viridis);
+  updateColorbar(vmin, vmax, state.field, delta ? DIVERGING : VIRIDIS);
 }
 
 // Vessels tab: the editable networks with node handles, the selection and a
@@ -340,9 +343,9 @@ function drawTissueStroke() {
   }
 }
 
-function updateColorbar(vmin, vmax, label) {
+function updateColorbar(vmin, vmax, label, ramp = VIRIDIS) {
   const cb = $("colorbar"); cb.hidden = false;
-  const stops = VIRIDIS.map((c, i) => `rgb(${c[0]},${c[1]},${c[2]}) ${(100 * i / (VIRIDIS.length - 1)).toFixed(0)}%`);
+  const stops = ramp.map((c, i) => `rgb(${c[0]},${c[1]},${c[2]}) ${(100 * i / (ramp.length - 1)).toFixed(0)}%`);
   $("cb-ramp").style.background = `linear-gradient(to top, ${stops.join(",")})`;
   const fmt = (v) => (Math.abs(v) < 1e-3 || Math.abs(v) > 1e4) ? v.toExponential(1) : v.toFixed(2);
   $("cb-max").textContent = fmt(vmax); $("cb-min").textContent = fmt(vmin);

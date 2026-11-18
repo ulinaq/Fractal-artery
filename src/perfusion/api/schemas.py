@@ -504,6 +504,12 @@ class JobInfo(BaseModel):
     updated_at: str | None = None
 
 
+class SnapshotIn(BaseModel):
+    """Keep the current result as a named baseline (default name: "run N")."""
+
+    name: str | None = Field(None, max_length=80)
+
+
 class FieldResponse(BaseModel):
     name: str
     shape: tuple[int, ...]           # (nx, ny) or (nx, ny, nz) for a 3-D project

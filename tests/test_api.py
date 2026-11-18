@@ -578,6 +578,61 @@ def test_setting_lesions_invalidates_result(client):
     assert client.get(f"/projects/{pid}").json()["has_result"] is False   # stale result cleared
 
 
+def test_snapshot_and_compare_runs(client):
+    """A/B: keep a run as a baseline, add a lesion, re-run, compare — the summary
+    deltas and the flux difference map show the drop; snapshots list, survive in the
+    store and delete."""
+    pid = client.post("/projects", json={"name": "ab", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    assert client.post(f"/projects/{pid}/snapshots", json={}).status_code == 409  # no result
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    snap = client.post(f"/projects/{pid}/snapshots", json={"name": "healthy"})
+    assert snap.status_code == 201, snap.text
+    sid = snap.json()["id"]
+    assert snap.json()["name"] == "healthy"
+    assert snap.json()["summary"]["arterial_inflow"] > 0
+
+    # the identical run compares to zero change
+    same = client.get(f"/projects/{pid}/compare?snapshot={sid}").json()
+    assert same["same_grid"] is True
+    assert same["fields"]["flux"]["mean_abs_diff"] == 0.0
+
+    lesion = {"polygon": [[-25, 55], [25, 55], [25, 105], [-25, 105]], "permeability": 0.02}
+    client.put(f"/projects/{pid}/lesions", json={"lesions": [lesion]})
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    cmp = client.get(f"/projects/{pid}/compare?snapshot={sid}").json()
+    assert cmp["snapshot"]["name"] == "healthy"
+    rows = {r["key"]: r for r in cmp["summary"]}
+    assert rows["arterial_inflow"]["diff"] <= 0                 # the lesion can only resist
+    assert cmp["fields"]["flux"]["mean_abs_diff"] > 0
+    d = client.get(f"/projects/{pid}/compare/field/flux?snapshot={sid}").json()
+    assert d["name"] == "Δ flux"
+    diff = np.array([[np.nan if v is None else v for v in row] for row in d["data"]])
+    xc = -70 + (np.arange(60) + 0.5) * 140 / 60                 # SMALL_GRID cell centres
+    yc = (np.arange(70) + 0.5) * 160 / 70
+    gx, gy = np.meshgrid(xc, yc, indexing="ij")
+    inside = (np.abs(gx) < 20) & (gy > 60) & (gy < 100)
+    assert np.nanmean(diff[inside]) < 0                         # flux drops in the lesion
+
+    second = client.post(f"/projects/{pid}/snapshots", json={}).json()
+    assert second["name"] == "run 2"
+    listed = client.get(f"/projects/{pid}/snapshots").json()["snapshots"]
+    assert [s["name"] for s in listed] == ["healthy", "run 2"]
+    assert client.get(f"/projects/{pid}/compare?snapshot=nope").status_code == 404
+    assert client.get(f"/projects/{pid}/compare/field/bogus?snapshot={sid}").status_code == 404
+    assert client.delete(f"/projects/{pid}/snapshots/{sid}").status_code == 204
+    assert client.delete(f"/projects/{pid}/snapshots/{sid}").status_code == 404
+    assert len(client.get(f"/projects/{pid}/snapshots").json()["snapshots"]) == 1
+
+    jid = client.post(f"/projects/{pid}/run", json={"model": "direct"}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    r = client.post(f"/projects/{pid}/snapshots", json={})
+    assert r.status_code == 409                                 # no field to keep
+    assert "no tissue field" in r.json()["detail"]
+
+
 def test_document_roundtrip_basic(client):
     # a plain project with params, a tissue region and I/O points
     pid = client.post("/projects", json={"name": "my work", "grid": SMALL_GRID,
@@ -1411,6 +1466,32 @@ def test_3d_lesion_sphere_cuts_local_perfusion(client):
     doc = client.get(f"/projects/{pid}/document").json()
     pid2 = client.post("/projects/import", json=doc).json()["id"]
     assert client.get(f"/projects/{pid2}/lesions").json()["lesions"][0]["radius"] == radius
+
+
+def test_3d_compare_shows_a_lesion_as_a_signed_difference(client):
+    """On a 3-D project: snapshot, add a lesion sphere, re-run — the viewer's Δ-flux
+    field is signed (symmetric colour range) and negative inside the lesion."""
+    pid = _explorer_project(client, 3)["id"]
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    sid = client.post(f"/projects/{pid}/snapshots", json={"name": "A"}).json()["id"]
+    center, radius = _sphere_in_tissue(client, pid)
+    client.put(f"/projects/{pid}/lesions", json={"lesions": [
+        {"center": center, "radius": radius, "permeability": 0.02}]})
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+
+    assert client.get(f"/projects/{pid}/view3d?field=d_flux").status_code == 422
+    v = client.get(f"/projects/{pid}/view3d?field=d_flux&snapshot={sid}").json()
+    assert v["delta"] is True
+    assert v["pressure"]["min"] == pytest.approx(-v["pressure"]["max"])
+    vox = np.asarray(v["pressure"]["voxels"])
+    near = np.linalg.norm(vox[:, :3] - center, axis=1) < 0.7 * radius
+    assert near.any()
+    assert vox[near, 3].mean() < 0
+    cmp = client.get(f"/projects/{pid}/compare?snapshot={sid}").json()
+    assert cmp["fields"]["flux"]["cells"] > 0
+    assert client.get(f"/projects/{pid}/compare/field/flux?snapshot={sid}").status_code == 409
 
 
 def test_region_shapes_must_match_the_project_dimension(client):

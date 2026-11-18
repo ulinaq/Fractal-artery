@@ -231,6 +231,65 @@ def _transit_stats(art, ven, conns, sol) -> dict:
             "mtt_to_outlet": float(mtt.mean()) if mtt.size else None}
 
 
+_SCENARIO_KEYS = ("p_in", "p_out", "permeability", "lesion")
+
+
+def tissue_compare(dim: int = 3, shape: str = "kidney", generations: int = 4,
+                   fill: str = "cco", n_terminals: int = 40, baseline: dict | None = None,
+                   change: dict | None = None, seed: int = 0, extent: float = 1.0) -> dict:
+    """Run comparison (A/B) in an organ: grow trees into ``shape`` (2-D or 3-D) once,
+    solve the hybrid model under ``baseline`` (A) and under ``baseline`` updated with
+    ``change`` (B), and compare them (``core.compare``): per-quantity summary deltas
+    and per-field change statistics, Δ = B − A.
+
+    Scenario keys: ``p_in``, ``p_out``, ``permeability`` (healthy K) and ``lesion`` —
+    ``{"center": [...] (default the tissue centroid), "radius_frac": 0.2,
+    "permeability": 0.05}``.
+    """
+    from . import io as perfio
+    from . import treegen
+    from .core.compare import compare_results
+    from .core.geometry import rasterize_regions
+
+    a = dict(baseline or {})
+    b = {**a, **(change or {})}
+    for scen in (a, b):
+        bad = set(scen) - set(_SCENARIO_KEYS)
+        if bad:
+            raise ValueError(f"unknown scenario keys {sorted(bad)}; use {list(_SCENARIO_KEYS)}")
+    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
+                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
+                           _return_model=True)
+    spec, art, ven, mask, domain = grown["_model"]
+    lim = np.asarray(domain, dtype=float)
+
+    def k_field(scen):
+        k = float(scen.get("permeability", 1.0))
+        les = scen.get("lesion")
+        if not les:
+            return None if k == 1.0 else np.full(mask.shape, k)
+        center = les.get("center")
+        if center is None:
+            h = (lim[1::2] - lim[0::2]) / np.array(mask.shape)
+            center = (lim[0::2] + (np.argwhere(mask).mean(axis=0) + 0.5) * h).tolist()
+        radius = float(les.get("radius_frac", 0.2)) * float((lim[1::2] - lim[0::2]).min())
+        return rasterize_regions(mask.shape, domain, [{
+            "center": center, "radius": radius,
+            "value": float(les.get("permeability", 0.05))}], base=k)
+
+    def run(scen):
+        res = treegen.solve(spec, art, ven, mask, domain, p_in=float(scen.get("p_in", 10.0)),
+                            p_out=float(scen.get("p_out", 0.0)), permeability=k_field(scen))
+        fields = {"pressure": res.pressure, "flux": res.flux, "tof": res.tof, "mask": mask}
+        return fields, perfio.results_summary(res)
+
+    (fa, sa), (fb, sb) = run(a), run(b)
+    out = compare_results(fb, fa, sb, sa)
+    keep = {"arterial_inflow", "venous_outflow", "pressure_max", "flux_mean", "mtt", "cth"}
+    out["summary"] = [r for r in out["summary"] if r["key"] in keep]
+    return {"dim": spec.dim, "shape": shape, "baseline": a, "changed": b, **out}
+
+
 def tissue_lesion(dim: int = 3, shape: str = "kidney", generations: int = 4,
                   fill: str = "cco", n_terminals: int = 40, center=None,
                   radius_frac: float = 0.2, permeability: float = 0.05, seed: int = 0,
@@ -929,6 +988,21 @@ def build_server():
         Returns the mean bolus arrival time by element class and the overall mean
         transit time to the venous outlet. `rho_c` is the connection search radius."""
         return direct_transit(rho_c=rho_c, p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+
+    @server.tool()
+    def compare_scenarios(dim: int = 3, shape: str = "kidney", generations: int = 4,
+                          fill: str = "cco", n_terminals: int = 40,
+                          baseline: dict | None = None, change: dict | None = None,
+                          seed: int = 0, extent: float = 1.0) -> dict:
+        """A/B comparison in an organ (2-D or 3-D): the same trees solved under
+        `baseline` and under `baseline` + `change`, returning what changed (inflow,
+        outflow, MTT, CTH, …) and per-field statistics of pressure / flux / time-of-flight
+        (Δ = changed − baseline). Scenario keys: p_in, p_out, permeability, and lesion =
+        {center?, radius_frac, permeability}. E.g. change={"lesion": {"permeability": 0.02}}
+        or change={"p_in": 12}."""
+        return tissue_compare(dim=dim, shape=shape, generations=generations, fill=fill,
+                              n_terminals=n_terminals, baseline=baseline, change=change,
+                              seed=seed, extent=extent)
 
     @server.tool()
     def lesion_in_tissue(dim: int = 3, shape: str = "kidney", generations: int = 4,

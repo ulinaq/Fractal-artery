@@ -17,6 +17,7 @@ from .schemas import (
     FieldResponse,
     JobInfo,
     RunRequest,
+    SnapshotIn,
     TracerInfo,
     TracerRequest,
     UQRequest,
@@ -77,6 +78,80 @@ def result_field(pid: str, name: str, project: Project = Depends(get_project_2d)
     field = np.where(mask, field, np.nan)             # inactive cells -> null
     data = np.where(np.isfinite(field), field, None)  # NaN -> null (valid JSON)
     return FieldResponse(name=name, shape=field.shape, data=data.tolist())
+
+
+# -- run comparison (A/B against a saved baseline) --------------------------- #
+@router.post("/projects/{pid}/snapshots", status_code=201)
+def create_snapshot(pid: str, body: SnapshotIn | None = None,
+                    project: Project = Depends(get_project),
+                    store: ProjectStore = Depends(get_store)) -> dict:
+    """Keep the current field result as a named baseline to compare later runs with
+    (e.g. before adding a lesion or changing p_in). 2-D and 3-D alike."""
+    _require_field_result(project, store)
+    return store.save_snapshot(project, body.name if body else None)
+
+
+@router.get("/projects/{pid}/snapshots")
+def list_snapshots(pid: str, project: Project = Depends(get_project),
+                   store: ProjectStore = Depends(get_store)) -> dict:
+    return {"snapshots": store.list_snapshots(pid)}
+
+
+@router.delete("/projects/{pid}/snapshots/{sid}", status_code=204)
+def delete_snapshot(pid: str, sid: str, project: Project = Depends(get_project),
+                    store: ProjectStore = Depends(get_store)):
+    from fastapi.responses import Response
+
+    if not store.delete_snapshot(pid, sid):
+        raise HTTPException(404, f"no snapshot {sid!r} in this project")
+    return Response(status_code=204)
+
+
+def _snapshot_or_404(store, pid: str, sid: str) -> dict:
+    snap = store.get_snapshot(pid, sid)
+    if snap is None:
+        raise HTTPException(404, f"no snapshot {sid!r} in this project")
+    return snap
+
+
+@router.get("/projects/{pid}/compare")
+def compare(pid: str, snapshot: str, project: Project = Depends(get_project),
+            store: ProjectStore = Depends(get_store)) -> dict:
+    """The current result against a saved baseline: per-quantity changes of the
+    summary (inflow, MTT, …) and, on the same grid, per-field change statistics
+    (mean / mean-|Δ| / max-|Δ| of pressure, flux, time-of-flight). Δ = current − baseline."""
+    from ..core.compare import compare_results
+
+    snap = _snapshot_or_404(store, pid, snapshot)
+    _require_field_result(project, store)
+    out = compare_results(store.load_result(pid), store.load_snapshot(pid, snapshot),
+                          project.summary or {}, snap["summary"] or {})
+    return {"snapshot": {k: snap[k] for k in ("id", "name", "created_at")}, **out}
+
+
+def _difference(store, project, sid: str, name: str) -> np.ndarray:
+    from ..core.compare import field_difference
+
+    if name not in helpers.FIELDS:
+        raise HTTPException(404, f"unknown field {name!r}; use {list(helpers.FIELDS)}")
+    _snapshot_or_404(store, project.id, sid)
+    _require_field_result(project, store)
+    cur, base = store.load_result(project.id), store.load_snapshot(project.id, sid)
+    try:
+        return field_difference(cur[name], base[name], cur["mask"], base["mask"])
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from None
+
+
+@router.get("/projects/{pid}/compare/field/{name}", response_model=FieldResponse)
+def compare_field(pid: str, name: str, snapshot: str,
+                  project: Project = Depends(get_project_2d),
+                  store: ProjectStore = Depends(get_store)) -> FieldResponse:
+    """The difference map ``current − baseline`` of one field (2-D grid; a 3-D project
+    shows it in the viewer as ``view3d?field=d_<name>&snapshot=…``)."""
+    d = _difference(store, project, snapshot, name)
+    return FieldResponse(name=f"Δ {name}", shape=d.shape,
+                         data=np.where(np.isfinite(d), d, None).tolist())
 
 
 @router.get("/projects/{pid}/transit")
@@ -339,7 +414,8 @@ def _net_tracer_payload(pid: str, d: dict) -> dict:
 
 @router.get("/projects/{pid}/view3d")
 def project_view3d(pid: str, field: str = "pressure", k: float = 1.0, n: int = 3,
-                   beta: float = 1.0, project: Project = Depends(get_project),
+                   beta: float = 1.0, snapshot: str | None = None,
+                   project: Project = Depends(get_project),
                    store: ProjectStore = Depends(get_store)) -> dict:
     """This project's result as a 3-D scene. A 2-D project: pressure as a relief
     surface (z ∝ pressure) with the vessel trees at the base. A **3-D project**: its
@@ -351,7 +427,7 @@ def project_view3d(pid: str, field: str = "pressure", k: float = 1.0, n: int = 3
     ``mc_arteriole`` / ``mc_venule`` (an ``n``-compartment bed with exchange ``beta``:
     the capillary exchange, or the first / last compartment pressure)."""
     if project.grid.is_3d:
-        return _view3d_volume(project, store, field, k=k, n=n, beta=beta)
+        return _view3d_volume(project, store, field, k=k, n=n, beta=beta, snapshot=snapshot)
     grid, dom = runner.build_grid(project)
     x0, x1, y0, y1 = dom
     art, ven = runner.build_networks(project, use_vessels=True, defaults=True)
@@ -392,7 +468,8 @@ _V3_RESULT = ("pressure", "flux", "tof")
 _V3_OXYGEN = ("saturation", "consumption")
 _V3_TRACER = {"Fp": "semi", "vp": "semi", "CBV": "deconv", "MTT": "deconv"}
 _V3_MC = ("mc_perfusion", "mc_arteriole", "mc_venule")
-V3_FIELDS = (*_V3_RESULT, *_V3_OXYGEN, *_V3_TRACER, "tracer", *_V3_MC)
+_V3_DELTA = tuple(f"d_{f}" for f in _V3_RESULT)       # current − a saved baseline
+V3_FIELDS = (*_V3_RESULT, *_V3_OXYGEN, *_V3_TRACER, "tracer", *_V3_MC, *_V3_DELTA)
 
 
 def _mc_field(project, field: str, n: int, beta: float):
@@ -407,7 +484,7 @@ def _mc_field(project, field: str, n: int, beta: float):
 
 
 def _view3d_volume(project, store, field: str, k: float = 1.0, n: int = 3,
-                   beta: float = 1.0) -> dict:
+                   beta: float = 1.0, snapshot: str | None = None) -> dict:
     """The 3-D scene of a 3-D project (same payload shape as ``/demo3d``)."""
     if field not in V3_FIELDS:
         raise HTTPException(422, f"field must be one of {list(V3_FIELDS)}")
@@ -445,6 +522,11 @@ def _view3d_volume(project, store, field: str, k: float = 1.0, n: int = 3,
         elif field in _V3_OXYGEN:
             f, oef = runner.oxygen_field(project, field, k=k)
             out["oef"] = oef
+        elif field in _V3_DELTA:
+            if not snapshot:
+                raise HTTPException(422, "a difference field needs ?snapshot=<id>")
+            f = _difference(store, project, snapshot, field[2:])
+            out["delta"] = True                         # signed: draw with a diverging map
         elif field in _V3_MC:
             f = _mc_field(project, field, n, beta)
             out["mc"] = {"n": int(np.clip(n, 2, 5)), "beta": beta,
@@ -455,6 +537,9 @@ def _view3d_volume(project, store, field: str, k: float = 1.0, n: int = 3,
         ok = np.isfinite(vals)
         fin = f[grid.mask & np.isfinite(f)]
         lo_v, hi_v = (np.percentile(fin, [2, 98]) if fin.size else (0.0, 1.0))
+        if out.get("delta"):                            # symmetric about zero change
+            m = float(max(abs(lo_v), abs(hi_v))) or 1.0
+            lo_v, hi_v = -m, m
         out["pressure"] = {"min": float(lo_v), "max": float(hi_v), "name": field,
                            "voxels": np.column_stack([xyz[ok], np.round(vals[ok], 6)]).tolist()}
         out["summary"] = project.summary

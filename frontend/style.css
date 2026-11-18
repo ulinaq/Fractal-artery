@@ -238,3 +238,10 @@ button.link-danger:hover:not(:disabled) { color: #b91c1c; }
 .reg-row label { display: flex; align-items: center; gap: 3px; margin: 0; }
 .reg-row .reg-tag { flex-basis: 100%; font-weight: 600; }
 .reg-row .reg-del { margin-left: auto; padding: 2px 8px; }
+
+/* run comparison table */
+table.cmp { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 4px; }
+table.cmp th, table.cmp td { text-align: right; padding: 2px 4px; border-bottom: 1px solid var(--line, #e5e7eb); }
+table.cmp th:first-child, table.cmp td:first-child { text-align: left; }
+table.cmp td.dn { color: #2563eb; font-weight: 600; }
+table.cmp td.up { color: #c2410c; font-weight: 600; }
