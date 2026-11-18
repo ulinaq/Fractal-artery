@@ -455,6 +455,38 @@ def rasterize_mask(nx: int, ny: int,
     return inside.reshape(nx, ny)
 
 
+def rasterize_regions(shape, domain_limit, regions, base: float = 1.0) -> np.ndarray:
+    """A piecewise-constant field on a 2-D or 3-D grid from tissue ``regions``.
+
+    Starts at ``base``; each region is a mapping with a value ``"value"`` and either a
+    ``"polygon"`` (2-D outline) or a ball — ``"center"`` (``[x, y]`` / ``[x, y, z]``)
+    + ``"radius"`` — and every cell whose centre falls inside takes its value (later
+    regions win on overlap). Cell centres match :func:`rasterize_mask` /
+    ``Grid3D`` so the field aligns with the mask and the networks.
+    """
+    shape = tuple(int(n) for n in shape)
+    lim = np.asarray(domain_limit, dtype=float)
+    if len(lim) != 2 * len(shape):
+        raise ValueError(f"a {len(shape)}-D grid needs {2 * len(shape)} domain_limit values")
+    field = np.full(shape, float(base))
+    axes = [lo + (np.arange(n) + 0.5) * (hi - lo) / n
+            for n, lo, hi in zip(shape, lim[0::2], lim[1::2], strict=True)]
+    centres = np.stack(np.meshgrid(*axes, indexing="ij"), axis=-1)       # (..., dim)
+    for reg in regions:
+        if reg.get("polygon") is not None:
+            if len(shape) != 2:
+                raise ValueError("a polygon region needs a 2-D grid; use a sphere in 3-D")
+            inside = _points_in_polygon(centres[..., 0].ravel(), centres[..., 1].ravel(),
+                                        reg["polygon"]).reshape(shape)
+        else:
+            c = np.asarray(reg["center"], dtype=float)
+            if len(c) != len(shape):
+                raise ValueError(f"a {len(shape)}-D grid needs a {len(shape)}-value center")
+            inside = np.sum((centres - c) ** 2, axis=-1) <= float(reg["radius"]) ** 2
+        field[inside] = float(reg["value"])
+    return field
+
+
 def rasterize_permeability(nx: int, ny: int,
                            domain_limit: tuple[float, float, float, float],
                            lesions, base: float = 1.0) -> np.ndarray:

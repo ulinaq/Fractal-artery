@@ -17,7 +17,6 @@ from ..core.geometry import (
     arterial_tree,
     network_from_polylines,
     rasterize_mask,
-    rasterize_permeability,
     venous_tree,
 )
 from ..core.pipeline import run_hybrid
@@ -55,14 +54,29 @@ def is_3d(project) -> bool:
     return bool(getattr(project.grid, "is_3d", False))
 
 
+def region_field(regions, key: str, shape, domain_limit, base: float) -> np.ndarray:
+    """Rasterise stored lesions / hotspots (``key`` = their value field) — polygons,
+    discs or spheres — onto a 2-D or 3-D grid (see ``geometry.rasterize_regions``)."""
+    from ..core.geometry import rasterize_regions
+
+    return rasterize_regions(shape, domain_limit,
+                             [{**r, "value": r[key]} for r in regions], base=base)
+
+
 def build_grid3d(project):
-    """A 3-D project's ``Grid3D`` (+ 6-value window) with its raster tissue mask."""
+    """A 3-D project's ``Grid3D`` (+ 6-value window) with its raster tissue mask and,
+    with lesions, the heterogeneous per-voxel permeability (spheres of low K)."""
     g = project.grid
     raster = getattr(project, "mask", None)
     mask = None
     if raster is not None and np.asarray(raster).shape == (g.nx, g.ny, g.nz):
         mask = np.asarray(raster, dtype=bool)
-    return g.to_core3d(mask=mask), tuple(g.domain_limit)
+    grid = g.to_core3d(mask=mask)
+    lesions = getattr(project, "lesions", None)
+    if lesions:
+        grid.permeability = region_field(lesions, "permeability", (g.nx, g.ny, g.nz),
+                                         g.domain_limit, base=g.permeability)
+    return grid, tuple(g.domain_limit)
 
 
 def default_trees_3d(project):
@@ -115,9 +129,8 @@ def build_grid(project):
         mask = None
     lesions = getattr(project, "lesions", None)
     if lesions:
-        les = [(le["polygon"], le["permeability"]) for le in lesions]
-        kfield = rasterize_permeability(nx, ny, domain_limit, les,
-                                        base=project.grid.permeability)
+        kfield = region_field(lesions, "permeability", (nx, ny), domain_limit,
+                              base=project.grid.permeability)
         return project.grid.to_core(mask=mask, permeability=kfield), domain_limit
     return project.grid.to_core(mask=mask), domain_limit
 

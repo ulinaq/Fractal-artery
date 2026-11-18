@@ -91,10 +91,34 @@ class MaskIn(BaseModel):
     regions: list[list[tuple[float, float]]] = Field(default_factory=list)
 
 
-class Lesion(BaseModel):
-    """A low-permeability tissue patch: an outline polygon + its permeability."""
+class _Region(BaseModel):
+    """A tissue region: a 2-D outline ``polygon``, or a ball — ``center`` ([x, y] disc
+    in 2-D, [x, y, z] sphere in 3-D) + ``radius``. A 3-D project uses spheres."""
 
-    polygon: list[tuple[float, float]]
+    polygon: list[tuple[float, float]] | None = None
+    center: list[float] | None = None
+    radius: float | None = Field(None, gt=0)
+
+    @model_validator(mode="after")
+    def _one_shape(self):
+        ball = self.center is not None or self.radius is not None
+        if ball and (self.center is None or self.radius is None):
+            raise ValueError("a ball region needs both center and radius")
+        if ball == (self.polygon is not None):
+            raise ValueError("give either a polygon or a center + radius")
+        if self.center is not None and len(self.center) not in (2, 3):
+            raise ValueError("center must be [x, y] or [x, y, z]")
+        return self
+
+    @property
+    def dim(self) -> int | None:
+        """3 for a sphere, else 2 (polygon or disc)."""
+        return 3 if self.center is not None and len(self.center) == 3 else 2
+
+
+class Lesion(_Region):
+    """A low-permeability tissue patch (outline polygon or ball) + its permeability."""
+
     permeability: float = Field(0.1, gt=0)   # relative to healthy K = 1
 
 
@@ -104,10 +128,9 @@ class LesionsIn(BaseModel):
     lesions: list[Lesion] = Field(default_factory=list)
 
 
-class Hotspot(BaseModel):
-    """A growth-demand target: an outline polygon + its relative demand weight."""
+class Hotspot(_Region):
+    """A growth-demand target (outline polygon or ball) + its relative demand weight."""
 
-    polygon: list[tuple[float, float]]
     weight: float = Field(4.0, gt=0)   # demand relative to a baseline of 1 outside
 
 

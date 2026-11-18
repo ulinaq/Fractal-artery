@@ -568,7 +568,11 @@ a research project. Each notes where it lands in the tree.
   (`GridIn.permeability`); low-K **lesions** are drawn in the web Tissue tab (draw-target
   toggle + per-lesion k, amber overlay), stored per project (`GET/PUT …/lesions`, document
   round-trip) and rasterised into the grid's K field by `build_grid`; MCP
-  `heterogeneous_perfusion_lesion` reports the in-vs-outside flux drop.
+  `heterogeneous_perfusion_lesion` reports the in-vs-outside flux drop. **3-D**: `Grid3D`
+  takes a per-voxel K field too (harmonic-mean faces); lesions and growth hotspots on a 3-D
+  project are **spheres** (`center` + `radius`, `geometry.rasterize_regions`), placed,
+  edited and dragged in the 3-D viewer's *Lesions & hotspots* card (`regions3d.js`); MCP
+  `lesion_in_tissue` reports the perfusion deficit of a disc / sphere lesion in an organ.
 - ✅ **Anisotropic (diagonal-tensor) permeability** (`core/darcy.py`) — `Grid.permeability_y`
   gives the capillary bed a distinct y-permeability; `transmissibilities` splits by axis
   (x-faces use `Kx`, y-faces `Ky`, both harmonic-averaged) so TPFA stays consistent for the

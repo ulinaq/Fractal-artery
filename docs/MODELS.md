@@ -93,6 +93,10 @@ The TPFA operator `A` (`darcy.tpfa_operator`) is a 5-point Laplacian with `diag 
 Σ faces` and `−T` off-diagonals; inactive cells get identity rows (`p = 0`), which
 hydraulically isolates the organ. `A` is singular (pure Neumann) → pin one active cell.
 
+In **3-D** (`darcy3d.tpfa_operator_3d`, a 7-point stencil) the same harmonic-mean face K
+applies on all three axes — `T_x = K_face·h_y·h_z/h_x` and cyclically — so a per-voxel K
+field (e.g. a spherical low-K lesion) throttles every face of a low-K voxel.
+
 **Mollifier** — regularised point source at a terminal cell (`darcy.mollifier`, the
 thesis power-1 bump, Eq. 4.20 / 2.11), support radius `ε` (cell units), restricted to
 the active mask and normalised to a partition of unity:

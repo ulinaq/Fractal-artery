@@ -255,8 +255,22 @@ export async function loadMask() {
     catch { return []; }
   };
   state.regions = await get("mask", "regions");
-  state.lesions = await get("lesions", "lesions");
-  state.hotspots = await get("hotspots", "hotspots");
+  state.lesions = (await get("lesions", "lesions")).map(asOutline);
+  state.hotspots = (await get("hotspots", "hotspots")).map(asOutline);
   state.tissueStroke = []; state.tissueSel = null;
   clearTissueDirty(); syncTissuePanel();
+}
+
+// A disc region (center + radius, e.g. set through the API) becomes an editable
+// 32-gon outline here, since the Tissue editor works on polygons.
+function asOutline(r) {
+  if (r.polygon || !r.center) return r;
+  const [cx, cy] = r.center, n = 32;
+  const polygon = Array.from({ length: n }, (_, i) => {
+    const a = (2 * Math.PI * i) / n;
+    return [cx + r.radius * Math.cos(a), cy + r.radius * Math.sin(a)];
+  });
+  const out = { ...r, polygon };
+  delete out.center; delete out.radius;
+  return out;
 }

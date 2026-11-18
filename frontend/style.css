@@ -230,3 +230,11 @@ button.link-danger:hover:not(:disabled) { color: #b91c1c; }
 /* explorer optimiser: which parameters to vary */
 .optfree { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8px; margin: 4px 0 8px; }
 .optfree label.check { margin: 2px 0; font-size: 12.5px; }
+
+/* 3-D viewer: lesion / hotspot spheres */
+.reg-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 6px 0;
+  border-top: 1px solid var(--line, #e5e7eb); font-size: 12px; }
+.reg-row.sel { background: rgba(250, 204, 21, 0.08); }
+.reg-row label { display: flex; align-items: center; gap: 3px; margin: 0; }
+.reg-row .reg-tag { flex-basis: 100%; font-weight: 600; }
+.reg-row .reg-del { margin-left: auto; padding: 2px 8px; }

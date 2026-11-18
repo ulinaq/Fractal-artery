@@ -109,6 +109,8 @@ no separate dev server.
   timed along the network. An export row saves the fields (`.npz` / `.csv` / `.vti`), the
   vessels (`.vtp`), a zip bundle, or a 📷 PNG of the view; after 🌊 flow, ↓ GIF / ↓ MP4
   download the bolus rendered on the server (rotating maximum-intensity projection).
+  **Lesions & hotspots** (`regions3d.js`): ＋ adds a sphere at the tissue centre; edit
+  x/y/z, radius and K / weight in the card, or drag its centre dot in the view.
 
 The left-panel **tools are contextual**: picking a tab above the canvas
 (Vessels · Tissue · Result, keys 1–3) shows just that tool card; Project,
@@ -131,6 +133,7 @@ are vectorised into the network and points snap onto the nearest end nodes.
 | `run.js`     | solve, results, tracer, analyses |
 | `viewer3d.html` / `viewer3d.js` | standalone rotatable 3-D result viewer |
 | `edit3d.js` | hand-editing the 3-D trees in the viewer (pick, drag, branch, undo) |
+| `regions3d.js` | lesion / hotspot spheres on a 3-D project (card + drag in the viewer) |
 | `uqview.js` | UQ result tables (Pearson / Sobol bars), shared by workspace + viewer |
 | `explorer.html` / `explorer.js` | tree explorer: roots, tissue shape, 2-D/3-D growth |
 

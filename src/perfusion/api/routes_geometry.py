@@ -67,11 +67,23 @@ def get_lesions(project: Project = Depends(get_project)) -> dict:
     return {"lesions": project.lesions}
 
 
+def _check_region_dims(project, regions, what: str) -> None:
+    """A 3-D project takes spheres ([x, y, z] + radius); a 2-D one polygons or discs."""
+    want = 3 if project.grid.is_3d else 2
+    for i, r in enumerate(regions):
+        if r.dim != want:
+            shape = ("a sphere: center [x, y, z] + radius" if want == 3
+                     else "a polygon or a disc: center [x, y] + radius")
+            raise HTTPException(422, f"{what} {i}: a {want}-D project needs {shape}")
+
+
 @router.put("/projects/{pid}/lesions", response_model=ProjectInfo)
-def set_lesions(body: LesionsIn, project: Project = Depends(get_project_2d),
+def set_lesions(body: LesionsIn, project: Project = Depends(get_project),
                 store: ProjectStore = Depends(get_store)) -> ProjectInfo:
-    """Set the low-permeability tissue patches (heterogeneous ``K``). Invalidates any
-    stale result so the next solve uses the new permeability field."""
+    """Set the low-permeability tissue patches (heterogeneous ``K``): outline polygons
+    or discs on a 2-D project, spheres on a 3-D one. Invalidates any stale result so
+    the next solve uses the new permeability field."""
+    _check_region_dims(project, body.lesions, "lesion")
     project.lesions = [le.model_dump() for le in body.lesions]
     if project.has_result:
         store.clear_result(project)
@@ -85,11 +97,12 @@ def get_hotspots(project: Project = Depends(get_project)) -> dict:
 
 
 @router.put("/projects/{pid}/hotspots", response_model=ProjectInfo)
-def set_hotspots(body: HotspotsIn, project: Project = Depends(get_project_2d),
+def set_hotspots(body: HotspotsIn, project: Project = Depends(get_project),
                  store: ProjectStore = Depends(get_store)) -> ProjectInfo:
-    """Set the data-constrained growth targets: subsequent grows sample attraction
-    points with probability weighted by these hotspots (denser tree where demand is
-    higher)."""
+    """Set the data-constrained growth targets (polygons / discs in 2-D, spheres in
+    3-D): subsequent grows sample attraction points with probability weighted by these
+    hotspots (denser tree where demand is higher)."""
+    _check_region_dims(project, body.hotspots, "hotspot")
     project.hotspots = [h.model_dump() for h in body.hotspots]
     store.save(project)
     return project_info(project)
@@ -270,7 +283,7 @@ def grow_vessels(body: GrowRequest | None = None, project: Project = Depends(get
     branches extend the existing vessels rather than a straight trunk), else
     the default fractal tree. Artery and vein grow independently. On a **3-D
     project** the tree grows through the 3-D tissue mask (colonisation and CCO are
-    dimension-agnostic); hotspot density maps are 2-D only.
+    dimension-agnostic), weighted by spherical hotspots.
     """
     req = body or GrowRequest()
     if req.method not in ("colonization", "cco"):
@@ -287,11 +300,9 @@ def grow_vessels(body: GrowRequest | None = None, project: Project = Depends(get
         mask = (rasterize_mask(nx, ny, domain_limit, project.regions)
                 if project.regions else np.ones((nx, ny), bool))
     # data-constrained growth: a demand map from the drawn hotspots (baseline 1)
-    if project.hotspots and not project.grid.is_3d:
-        from ..core.geometry import rasterize_permeability
-        density = rasterize_permeability(
-            nx, ny, domain_limit,
-            [(h["polygon"], h["weight"]) for h in project.hotspots], base=1.0)
+    if project.hotspots:
+        density = runner.region_field(project.hotspots, "weight", mask.shape,
+                                      domain_limit, base=1.0)
 
     d_art, d_ven = runner.defaults_for(project)       # fitted into this project's domain
     if req.target == "artery":

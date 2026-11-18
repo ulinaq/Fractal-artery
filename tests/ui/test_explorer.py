@@ -230,6 +230,60 @@ def test_3d_viewer_direct_connection_model(page, server):
     assert not errors
 
 
+def test_3d_viewer_lesions_and_hotspots(page, server):
+    """Place a lesion and a hotspot sphere in the 3-D viewer: edit the lesion's radius,
+    drag its centre, then solve with it — saved through the API, no page errors."""
+    import httpx
+
+    pid = httpx.post(server + "/explore/project", timeout=60, json={
+        "dim": 3, "shape": "heart", "fill": "cco", "n_terminals": 12, "generations": 3,
+        "nx": 16, "name": "ui-3d-lesion"}).json()["id"]
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(f"{server}/viewer3d.html?project={pid}")
+    page.wait_for_selector("#v3-reg-card:not([hidden])")
+    page.uncheck("#spin")
+    page.click("#v3-add-lesion")
+    page.wait_for_function("document.querySelector('#v3-reg-info').textContent"
+                           ".includes('lesions saved')")
+    les = httpx.get(f"{server}/projects/{pid}/lesions").json()["lesions"]
+    assert len(les) == 1
+    assert les[0]["permeability"] == pytest.approx(0.1)
+    c0 = les[0]["center"]
+
+    page.fill('#v3-reg-list input[data-kind="lesion"][data-f="radius"]', "7")
+    page.press('#v3-reg-list input[data-kind="lesion"][data-f="radius"]', "Enter")
+    page.wait_for_function("document.querySelector('#v3-reg-info').textContent"
+                           ".includes('lesions saved')")
+    assert httpx.get(f"{server}/projects/{pid}/lesions").json()["lesions"][0]["radius"] == 7
+
+    # drag the sphere's centre handle 60 px to the right
+    sx, sy = page.evaluate("""() => {
+      const r = window.viewer3d.regions.st.lesion[0];
+      return window.viewer3d.project(...r.center).slice(0, 2); }""")
+    box = page.locator("#view3d").bounding_box()
+    page.mouse.move(box["x"] + sx, box["y"] + sy)
+    page.mouse.down()
+    page.mouse.move(box["x"] + sx + 30, box["y"] + sy, steps=4)
+    page.mouse.move(box["x"] + sx + 60, box["y"] + sy, steps=4)
+    page.mouse.up()
+    page.wait_for_function(f"""() => {{
+      const c = window.viewer3d.regions.st.lesion[0].center;
+      return Math.hypot(c[0] - {c0[0]}, c[1] - {c0[1]}, c[2] - {c0[2]}) > 1; }}""")
+    page.wait_for_timeout(500)
+    moved = httpx.get(f"{server}/projects/{pid}/lesions").json()["lesions"][0]["center"]
+    assert np.linalg.norm(np.subtract(moved, c0)) > 1
+
+    page.click("#v3-add-hotspot")
+    page.wait_for_function("document.querySelector('#v3-reg-info').textContent"
+                           ".includes('hotspots saved')")
+    assert len(httpx.get(f"{server}/projects/{pid}/hotspots").json()["hotspots"]) == 1
+    page.click("#v3-run")
+    page.wait_for_selector("#v3-flow-card:not([hidden])", timeout=120000)
+    assert page.locator(".reg-row").count() == 2
+    assert not errors
+
+
 def test_3d_viewer_hand_edits_the_trees(page, server):
     """Edit a 3-D project's trees in the viewer: select + resize a vessel, drag a
     node, branch with Shift+click, toggle an outlet, delete, undo — then solve."""

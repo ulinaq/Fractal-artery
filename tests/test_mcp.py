@@ -82,7 +82,7 @@ def test_server_registers_expected_tools():
             "sobol_sensitivity_indices", "calibrate_parameter_to_flow",
             "tissue_perfusion_analysis", "optimize_trees_in_tissue",
             "tissue_uncertainty_calibration", "direct_model_in_tissue",
-            "export_tissue_fields", "describe_model"} <= tools
+            "export_tissue_fields", "lesion_in_tissue", "describe_model"} <= tools
 
 
 def test_calibrate_to_flow_recovers_value():
@@ -343,3 +343,19 @@ def test_export_tissue_fields_with_a_3d_video(tmp_path):
                                    n_terminals=10, video=True, n_frames=8)
     gif = Path(out["files"]["tracer.gif"])
     assert gif.read_bytes()[:6] in (b"GIF87a", b"GIF89a")
+
+
+@pytest.mark.parametrize("dim", [2, 3])
+def test_lesion_in_tissue_cuts_local_perfusion(dim):
+    """A low-K ball in an organ (disc in 2-D, sphere in 3-D) throttles the flow
+    through it; the milder lesion leaves more."""
+    strong = mcp_server.tissue_lesion(dim=dim, shape="kidney", generations=3,
+                                      n_terminals=15, permeability=0.02)
+    mild = mcp_server.tissue_lesion(dim=dim, shape="kidney", generations=3,
+                                    n_terminals=15, permeability=0.5)
+    assert strong["lesion_cells"] > 0
+    assert strong["remaining_fraction"] < 0.85
+    assert 1.0 > mild["remaining_fraction"] > strong["remaining_fraction"]
+    assert strong["inflow_lesion"] <= strong["inflow_healthy"] * (1 + 1e-9)
+    with pytest.raises(ValueError, match="center needs"):
+        mcp_server.tissue_lesion(dim=dim, center=[1.0] * (5 - dim))

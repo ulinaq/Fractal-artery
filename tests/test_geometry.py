@@ -254,3 +254,28 @@ def test_grow_tree_3d_asymmetry_and_jitter_are_seeded():
     assert not np.allclose(a.node_x, c.node_x)
     first = a.seg_radius[1:3]                          # the asymmetric first split
     assert first.max() / first.min() > 1.1
+
+
+def test_rasterize_regions_polygons_discs_and_spheres():
+    from perfusion.core.geometry import rasterize_regions
+
+    # 2-D: a polygon then an overlapping disc (later wins)
+    f = rasterize_regions((10, 10), (0, 10, 0, 10), [
+        {"polygon": [(0, 0), (5, 0), (5, 10), (0, 10)], "value": 0.5},
+        {"center": [7.5, 7.5], "radius": 1.0, "value": 0.1}], base=1.0)
+    assert f[0, 0] == 0.5
+    assert f[9, 0] == 1.0
+    assert f[7, 7] == 0.1                               # centre (7.5, 7.5)
+    # 3-D: a sphere of radius 2 around (5, 5, 5) on a unit grid
+    g = rasterize_regions((10, 10, 10), (0, 10, 0, 10, 0, 10),
+                          [{"center": [5, 5, 5], "radius": 2.0, "value": 3.0}])
+    inside = g == 3.0
+    assert inside[4, 4, 4]
+    assert not inside[0, 0, 0]
+    assert inside.sum() == pytest.approx(4 / 3 * np.pi * 8, rel=0.25)   # ~ the ball volume
+    with pytest.raises(ValueError, match="needs a 2-D grid"):
+        rasterize_regions((4, 4, 4), (0, 1, 0, 1, 0, 1),
+                          [{"polygon": [(0, 0), (1, 0), (1, 1)], "value": 1.0}])
+    with pytest.raises(ValueError, match="3-value center"):
+        rasterize_regions((4, 4, 4), (0, 1, 0, 1, 0, 1),
+                          [{"center": [0.5, 0.5], "radius": 0.2, "value": 1.0}])
