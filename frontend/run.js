@@ -17,8 +17,10 @@ export async function grow() {
   status(`growing ${target}…`);
   const info = await api("POST", `/projects/${state.project}/grow`,
     { target, method: $("grow-method").value, n_points: numOf("grow-npts"),
-      step: numOf("grow-step"), seed: numOf("seed") });
-  $("grow-info").textContent = `grown ${target}: ${info.n_segments} segments, ${info.n_terminals} terminals`;
+      step: numOf("grow-step"), seed: numOf("seed"),
+      close_loops: $("grow-method").value === "colonization" && $("grow-loops").checked });
+  $("grow-info").textContent = `grown ${target}: ${info.n_segments} segments, ${info.n_terminals} terminals`
+    + (info.n_loops ? `, ${info.n_loops} loops` : "");
   state.hasResult = false;         // grow invalidates any prior result server-side
   stopFlow(); state.tracer = null; state.fieldData = null;
   await Promise.all([loadNetwork(), loadEditable()]);

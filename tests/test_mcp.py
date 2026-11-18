@@ -454,3 +454,13 @@ def test_shear_thinning_blood_in_an_organ(dim):
     assert all(r["viscosity_factor_min"] >= 1.0 for r in out["rows"])
     with pytest.raises(ValueError, match="positive"):
         mcp_server.tissue_rheology(dim=dim, pressures=(0.0, 5.0))
+
+
+def test_generate_trees_can_close_loops():
+    plain = mcp_server.generate_trees(dim=2, shape="kidney", fill="colonization",
+                                      fill_steps=60)
+    looped = mcp_server.generate_trees(dim=2, shape="kidney", fill="colonization",
+                                       fill_steps=60, close_loops=True)
+    assert plain["artery"]["loops"] == 0
+    assert looped["artery"]["loops"] > 0
+    assert looped["inflow"] == pytest.approx(looped["outflow"], rel=1e-6)

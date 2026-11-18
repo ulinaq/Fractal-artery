@@ -520,3 +520,15 @@ def test_3d_viewer_shear_thinning_run(page, server):
     page.select_option("#v3-model", "direct")
     assert page.is_hidden("#v3-shear-row")
     assert not errors
+
+
+def test_explorer_close_loops_counts_loops(page, server):
+    page.goto(server + "/explorer.html")
+    _ready(page)
+    page.select_option("#shape2", "kidney")
+    _ready(page)
+    assert "loops" not in page.inner_text("#summary")
+    page.check("#close-loops")
+    page.wait_for_function("document.querySelector('#summary').textContent.includes('loops')",
+                           timeout=60000)
+    assert not page.errors

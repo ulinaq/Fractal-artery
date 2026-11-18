@@ -290,6 +290,9 @@ def grow_vessels(body: GrowRequest | None = None, project: Project = Depends(get
     req = body or GrowRequest()
     if req.method not in ("colonization", "cco"):
         raise HTTPException(422, "method must be 'colonization' or 'cco'")
+    if req.close_loops and req.method != "colonization":
+        raise HTTPException(422, "loop closure happens during space colonisation; "
+                                 "use method 'colonization' (or ⟳ Add loops after CCO)")
     if req.target not in ("artery", "vein"):
         raise HTTPException(422, "target must be 'artery' or 'vein'")
     domain_limit = project.grid.domain_limit
@@ -328,14 +331,17 @@ def grow_vessels(body: GrowRequest | None = None, project: Project = Depends(get
             base, mask, domain_limit,
             n_points=req.n_points, seed=req.seed, seed_nodes=seed_nodes, density=density,
             step=req.step, influence_radius=req.influence_radius,
-            kill_radius=req.kill_radius, leaf_radius=req.leaf_radius)
+            kill_radius=req.kill_radius, leaf_radius=req.leaf_radius,
+            close_loops=req.close_loops, fuse_radius=req.fuse_radius)
     if req.target == "artery":
         project.artery_network = network
     else:
         project.vein_network = network
     store.clear_result(project)   # persist the tree; invalidate stale result
+    from ..core.anastomosis import n_loops
+
     return GrowInfo(id=project.id, n_segments=network.n_segments,
-                    n_terminals=int(network.terminal_nodes.size))
+                    n_terminals=int(network.terminal_nodes.size), n_loops=n_loops(network))
 
 
 @router.post("/projects/{pid}/prune", response_model=PruneInfo)

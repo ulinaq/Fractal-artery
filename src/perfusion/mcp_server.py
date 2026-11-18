@@ -790,7 +790,7 @@ def generate_trees(dim: int = 2, shape: str = "ellipse", generations: int = 4,
                    artery_root=None, vein_root=None, artery_direction=None,
                    vein_direction=None, artery_angle: float = 90.0, vein_angle: float = -90.0,
                    solve: bool = True, seed: int = 0, extent: float = 1.0,
-                   _return_model: bool = False) -> dict:
+                   close_loops: bool = False, _return_model: bool = False) -> dict:
     """Grow an arterial + venous tree into a tissue shape (2-D or 3-D) and solve.
 
     A fractal skeleton of ``generations`` branching levels starts at each root
@@ -800,6 +800,8 @@ def generate_trees(dim: int = 2, shape: str = "ellipse", generations: int = 4,
     liver, lung, tongue, tumour, placenta, ellipse, …; 3-D: heart, kidney, brain,
     liver, lung, tumour, ellipsoid, box, …). ``extent`` scales the domain (>1 = a
     bigger object). 3-D trees branch in twisting planes (truly volumetric).
+    ``close_loops`` (colonisation fill) lets growing tips fuse with a nearby branch,
+    forming vessel loops (each tree's ``loops`` stat counts them).
     Returns per-tree stats and, with ``solve``, the perfused inflow."""
     from . import organs, treegen
 
@@ -821,7 +823,7 @@ def generate_trees(dim: int = 2, shape: str = "ellipse", generations: int = 4,
         dim=dim_, shape=shape, generations=int(np.clip(generations, 1, 10)),
         fill=fill, fill_steps=int(np.clip(fill_steps, 0, 400)),
         n_terminals=int(np.clip(n_terminals, 1, 600)), seed=seed, nx=20 if d3 else 60,
-        extent=e,
+        extent=e, close_loops=bool(close_loops),
         artery=treegen.TreeSpec(tuple(artery_root or anat["artery"]["root"]), a_ang, a_dir),
         vein=treegen.TreeSpec(tuple(vein_root or anat["vein"]["root"]), v_ang, v_dir,
                               radius=2.4, gamma=1.2))
@@ -1417,10 +1419,13 @@ def build_server():
                              artery_direction: list[float] | None = None,
                              vein_direction: list[float] | None = None,
                              artery_angle: float = 90.0, vein_angle: float = -90.0,
-                             solve: bool = True, seed: int = 0, extent: float = 1.0) -> dict:
+                             solve: bool = True, seed: int = 0, extent: float = 1.0,
+                             close_loops: bool = False) -> dict:
         """Grow artery + vein trees into a tissue shape in 2-D or 3-D: a fractal
         skeleton (`generations` levels) from placed roots, then a space-filling
-        `fill` (colonization steps / CCO terminals). Shapes are organs — 2-D: heart,
+        `fill` (colonization steps / CCO terminals). `close_loops` (colonization) lets
+        growing tips fuse with a nearby branch of the same tree — vessel loops /
+        arcades form during growth (stats count them as `loops`). Shapes are organs — 2-D: heart,
         kidney, brain, liver, lung, tongue, tumour, placenta, ellipse, rectangle,
         wedge; 3-D: heart, kidney, brain, liver, lung, tumour, ellipsoid, box,
         cylinder, hemisphere. `extent` scales the domain (>1 = bigger object). Returns
@@ -1430,7 +1435,8 @@ def build_server():
                               artery_root=artery_root, vein_root=vein_root,
                               artery_direction=artery_direction,
                               vein_direction=vein_direction, artery_angle=artery_angle,
-                              vein_angle=vein_angle, solve=solve, seed=seed, extent=extent)
+                              vein_angle=vein_angle, solve=solve, seed=seed, extent=extent,
+                              close_loops=close_loops)
 
     @server.tool()
     def optimize_trees_in_tissue(dim: int = 2, shape: str = "kidney", kind: str = "tof_std",

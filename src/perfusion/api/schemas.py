@@ -235,6 +235,7 @@ class ExploreGrowRequest(BaseModel):
     n_points: int = Field(400, ge=10, le=4000)
     step: float | None = Field(None, gt=0, le=1000)          # (scale with extent)
     influence: float | None = Field(None, gt=0, le=5000)
+    close_loops: bool = False                 # colonisation: tips fuse → vessel loops
     n_terminals: int = Field(60, ge=1, le=600)
     leaf_radius: float | None = Field(None, gt=0, le=100)
     seed: int = 0
@@ -294,12 +295,15 @@ class GrowRequest(BaseModel):
     d_min: float | None = None                   # cco: min terminal spacing
     leaf_radius: float | None = None
     from_segments: list[int] | None = None       # colonisation: grow from these tips
+    close_loops: bool = False                    # colonisation: tips fuse with other branches
+    fuse_radius: float | None = Field(None, gt=0)   # ... within this distance (None = 2 × step)
 
 
 class GrowInfo(BaseModel):
     id: str
     n_segments: int
     n_terminals: int
+    n_loops: int = 0
 
 
 class PruneRequest(BaseModel):

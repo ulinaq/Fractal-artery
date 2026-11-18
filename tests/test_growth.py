@@ -211,3 +211,95 @@ def test_cco_grows_in_3d_and_rejects_wrong_dimension():
     assert net.terminal_nodes.size > base.terminal_nodes.size
     with pytest.raises(ValueError, match=r"\(M, 3\)"):
         cco_grow(base, pool[:, :2], n_terminals=5)
+
+
+# ── loop closure during growth & the duplicate-sprout fix ─────────────────────
+def _default_art():
+    from perfusion.core.geometry import arterial_tree
+
+    return arterial_tree(Parameters(r_min_frac=0.5))
+
+
+def _default_points(n=400, seed=0):
+    return growth.sample_points_in_mask(np.ones((70, 80), bool), (-70, 70, 0, 160), n,
+                                        seed=seed)
+
+
+def test_colonisation_never_stacks_nodes():
+    """A node pulled from opposite sides used to re-sprout onto the same spot every
+    iteration (hundreds of stacked duplicate tips); growth now also terminates."""
+    pts = _default_points()
+    net = growth.grow_network(_default_art(), pts)
+    step = 0.02 * 160
+    d, _ = cKDTree(np.column_stack([net.node_x, net.node_y])).query(
+        np.column_stack([net.node_x, net.node_y]), k=2)
+    assert d[:, 1].min() >= 0.5 * step - 1e-9
+    assert growth.grow_network(_default_art(), pts, max_iter=4000).n_nodes == net.n_nodes
+
+
+def test_close_loops_fuses_tips_onto_other_branches():
+    from perfusion.core.anastomosis import n_loops
+
+    base = _default_art()
+    pts = _default_points()
+    tree = growth.grow_network(base, pts)
+    looped = growth.grow_network(base, pts, close_loops=True, fuse_radius=3 * 0.02 * 160)
+    assert n_loops(tree) == 0
+    k = n_loops(looped)
+    assert k >= 3
+    assert looped.n_segments == looped.n_nodes - 1 + k
+    # base nodes keep their indices and positions; the inlet is unchanged
+    assert np.allclose(looped.node_x[:base.n_nodes], base.node_x)
+    assert np.array_equal(looped.inlet_nodes, base.inlet_nodes)
+    # loop segments are thinner than both vessels they join (0.7 × the thinner one)
+    deg = looped.node_degree
+    assert looped.terminal_nodes.size < tree.terminal_nodes.size + k
+    assert np.all(deg[looped.inlet_nodes] == 1)          # never fused onto the inlet
+    # the looped tree solves and conserves mass
+    from perfusion.core.geometry import venous_tree
+
+    res = run_hybrid(Parameters(r_min_frac=0.5), Grid(nx=70, ny=80, lx=140, ly=160),
+                     art=looped, ven=venous_tree(Parameters(r_min_frac=0.5)))
+    tf = res.solution.terminal_flux
+    assert np.isclose(tf.sum(), 0.0, atol=1e-10)
+    assert tf[:looped.terminal_nodes.size].sum() > 0
+
+
+def test_close_loops_respects_the_branch_criteria():
+    from perfusion.core.anastomosis import n_loops
+
+    base, pts = _default_art(), _default_points()
+    none = growth.grow_network(base, pts, close_loops=True, min_hops=10_000)
+    assert n_loops(none) == 0
+    capped = growth.grow_network(base, pts, close_loops=True, fuse_radius=10.0, max_loops=2)
+    assert n_loops(capped) == 2
+
+
+def test_growth_keeps_loops_already_in_the_base():
+    from perfusion.core.anastomosis import add_anastomoses, n_loops
+
+    tree = growth.grow_network(_default_art(), _default_points(), max_iter=12)
+    base, links = add_anastomoses(tree, n_links=2)
+    assert n_loops(base) == len(links) == 2
+    grown = growth.grow_network(base, _default_points(seed=1))
+    assert n_loops(grown) == 2                          # the base's loops survive growth
+    assert grown.n_nodes > base.n_nodes
+    for link in links:                                  # ... with the same link radius
+        a, b = link["a"], link["b"]
+        s = np.flatnonzero(((grown.seg_start == a) & (grown.seg_end == b))
+                           | ((grown.seg_start == b) & (grown.seg_end == a)))
+        assert s.size == 1
+        assert grown.seg_radius[s[0]] == pytest.approx(link["radius"])
+
+
+def test_close_loops_in_3d():
+    from perfusion.core.anastomosis import n_loops
+    from perfusion.growth import grow_network, sample_points_in_mask
+    from perfusion.treegen import DOMAIN_3D, shape_mask_3d
+
+    base = _trunk_3d()
+    pts = sample_points_in_mask(shape_mask_3d("box", 16, 16, 16), DOMAIN_3D, 400, seed=0)
+    net = grow_network(base, pts, max_iter=60, close_loops=True, fuse_radius=8.0)
+    assert net.is_3d
+    assert n_loops(net) >= 1
+    assert net.n_segments == net.n_nodes - 1 + n_loops(net)

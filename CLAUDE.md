@@ -360,6 +360,13 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   = E − V + C; `occlude` narrows segments (r × 10⁻³). `POST /projects/{id}/anastomose`
   (409 when no pair qualifies); ⟳ Add loops in the 2-D Grow / prune / loops card and the
   3-D tree card; ⛔ Occlude in both editors; MCP `anastomosis_rescue`.
+  **Loops during growth**: `growth.grow_network(close_loops=True, fuse_radius=)` (`_Fuser`:
+  a new tip fuses with a nearby node on another branch and stops) — colonisation only
+  (`POST /grow` 422s with CCO), `GenSpec.close_loops`, explorer/project/3-D checkboxes,
+  `tree_stats["loops"]`, MCP `grow_trees_in_tissue(close_loops=)`. `_spanning_parents`
+  takes a **maximum spanning tree by radius** so a looped base keeps its collaterals
+  through growth. Colonisation skips sprouts within step/2 of an existing node (the old
+  re-sprout bug stacked duplicate nodes) — keep `test_colonisation_never_stacks_nodes`.
 - **Browser tests**: `tests/ui/` (Playwright; `--extra ui`), run in the CI `ui` job.
 
 ## Gotchas

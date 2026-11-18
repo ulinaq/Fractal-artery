@@ -72,7 +72,8 @@ right-drag / Space+drag = pan, ＋ − ⤢ buttons).
   nodes, **click a segment to change its radius** at any time, double-click to insert
   a node, Shift+click to join, Del to delete. **Inlets/outlets are nodes** — select
   one and press *Set as inlet/outlet* (`I`). Also: segment a vessel image, **grow**
-  (space colonisation / CCO) or **prune** (remove the outermost generations), Strahler
+  (space colonisation / CCO, optionally **closing loops** where growing tips meet other
+  branches) or **prune** (remove the outermost generations), Strahler
   morphometry and Pries–Secomb radius adaptation.
 - **Tissue** — draw/edit the organ outline, low-K lesions and growth hotspots
   vertex by vertex (drag, insert, delete, move), or drop in an **organ preset**

@@ -64,6 +64,7 @@ function request(over = {}) {
     fill: $("fill").value, fill_target: $("fill-target").value,
     fill_steps: num("fill-steps"), n_points: num("n-points"),
     step: optNum("step-len"), influence: optNum("influence"),
+    close_loops: $("close-loops").checked,
     n_terminals: num("n-terminals"), seed: num("seed"),
     solve: $("solve").checked, field: $("field").value, kind: $("kind").value,
     ...gridSize(), ...over,
@@ -309,6 +310,7 @@ function showStats() {
   let h = stat(`${a.segments} / ${v.segments}`, "segments art / ven")
     + stat(`${a.terminals} / ${v.terminals}`, "terminals art / ven")
     + stat(`${a.max_order} / ${v.max_order}`, "Strahler order art / ven")
+    + (a.loops || v.loops ? stat(`${a.loops} / ${v.loops}`, "loops art / ven") : "")
     + stat(d.active_cells, "tissue cells");
   if (d.inflow != null) h += stat(fmt(d.inflow), "perfused inflow");
   if (d.objective != null) h += stat(fmt(d.objective), d.kind);
@@ -552,7 +554,7 @@ for (const id of ["a-x", "a-y", "a-z", "a-angle", "v-x", "v-y", "v-z", "v-angle"
   $(id).addEventListener("change", () => { manualRoots(); evaluate(); });
 }
 for (const id of ["a-radius", "a-gamma", "v-radius", "v-gamma", "n-points", "step-len",
-                  "influence", "seed"]) {
+                  "influence", "close-loops", "seed"]) {
   $(id).addEventListener("change", () => evaluate());
 }
 $("btn-root-default").addEventListener("click", organDefaultRoots);

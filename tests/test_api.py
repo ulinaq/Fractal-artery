@@ -2115,3 +2115,37 @@ def test_run_with_shear_thinning_blood(client, dim):
     bad = client.post(f"/projects/{pid}/run", json={"shear_thinning": True,
                                                     "carreau_lambda": 0})
     assert bad.status_code == 422
+
+
+def test_grow_with_loop_closure_then_run(client):
+    """Colonisation with close_loops: the grown tree reports its loops, keeps its inlet,
+    and the run conserves mass; loop closure is colonisation-only."""
+    def new():
+        return client.post("/projects", json={"name": "loops", "grid": {"nx": 40, "ny": 46},
+                                              "params": {"r_min_frac": 0.5}}).json()["id"]
+
+    plain = client.post(f"/projects/{new()}/grow", json={"n_points": 400, "seed": 0}).json()
+    assert plain["n_loops"] == 0
+    pid = new()                       # grow from the default tree again, closing loops
+    r = client.post(f"/projects/{pid}/grow",
+                    json={"n_points": 400, "seed": 0, "close_loops": True, "fuse_radius": 9})
+    assert r.status_code == 200, r.text
+    assert r.json()["n_loops"] >= 3
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    res = client.get(f"/projects/{pid}/results").json()
+    assert res["arterial_inflow"] > 0
+    assert res["arterial_inflow"] == pytest.approx(res["venous_outflow"], rel=1e-6)
+    bad = client.post(f"/projects/{pid}/grow", json={"method": "cco", "close_loops": True})
+    assert bad.status_code == 422
+    assert "colonisation" in bad.json()["detail"]
+
+
+def test_explorer_grow_closes_loops(client):
+    body = {"dim": 2, "shape": "kidney", "fill": "colonization", "generations": 4,
+            "fill_steps": 60}
+    plain = client.post("/explore/grow", json=body).json()["stats"]
+    looped = client.post("/explore/grow", json={**body, "close_loops": True}).json()
+    assert plain["artery"]["loops"] == plain["vein"]["loops"] == 0
+    assert looped["stats"]["artery"]["loops"] > 0
+    assert looped["inflow"] > 0
