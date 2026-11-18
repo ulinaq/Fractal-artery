@@ -69,6 +69,10 @@ no separate dev server.
   on a diverging ramp (blue = lower than the baseline, red = higher). **Batch
   experiment**: pick an input (p_in, p_out, μ, K; tree depth in 2-D) and values, ▶ Run
   batch — every run is kept and listed in a sweep table; click a row to compare.
+- **Fit to DCE-MRI** (`dcefit.js`, Result tab and the 3-D viewer's analyses card) —
+  paste `t, tissue, aif` CSV (or take this project's own tracer curve), tick the inputs
+  to fit with bounds, Fit: values ± 1σ, R², warnings for correlated / bound-limited
+  inputs, and a measured-vs-model chart.
 - **Flow video** — play/scrub an animation of a contrast bolus washing through
   the tissue (`POST/GET /projects/{id}/tracer`), and download it as an animated
   GIF (`tracer.gif`, needs the `image` extra) or MP4 (`tracer.mp4`, needs the
@@ -141,6 +145,7 @@ are vectorised into the network and points snap onto the nearest end nodes.
 | `edit3d.js` | hand-editing the 3-D trees in the viewer (pick, drag, branch, undo) |
 | `regions3d.js` | lesion / hotspot spheres on a 3-D project (card + drag in the viewer) |
 | `compare.js` | run comparison (A/B) panel shared by the workspace and the 3-D viewer |
+| `dcefit.js` | multi-parameter DCE-MRI fit panel (workspace + 3-D viewer) |
 | `uqview.js` | UQ result tables (Pearson / Sobol bars), shared by workspace + viewer |
 | `explorer.html` / `explorer.js` | tree explorer: roots, tissue shape, 2-D/3-D growth |
 

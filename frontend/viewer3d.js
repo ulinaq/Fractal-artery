@@ -4,6 +4,7 @@
 
 import { divergingCss, viridisCss } from "./palette.js";
 import { createCompare } from "./compare.js";
+import { mountDceFit } from "./dcefit.js";
 import { createViewport } from "./viewport.js";
 import { uqHtml } from "./uqview.js";
 import { createEditor3d } from "./edit3d.js";
@@ -109,7 +110,11 @@ function show3dProject() {
     $("v3-cal-target").value = Number((1.2 * s.arterial_inflow).toPrecision(3));
   }
   $("v3-an-card").hidden = direct;                 // UQ / calibration re-solve the hybrid
-  if ($("v3-cmp-card").hidden) { $("v3-cmp-card").hidden = false; compare.refresh().catch(() => {}); }
+  if ($("v3-cmp-card").hidden) {
+    $("v3-cmp-card").hidden = false;
+    compare.refresh().catch(() => {});
+    dce.load().catch(() => {});
+  }
   syncExport();
   syncVideo();
   $("v3-flow-desc").textContent = direct
@@ -396,6 +401,10 @@ const compare = PROJECT ? createCompare({
     $("v3-cmp-info").style.color = err ? "#b91c1c" : "";
   },
 }) : null;
+
+// fit the 3-D model to a measured DCE-MRI curve (see dcefit.js)
+const dce = PROJECT ? mountDceFit($("v3-dce-box"), { projectId: () => PROJECT, prefix: "v3-dce-" })
+  : null;
 
 // Lesions & hotspots (spheres) on a 3-D project (see regions3d.js)
 const regions = PROJECT ? createRegions3d({

@@ -155,3 +155,27 @@ def test_batch_experiment_sweep_table(page, server):
     assert "p_in = 20" in page.inner_text("#cmp-out")
     assert page.input_value("#cmp-snap") == rows.nth(1).get_attribute("data-snap")
     assert not page.errors
+
+
+def test_dce_fit_from_the_projects_own_tracer(page, server):
+    """Compute the tracer, take its curve as 'measured' data and fit p_in + porosity:
+    the table, R² and the measured-vs-model chart appear."""
+    _new_project(page, server)
+    page.click("#btn-run")
+    wait_status(page, "solved", "failed", timeout=120000)
+    page.click("#btn-flow")
+    wait_status(page, "flow ready", timeout=120000)
+    page.click("#dce-card summary")
+    page.click("#dce-own")
+    page.wait_for_function("document.querySelector('#dce-csv').value.split('\\n').length > 10")
+    page.click("#dce-go")
+    page.wait_for_selector("#dce-out table.cmp", timeout=180000)
+    out = page.inner_text("#dce-out")
+    assert "p_in" in out
+    assert "porosity" in out
+    import re
+
+    assert float(re.search(r"R² = ([0-9.]+)", out).group(1)) > 0.98
+    assert "±" in out
+    assert page.is_visible("#dce-chart")
+    assert not page.errors

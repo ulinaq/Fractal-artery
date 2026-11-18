@@ -81,7 +81,9 @@ right-drag / Space+drag = pan, ＋ − ⤢ buttons).
   pulsatile, multi-compartment, oxygen and uncertainty analyses, export, and **Compare
   runs (A/B)**: keep a result as a baseline, change something, re-run, and see what
   changed plus Δ maps (also in the 3-D viewer) — or run a **batch experiment** (one
-  input over several values in one job) and compare its runs from a sweep table.
+  input over several values in one job) and compare its runs from a sweep table; and
+  **Fit to DCE-MRI**: paste a measured tissue curve + AIF and fit several inputs at once
+  (flow-setting p_in, blood-volume porosity, K, μ) with error bars.
 
 🐸 **Frog** loads a real segmented frog-tongue system in one click. Set a New
 project's **domain size** and grid in Parameters. Projects are shareable by URL
@@ -165,7 +167,8 @@ calibration on an organ's 2-D/3-D model), `prune_vessel_tree`, `data_constrained
 `direct_model_in_tissue` (the direct model in a 2-D/3-D organ), `export_tissue_fields`
 (an organ model's fields + vessels as CSV / VTI / VTP files, optionally the flow video),
 `pulsatile_windkessel`, `multicompartment_perfusion`, `oxygen_extraction_map`,
-`compare_scenarios` (A/B: two settings on the same organ trees), `experiment_in_tissue`
+`fit_dce_curve` (fit several inputs to a DCE-MRI curve), `compare_scenarios` (A/B: two
+settings on the same organ trees), `experiment_in_tissue`
 (a parameter sweep in an organ), `heterogeneous_perfusion_lesion`, `lesion_in_tissue` (a lesion's perfusion deficit in a
 2-D/3-D organ), `anisotropic_perfusion_bed`,
 `calibrate_parameter_to_flow`, `uncertainty_quantification`,

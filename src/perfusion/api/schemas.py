@@ -504,6 +504,19 @@ class JobInfo(BaseModel):
     updated_at: str | None = None
 
 
+class DCEFitRequest(BaseModel):
+    """Fit several model inputs to a measured DCE-MRI curve: ``times`` with the tissue
+    and arterial-input (``aif``) concentrations, and the inputs to estimate with their
+    ``[lo, hi]`` bounds (``p_in`` / ``mu`` / ``permeability`` / ``porosity``)."""
+
+    times: list[float] = Field(..., min_length=4, max_length=2000)
+    tissue: list[float] = Field(..., min_length=4, max_length=2000)
+    aif: list[float] = Field(..., min_length=4, max_length=2000)
+    params: dict[str, tuple[float, float]] = Field(
+        default_factory=lambda: {"p_in": (1.0, 50.0), "porosity": (0.02, 1.0)})
+    max_nfev: int = Field(80, ge=5, le=400)
+
+
 class ExperimentRequest(BaseModel):
     """A batch experiment: re-solve the project once per value of one input and keep
     each result as a baseline snapshot (``"<param> = <value>"``) for comparison."""

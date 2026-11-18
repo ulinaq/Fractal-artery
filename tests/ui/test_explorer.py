@@ -328,6 +328,27 @@ def test_3d_viewer_compares_runs(page, server):
     assert not errors
 
 
+def test_3d_viewer_fits_a_dce_curve(page, server):
+    """3-D viewer: compute the flow, use its curve as data and fit p_in + porosity."""
+    pid = _3d_project(server, "ui-3d-dce")
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(f"{server}/viewer3d.html?project={pid}")
+    page.wait_for_selector("#v3-an-card:not([hidden])")
+    page.click("#v3-run")
+    page.wait_for_selector("#v3-flow-card:not([hidden])", timeout=120000)
+    page.click("#v3-flow")
+    page.wait_for_selector("#v3-play-row:not([hidden])", timeout=120000)
+    page.click("#v3-an-card summary")
+    page.click("#v3-dce-own")
+    page.wait_for_function("document.querySelector('#v3-dce-csv').value.split('\\n').length > 10")
+    page.click("#v3-dce-go")
+    page.wait_for_selector("#v3-dce-out table.cmp", timeout=180000)
+    assert "porosity" in page.inner_text("#v3-dce-out")
+    assert page.is_visible("#v3-dce-chart")
+    assert not errors
+
+
 def test_3d_viewer_hand_edits_the_trees(page, server):
     """Edit a 3-D project's trees in the viewer: select + resize a vessel, drag a
     node, branch with Shift+click, toggle an outlet, delete, undo — then solve."""

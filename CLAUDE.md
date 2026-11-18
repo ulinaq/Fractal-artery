@@ -332,6 +332,15 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   (`{experiment, name, param, value}`); `GET …/experiments` groups them into sweep
   tables. `runner.check_experiment` rejects bad input before queueing (422).
   r_min_frac is 2-D only. MCP `experiment_in_tissue` (organ sweep).
+- **DCE-MRI fit (multi-parameter)**: `inverse.fit_dce(times, tissue, aif, grid, params)`
+  fits p_in / mu / permeability / porosity (bed blood-volume fraction; tissue curve =
+  porosity · mean c) by log-space `least_squares` over full simulations
+  (`simulate_tissue_curve`), caching flow solves (porosity-only steps reuse them).
+  Error bars use only the free parameters (`active_mask`; the solver zeroes a bound
+  parameter's Jacobian column). `POST /projects/{id}/fit-dce` is a job (kind `dce_fit`,
+  `runner.fit_dce_project`), `GET` returns the stored fit (`{pid}.dcefit.json`); fitting
+  K on a project with lesions is rejected. UI `frontend/dcefit.js` (2-D Result card + 3-D
+  analyses card); MCP `fit_dce_curve`.
 - **Browser tests**: `tests/ui/` (Playwright; `--extra ui`), run in the CI `ui` job.
 
 ## Gotchas

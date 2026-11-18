@@ -248,3 +248,11 @@ table.cmp td.up { color: #c2410c; font-weight: 600; }
 table.cmp.sweep tr[data-snap] { cursor: pointer; }
 table.cmp.sweep tr[data-snap]:hover td { background: rgba(37, 99, 235, 0.08); }
 .mini-btn { padding: 0 6px; font-size: 11px; margin: 0 0 0 6px; }
+
+/* DCE-MRI fit panel */
+.dce-params { display: grid; grid-template-columns: 1fr auto; gap: 2px 6px; align-items: center;
+  margin: 6px 0; font-size: 12px; }
+.dce-params label.check { margin: 0; }
+textarea[id$="dce-csv"] { width: 100%; font: 11px ui-monospace, monospace; box-sizing: border-box; }
+.dce-chart { width: 100%; height: auto; margin-top: 6px; }
+p.warn { color: #b45309; font-size: 12px; margin: 4px 0; }

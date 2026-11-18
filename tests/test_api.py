@@ -633,6 +633,34 @@ def test_snapshot_and_compare_runs(client):
     assert "no tissue field" in r.json()["detail"]
 
 
+def test_dce_fit_recovers_the_project_from_its_own_tracer(client):
+    """Fit p_in and porosity to the project's own simulated tracer curve (a DCE-like
+    measurement): it recovers the project's p_in and the unit porosity, stores the fit,
+    and rejects bad requests."""
+    pid = client.post("/projects", json={"name": "dce", "grid": SMALL_GRID,
+                                         "params": {**FAST_PARAMS, "p_in": 12}}).json()["id"]
+    assert client.get(f"/projects/{pid}/fit-dce").status_code == 404
+    jid = client.post(f"/projects/{pid}/tracer", json={"n_frames": 40}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    k = client.get(f"/projects/{pid}/kinetics").json()
+    body = {"times": k["times"], "tissue": k["measured"], "aif": k["aif"],
+            "params": {"p_in": [1, 60], "porosity": [0.05, 3]}}
+    r = client.post(f"/projects/{pid}/fit-dce", json=body)
+    assert r.status_code == 200, r.text
+    assert _wait_for_job(client, r.json()["id"], timeout=180)["state"] == "done"
+    fit = client.get(f"/projects/{pid}/fit-dce").json()
+    assert fit["params"]["p_in"] == pytest.approx(12.0, rel=0.15)
+    assert fit["params"]["porosity"] == pytest.approx(1.0, rel=0.15)
+    assert fit["r2"] > 0.98
+    assert len(fit["model"]) == len(k["times"])
+    assert fit["input"]["params"]["p_in"] == [1, 60]
+
+    bad = {**body, "params": {"hematocrit": [0.1, 0.5]}}
+    assert client.post(f"/projects/{pid}/fit-dce", json=bad).status_code == 422
+    short = {**body, "aif": body["aif"][:-1]}
+    assert client.post(f"/projects/{pid}/fit-dce", json=short).status_code == 422
+
+
 def test_batch_experiment_sweeps_p_in(client):
     """A p_in sweep as one job: one snapshot per value, grouped as an experiment; the
     linear model's inflow scales with the drop p_in − p_out; the current result and

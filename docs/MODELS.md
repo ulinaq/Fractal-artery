@@ -397,6 +397,24 @@ surrogate: variance `V = Σ_{α≠0} c_α²`, `S1_i = Σ_{α: supp={i}} c_α²/V
 forward solves to recover an input (`K`, `p_in`, `μ`, …) so a measured QoI matches a
 target.
 
+**Multi-parameter DCE-MRI fit (`inverse.fit_dce`)** — estimate several inputs
+`θ ⊂ {p_in, μ, K, φ}` at once from a measured tissue curve `C_meas(tᵢ)` and arterial
+input `C_a(tᵢ)`. Forward model: hybrid solve → bolus transport (§6, implicit Euler on a
+fine uniform step, `C_a` interpolated) → `C(t; θ) = φ · mean_active c(x, t)`, where the
+bed porosity `φ` is the blood-volume fraction (it scales the transit volume and the
+measured concentration but not the flow, so `(p_in, φ)` plays the role of `(Fp, vp)`).
+Bounded least squares in `log θ` (trust-region reflective):
+
+```
+min_θ  Σᵢ ( C(tᵢ; θ) − C_meas(tᵢ) )² ,   Cov(log θ) ≈ s² (JᵀJ)⁻¹,  s² = SSR/(m − p)
+σ(θ_k) ≈ θ_k · sqrt(Cov_kk)  (delta method)
+```
+
+`J` is taken over the free parameters only (one held at a bound has no standard
+error). A correlation `|ρ| > 0.95` is flagged as not separable — e.g. `p_in` and `μ`,
+which enter the linear model only through `Δp/μ`. Flow solves are cached, so steps in
+`φ` alone cost one transport.
+
 **Optimisation (`optimize.py`)** — minimise flux-/TOF-heterogeneity over the tree's
 branching asymmetries (Nelder–Mead / differential evolution), Paper D.
 
