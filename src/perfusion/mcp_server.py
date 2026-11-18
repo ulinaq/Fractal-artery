@@ -231,6 +231,38 @@ def _transit_stats(art, ven, conns, sol) -> dict:
             "mtt_to_outlet": float(mtt.mean()) if mtt.size else None}
 
 
+def tissue_export(out_dir: str, dim: int = 3, shape: str = "kidney",
+                  generations: int = 4, fill: str = "cco", n_terminals: int = 40,
+                  seed: int = 0, extent: float = 1.0) -> dict:
+    """Grow trees into an organ (2-D or 3-D), solve the hybrid model and write the result
+    for ParaView / spreadsheets into ``out_dir``: ``fields.csv`` (cell centres + pressure,
+    flux, time-of-flight per active cell/voxel), ``fields.vti`` (VTK ImageData),
+    ``results.npz`` and ``artery.vtp`` / ``vein.vtp`` (vessel PolyData with radius and
+    flow). Returns the written paths and a short summary."""
+    from pathlib import Path
+
+    from . import io as perfio
+    from . import treegen
+
+    out = Path(out_dir).expanduser()
+    out.mkdir(parents=True, exist_ok=True)
+    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
+                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
+                           _return_model=True)
+    spec, art, ven, mask, domain = grown["_model"]
+    res = treegen.solve(spec, art, ven, mask, domain)
+    files = {"fields.csv": perfio.save_results_csv(res, out / "fields.csv"),
+             "fields.vti": perfio.save_results_vtk(res, out / "fields.vti"),
+             "results.npz": perfio.save_results(res, out / "results.npz"),
+             "artery.vtp": perfio.network_to_vtp(art, out / "artery.vtp",
+                                                 flow=res.solution.q_a),
+             "vein.vtp": perfio.network_to_vtp(ven, out / "vein.vtp", flow=res.solution.q_v)}
+    q = res.solution.terminal_flux
+    return {"dim": spec.dim, "shape": shape, "grid": list(mask.shape),
+            "active_cells": int(mask.sum()), "inflow": float(q[q > 0].sum()),
+            "files": {k: str(v) for k, v in files.items()}}
+
+
 def tissue_direct(dim: int = 3, shape: str = "kidney", generations: int = 4,
                   fill: str = "cco", n_terminals: int = 40, rho_c: float = 0.0,
                   p_in: float = 10.0, p_out: float = 0.0, seed: int = 0,
@@ -816,6 +848,17 @@ def build_server():
         Returns the mean bolus arrival time by element class and the overall mean
         transit time to the venous outlet. `rho_c` is the connection search radius."""
         return direct_transit(rho_c=rho_c, p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+
+    @server.tool()
+    def export_tissue_fields(out_dir: str, dim: int = 3, shape: str = "kidney",
+                             generations: int = 4, fill: str = "cco", n_terminals: int = 40,
+                             seed: int = 0, extent: float = 1.0) -> dict:
+        """Solve an organ model (2-D or 3-D: trees grown into `shape`) and write it to
+        `out_dir` for ParaView / spreadsheets: fields.csv (x,y[,z] + pressure, flux,
+        time-of-flight per active cell), fields.vti (VTK ImageData volume), results.npz,
+        artery.vtp / vein.vtp (vessels with radius + flow). Returns the file paths."""
+        return tissue_export(out_dir, dim=dim, shape=shape, generations=generations,
+                             fill=fill, n_terminals=n_terminals, seed=seed, extent=extent)
 
     @server.tool()
     def direct_model_in_tissue(dim: int = 3, shape: str = "kidney", generations: int = 4,
