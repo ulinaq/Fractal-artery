@@ -424,6 +424,54 @@ def _organ_scenarios(dim, shape, generations, fill, n_terminals, seed, extent):
     return spec, run
 
 
+def tissue_rheology(dim: int = 3, shape: str = "kidney", generations: int = 4,
+                    fill: str = "cco", n_terminals: int = 40, pressures=(5.0, 10.0, 20.0),
+                    carreau_lambda: float = 3000.0, seed: int = 0,
+                    extent: float = 1.0) -> dict:
+    """Newtonian vs shear-thinning (Carreau) blood in an organ: grow trees into
+    ``shape``, solve both rheologies at each inlet pressure in ``pressures`` and report
+    the inflow, the Carreau/Newtonian flow ratio, the apparent resistance Δp/Q and the
+    viscosity-factor range. Shear-thinning makes flow grow *faster* than linearly with
+    pressure (fitted exponent ``Q ∝ Δp^k``, ``k = 1`` for Newtonian blood)."""
+    from . import io as perfio
+    from . import treegen
+
+    ps = sorted({float(p) for p in pressures})
+    if len(ps) < 1 or min(ps) <= 0:
+        raise ValueError("pressures must be positive inlet pressures (p_out = 0)")
+    if carreau_lambda <= 0:
+        raise ValueError("carreau_lambda must be positive")
+    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
+                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
+                           _return_model=True)
+    spec, art, ven, mask, domain = grown["_model"]
+    rows = []
+    for p in ps:
+        newt = perfio.results_summary(treegen.solve(spec, art, ven, mask, domain, p_in=p))
+        thin = perfio.results_summary(treegen.solve(
+            spec, art, ven, mask, domain, p_in=p, shear_thinning=True,
+            carreau_lambda=carreau_lambda))
+        qn, qc = newt["arterial_inflow"], thin["arterial_inflow"]
+        rows.append({"p_in": p, "inflow_newtonian": qn, "inflow_carreau": qc,
+                     "flow_ratio": qc / qn if qn else None,
+                     "resistance_newtonian": p / qn if qn else None,
+                     "resistance_carreau": p / qc if qc else None,
+                     "viscosity_factor_min": thin["viscosity_factor_min"],
+                     "viscosity_factor_max": thin["viscosity_factor_max"],
+                     "mtt_newtonian": newt["mtt"], "mtt_carreau": thin["mtt"],
+                     "iterations": thin["rheology_iterations"]})
+
+    def exponent(key):
+        q = np.array([r[key] for r in rows])
+        if len(ps) < 2 or np.any(q <= 0):
+            return None
+        return float(np.polyfit(np.log(ps), np.log(q), 1)[0])
+
+    return {"dim": spec.dim, "shape": shape, "carreau_lambda": float(carreau_lambda),
+            "rows": rows, "flow_exponent_newtonian": exponent("inflow_newtonian"),
+            "flow_exponent_carreau": exponent("inflow_carreau")}
+
+
 def tissue_lesion(dim: int = 3, shape: str = "kidney", generations: int = 4,
                   fill: str = "cco", n_terminals: int = 40, center=None,
                   radius_frac: float = 0.2, permeability: float = 0.05, seed: int = 0,
@@ -1181,6 +1229,24 @@ def build_server():
         return tissue_compare(dim=dim, shape=shape, generations=generations, fill=fill,
                               n_terminals=n_terminals, baseline=baseline, change=change,
                               seed=seed, extent=extent)
+
+    @server.tool()
+    def shear_thinning_blood(dim: int = 3, shape: str = "kidney", generations: int = 4,
+                             fill: str = "cco", n_terminals: int = 40,
+                             pressures: list[float] | None = None,
+                             carreau_lambda: float = 3000.0, seed: int = 0,
+                             extent: float = 1.0) -> dict:
+        """Newtonian vs shear-thinning (Carreau) blood in an organ, 2-D or 3-D: solve
+        both at each inlet pressure (default 5, 10, 20) and return inflow, the
+        Carreau/Newtonian flow ratio, apparent resistance Δp/Q, the viscosity-factor
+        range (1 = high-shear viscosity, ~16 = at rest) and the flow-pressure exponent
+        k in Q ∝ Δp^k (1 for Newtonian; > 1 when blood thins as flow speeds up).
+        `carreau_lambda` is the Carreau time constant — thinning sets in where
+        λ × wall shear rate ≈ 1; larger λ → closer to Newtonian."""
+        return tissue_rheology(dim=dim, shape=shape, generations=generations, fill=fill,
+                               n_terminals=n_terminals,
+                               pressures=pressures or (5.0, 10.0, 20.0),
+                               carreau_lambda=carreau_lambda, seed=seed, extent=extent)
 
     @server.tool()
     def lesion_in_tissue(dim: int = 3, shape: str = "kidney", generations: int = 4,

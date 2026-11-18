@@ -30,7 +30,8 @@ and a first-order **upwind time-of-flight** solver.
 Beyond the thesis: a full **3-D hybrid** (3-D trees + 3-D Darcy bed with pressure,
 flux and time-of-flight), vessel **growth** (space colonisation, CCO — 2-D and 3-D),
 **pruning**, truly volumetric 3-D fractal trees, a library of **organ tissue domains**
-with anatomical vessel entry points, hematocrit phase separation, multi-compartment
+with anatomical vessel entry points, hematocrit phase separation, shear-thinning
+(Carreau) blood, multi-compartment
 beds, oxygen extraction, structural adaptation, Windkessel transients, UQ/Sobol and
 calibration — all reachable from the web app, the API and MCP.
 
@@ -171,7 +172,8 @@ calibration on an organ's 2-D/3-D model), `prune_vessel_tree`, `data_constrained
 (an organ model's fields + vessels as CSV / VTI / VTP files, optionally the flow video),
 `pulsatile_windkessel`, `multicompartment_perfusion`, `oxygen_extraction_map`,
 `fit_dce_curve` (fit several inputs to a DCE-MRI curve), `anastomosis_rescue` (collateral
-flow round a blocked branch through vessel loops), `compare_scenarios` (A/B: two
+flow round a blocked branch through vessel loops), `shear_thinning_blood` (Newtonian vs
+Carreau blood: inflow, resistance and the flow–pressure exponent), `compare_scenarios` (A/B: two
 settings on the same organ trees), `experiment_in_tissue`
 (a parameter sweep in an organ), `heterogeneous_perfusion_lesion`, `lesion_in_tissue` (a lesion's perfusion deficit in a
 2-D/3-D organ), `anisotropic_perfusion_bed`,
@@ -274,7 +276,7 @@ fit = tkm.fit(t, ca, C, model="2CXM")             # recover Fp, vp, PS, ve
 src/perfusion/          # the package
   core/                 # pure compute engine (no I/O, viz, or web deps)
     parameters.py       #   model parameters + Murray bifurcation geometry
-    viscosity.py        #   Fåhræus–Lindqvist apparent viscosity
+    viscosity.py        #   Fåhræus–Lindqvist + shear-thinning (Carreau) viscosity
     geometry.py         #   Network dataclass + fractal-tree generation
     darcy.py            #   TPFA Darcy bed, mollifier, terminal response, fields
     network.py          #   hybrid solver (linear + nonlinear w/ junction losses)

@@ -92,11 +92,13 @@ function show3dProject() {
   const f = (v) => Number.isInteger(v) ? String(v)
     : (Math.abs(v) < 1e-3 || Math.abs(v) > 1e4) ? v.toExponential(2) : v.toFixed(3);
   const direct = !!data.direct;
-  $("v3-rhoc-row").hidden = $("v3-model").value !== "direct";
+  syncModelRows();
   $("v3-field-row").hidden = direct;               // the direct model has no tissue field
   $("v3-summary").innerHTML = s && data.has_result
     ? [["arterial inflow", s.arterial_inflow], ["venous outflow", s.venous_outflow],
-       ...(direct ? [["connections", s.n_connections]] : [["MTT", s.mtt], ["CTH", s.cth]])]
+       ...(direct ? [["connections", s.n_connections]] : [["MTT", s.mtt], ["CTH", s.cth]]),
+       ...(s.viscosity_factor_max != null ? [["viscosity × min", s.viscosity_factor_min],
+         ["viscosity × max", s.viscosity_factor_max]] : [])]
       .map(([k, v]) => `<div class="stat"><b>${f(v)}</b><span>${k}</span></div>`).join("")
     : "";
   if (data.oef != null) {
@@ -187,7 +189,9 @@ async function run3d() {
   $("v3-run-info").textContent = "solving…";
   try {
     const model = $("v3-model").value;
-    const st = await runJob("run", { model, rho_c: Number($("v3-rhoc").value) || 0 });
+    const st = await runJob("run", { model, rho_c: Number($("v3-rhoc").value) || 0,
+      shear_thinning: model === "hybrid" && $("v3-shear").checked,
+      carreau_lambda: Number($("v3-lambda").value) || 3000 });
     $("v3-run-info").textContent = st.state === "done" ? "" : (st.error || "run failed");
     $("v3-kin").textContent = "";
     if (model === "direct" || !["pressure", "flux", "tof"].includes($("v3-field").value)) {
@@ -342,8 +346,15 @@ $("v3-png").addEventListener("click", () => {
   a.download = `${(data && data.tissue) || "perfusion"}-3d.png`;
   a.click();
 });
+function syncModelRows() {                  // each model's own settings
+  const direct = $("v3-model").value === "direct";
+  $("v3-rhoc-row").hidden = !direct;
+  $("v3-shear-row").hidden = direct;
+  $("v3-lambda-row").hidden = direct || !$("v3-shear").checked;
+}
+$("v3-shear").addEventListener("change", syncModelRows);
 $("v3-model").addEventListener("change", (e) => {
-  $("v3-rhoc-row").hidden = e.target.value !== "direct";
+  syncModelRows();
   const stored = data && data.has_result ? (data.direct ? "direct" : "hybrid") : null;
   $("v3-run").textContent = stored === e.target.value ? "↻ Re-run 3-D simulation" : "▶ Run 3-D simulation";
 });

@@ -132,7 +132,8 @@ export async function run() {
     { model: $("run-model").value, nonlinear: $("nonlinear").checked,
       use_vessels: true, max_iter: numOf("max-iter"),
       rho_c: numOf("rho-c"), phase_separation: $("phase-sep").checked,
-      elasticity: $("elasticity").checked, compliance: numOf("compliance") });
+      elasticity: $("elasticity").checked, compliance: numOf("compliance"),
+      shear_thinning: $("shear-thin").checked, carreau_lambda: numOf("carreau-lambda") });
   status("running…");
   $("run-info").classList.remove("run-error");
   $("run-info").textContent = "job " + job.id;
@@ -410,6 +411,9 @@ async function showSummary() {
   ];
   if (s.model === "direct") stats.push(["connections", s.n_connections]);
   if (s.mtt != null) stats.push(["MTT", s.mtt], ["CTH", s.cth], ["RD", s.rd]);   // transit-time metrics
+  if (s.viscosity_factor_max != null) {     // shear-thinning: Carreau viscosity range
+    stats.push(["viscosity × min", s.viscosity_factor_min], ["viscosity × max", s.viscosity_factor_max]);
+  }
   $("summary").innerHTML = stats
     .map(([k, v]) => `<div class="stat"><b>${fmt(v)}</b><span>${k}</span></div>`).join("");
 }

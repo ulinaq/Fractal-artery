@@ -178,6 +178,8 @@ class RunRequest(BaseModel):
     phase_separation: bool = False                 # RBC plasma-skimming (implies Fåhræus–Lindqvist)
     elasticity: bool = False                       # pressure-dependent vessel radii
     compliance: float = Field(0.01, ge=0)          # radius change per unit transmural pressure
+    shear_thinning: bool = False                   # Carreau (non-Newtonian) blood viscosity
+    carreau_lambda: float = Field(3000.0, gt=0)    # Carreau time constant (model time units)
 
 
 class ExploreRequest(BaseModel):

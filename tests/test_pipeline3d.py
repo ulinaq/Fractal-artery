@@ -286,3 +286,17 @@ def test_3d_calibration_recovers_the_input(param, truth, bounds):
                           domain_limit=dom, art=art, ven=ven)
     assert c.value == pytest.approx(truth, rel=1e-3)
     assert c.achieved == pytest.approx(target, rel=1e-5)
+
+
+def test_3d_shear_thinning_conserves_mass_and_thickens_blood():
+    art, ven, grid, dom = _system(max_gen=4)
+    newt = run_hybrid_3d(Parameters(p_in=10.0, p_out=0.0), grid, art, ven, dom, eps=2.0)
+    thin = run_hybrid_3d(Parameters(p_in=10.0, p_out=0.0, shear_thinning=True), grid,
+                         art, ven, dom, eps=2.0)
+    n_art = thin.art.terminal_nodes.size
+    tf = thin.solution.terminal_flux
+    assert np.isclose(tf[:n_art].sum(), -tf[n_art:].sum(), rtol=1e-8)
+    assert thin.rheology["converged"]
+    assert thin.rheology["factor_max"] > 1.0
+    assert 0 < tf[:n_art].sum() < newt.solution.terminal_flux[:n_art].sum()
+    assert newt.rheology is None

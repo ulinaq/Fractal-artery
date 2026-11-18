@@ -35,6 +35,7 @@ class HybridResult3D:
     fy: np.ndarray | None = None
     fz: np.ndarray | None = None
     sources: list | None = None                # per-terminal mollified (cells, weights)
+    rheology: dict | None = None               # shear-thinning solve info (else None)
 
 
 def _spread_coincident_3d(grid: Grid3D, cells: np.ndarray) -> np.ndarray:
@@ -133,10 +134,12 @@ def run_hybrid_3d(prm: Parameters, grid: Grid3D, art: Network, ven: Network,
     ``art``/``ven`` are 3-D networks (``node_z`` set, e.g. from
     :func:`perfusion.core.geometry.grow_tree_3d`); ``domain_limit`` is the 3-D
     window ``(xmin, xmax, ymin, ymax, zmin, zmax)`` the grid maps to. ``prm``
-    supplies ``p_in``/``p_out`` and the (scalar) viscosity ``mu``. ``coupling`` is as
-    in :func:`perfusion.core.pipeline.run_hybrid` — the sparse ``"monolithic"`` solve
-    is what makes fine 3-D grids with many terminals fit in memory. ``darcy`` reuses a
-    :func:`darcy_coupling_3d` computed for the same grid / terminals / ``eps``.
+    supplies ``p_in``/``p_out``, the (scalar) viscosity ``mu`` and, with
+    ``prm.shear_thinning``, the Carreau law (per-segment viscosity from the shear
+    rate). ``coupling`` is as in :func:`perfusion.core.pipeline.run_hybrid` — the
+    sparse ``"monolithic"`` solve is what makes fine 3-D grids with many terminals fit
+    in memory. ``darcy`` reuses a :func:`darcy_coupling_3d` computed for the same
+    grid / terminals / ``eps``.
     """
     if art_inlets is not None:
         art = replace(art, inlet_nodes=np.asarray(art_inlets, dtype=int))
@@ -146,7 +149,16 @@ def run_hybrid_3d(prm: Parameters, grid: Grid3D, art: Network, ven: Network,
     if darcy is None:
         darcy = darcy_coupling_3d(grid, art, ven, domain_limit, eps, coupling)
     kind, operator, field_response, sources = darcy
-    sol = network.solve_linear(art, ven, operator, prm.p_in, prm.p_out, prm.mu)
+    def _solve(a, v, visc):
+        return network.solve_linear(a, v, operator, prm.p_in, prm.p_out, visc)
+
+    rheology = None
+    if prm.shear_thinning:               # Carreau blood: viscosity follows wall shear
+        from .pipeline import shear_thinning_solve
+
+        sol, _, rheology = shear_thinning_solve(_solve, art, ven, prm.mu, prm)
+    else:
+        sol = _solve(art, ven, prm.mu)
     if kind == "monolithic":
         pressure = np.asarray(sol.darcy_pressure)
     else:
@@ -158,4 +170,5 @@ def run_hybrid_3d(prm: Parameters, grid: Grid3D, art: Network, ven: Network,
     tof = time_of_flight_3d(grid, fx, fy, fz, sources, sol.terminal_flux)
     return HybridResult3D(art=art, ven=ven, grid=grid, solution=sol,
                           pressure=pressure, domain_limit=tuple(domain_limit),
-                          flux=flux, tof=tof, fx=fx, fy=fy, fz=fz, sources=sources)
+                          flux=flux, tof=tof, fx=fx, fy=fy, fz=fz, sources=sources,
+                          rheology=rheology)

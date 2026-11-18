@@ -84,7 +84,7 @@ def test_server_registers_expected_tools():
             "tissue_uncertainty_calibration", "direct_model_in_tissue",
             "export_tissue_fields", "lesion_in_tissue", "compare_scenarios",
             "experiment_in_tissue", "fit_dce_curve",
-            "anastomosis_rescue", "describe_model"} <= tools
+            "anastomosis_rescue", "shear_thinning_blood", "describe_model"} <= tools
 
 
 def test_calibrate_to_flow_recovers_value():
@@ -418,3 +418,18 @@ def test_anastomosis_rescue_in_an_organ(dim):
     assert out["best"]["looped_occluded"] > 0.01               # loops bring some back
     with pytest.raises(ValueError, match="segment index"):
         mcp_server.tissue_anastomosis(dim=dim, occlude=10**6)
+
+
+@pytest.mark.parametrize("dim", [2, 3])
+def test_shear_thinning_blood_in_an_organ(dim):
+    out = mcp_server.tissue_rheology(dim=dim, shape="kidney", generations=4,
+                                     pressures=(5.0, 10.0, 20.0))
+    assert out["dim"] == dim
+    assert out["flow_exponent_newtonian"] == pytest.approx(1.0, abs=1e-9)
+    assert out["flow_exponent_carreau"] > 1.05             # thinning: Q grows faster than Δp
+    ratios = [r["flow_ratio"] for r in out["rows"]]
+    assert all(0 < q < 1 for q in ratios)                  # thicker than the high-shear mu
+    assert ratios == sorted(ratios)                        # ... less so at higher pressure
+    assert all(r["viscosity_factor_min"] >= 1.0 for r in out["rows"])
+    with pytest.raises(ValueError, match="positive"):
+        mcp_server.tissue_rheology(dim=dim, pressures=(0.0, 5.0))

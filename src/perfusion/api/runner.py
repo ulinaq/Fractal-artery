@@ -298,9 +298,12 @@ def _validate_run_3d(project, prm):
 
 
 def solve(project, *, use_vessels, nonlinear=False, max_iter=100, tol=1e-10,
-          phase_separation=False, elasticity=False, compliance=0.01):
+          phase_separation=False, elasticity=False, compliance=0.01,
+          shear_thinning=False, carreau_lambda=3000.0):
     """Build the model (grid, trees, inlet/outlet nodes) and run the hybrid solve."""
     prm = project.params.to_core()
+    if shear_thinning:
+        prm.shear_thinning, prm.carreau_lambda = True, float(carreau_lambda)
     if phase_separation:
         prm.fahraeus_lindqvist = True     # skimming only feeds back through F-L viscosity
     if elasticity:
@@ -435,7 +438,8 @@ def run_project(store, project, req: RunRequest) -> None:
         result = solve(project, use_vessels=req.use_vessels, nonlinear=req.nonlinear,
                        max_iter=req.max_iter, tol=req.tol,
                        phase_separation=req.phase_separation,
-                       elasticity=req.elasticity, compliance=req.compliance)
+                       elasticity=req.elasticity, compliance=req.compliance,
+                       shear_thinning=req.shear_thinning, carreau_lambda=req.carreau_lambda)
     notes = [str(w.message) for w in caught if issubclass(w.category, RuntimeWarning)]
     store.save_result(project, result, notes=notes or None)
 
