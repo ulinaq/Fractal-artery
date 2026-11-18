@@ -298,9 +298,13 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   — any other field is a 409. **Field exports** (`export?fmt=csv|vtk`, `/bundle`) work in
   3-D: `io.fields_to_csv/_to_vtk` take a 2-D or 3-D field (4/6-value `domain_limit`;
   CSV `x,y[,z],…` rows x-fastest, VTI a voxel volume); a direct result has no field →
-  409 (`_require_field_result`), its vessels still export as `vtp`. The 3-D bundle ships
-  `tracer.npz` instead of a GIF/MP4. Still 2-D-only (`deps.get_project_2d` → 409):
-  masks/lesions/hotspots and the GIF/MP4 renders. New
+  409 (`_require_field_result`), its vessels still export as `vtp`. The bundle also ships
+  `tracer.npz`. **3-D flow videos**: `tracer.gif`/`tracer.mp4` on a 3-D project render
+  `helpers.tracer_images_3d` — a maximum-intensity projection of the bolus + the trees,
+  seen through `helpers.project_3d` (the same camera as `viewer3d.js`'s `project` — keep
+  them in step), turning once round the organ unless `spin=false`. Still 2-D-only
+  (`deps.get_project_2d` → 409): masks/lesions/hotspots and the raw `GET /tracer` /
+  `results/field` grids. New
   project features must either work in 3-D or be guarded. Oxygen's Damköhler rate is
   scaled by the *active* tissue volume (`oxygen.solve_oxygen`) — keep it that way.
 - **Default trees** (no vessels drawn): `runner.default_trees` fits the thesis trees

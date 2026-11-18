@@ -184,6 +184,31 @@ def test_tracer_mp4_export(client):
     assert mp4.content[4:8] == b"ftyp"                 # ISO base-media container
 
 
+def test_3d_project_tracer_video(client):
+    """A 3-D project's flow video: GIF and MP4 render the bolus as a rotating
+    maximum-intensity projection (the GIF has one frame per tracer frame)."""
+    imageio = pytest.importorskip("imageio.v2")
+    import io as stdio
+
+    pid = _explorer_project(client, 3)["id"]
+    assert client.get(f"/projects/{pid}/tracer.gif").status_code == 409   # no tracer yet
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    jid = client.post(f"/projects/{pid}/tracer", json={"n_frames": 8}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    assert client.get(f"/projects/{pid}/view3d").json()["has_tracer"]
+
+    gif = client.get(f"/projects/{pid}/tracer.gif?spin=false")
+    assert gif.status_code == 200, gif.text
+    frames = imageio.mimread(stdio.BytesIO(gif.content), format="GIF")
+    assert len(frames) == 8
+    assert frames[0].shape[:2] == (480, 480)
+    pytest.importorskip("imageio_ffmpeg")
+    mp4 = client.get(f"/projects/{pid}/tracer.mp4")
+    assert mp4.status_code == 200
+    assert mp4.content[4:8] == b"ftyp"
+
+
 def test_image_upload_segments_a_network(client):
     pytest.importorskip("skimage")
     pytest.importorskip("imageio")
@@ -1403,7 +1428,10 @@ def test_3d_project_field_exports(client):
     assert r.status_code == 200, r.text
     names = set(zipfile.ZipFile(stdio.BytesIO(r.content)).namelist())
     assert {"results.npz", "fields.csv", "fields.vti", "summary.json", "tracer.npz"} <= names
-    assert "tracer.gif" not in names                            # GIF/MP4 are 2-D renders
+    import importlib.util
+
+    if importlib.util.find_spec("imageio"):                     # 3-D flow video renders too
+        assert "tracer.gif" in names
 
     jid = client.post(f"/projects/{pid}/run", json={"model": "direct"}).json()["id"]
     assert _wait_for_job(client, jid)["state"] == "done"
@@ -1418,7 +1446,7 @@ def test_2d_only_features_say_so_on_a_3d_project(client):
     pid = _explorer_project(client, 3)["id"]
     for method, path, body in [
         ("put", "mask", {"regions": []}), ("get", "results/field/pressure", None),
-        ("get", "tracer", None), ("get", "tracer.gif", None),
+        ("get", "tracer", None),
     ]:
         r = getattr(client, method)(f"/projects/{pid}/{path}",
                                     **({"json": body} if body is not None else {}))
@@ -1670,3 +1698,35 @@ def test_explorer_2d_result_becomes_an_editable_workspace_project(client):
 def test_grid_dims_are_validated(client):
     bad = {"name": "x", "grid": {"nx": 10, "ny": 10, "nz": 10, "domain_limit": [0, 1, 0, 1]}}
     assert client.post("/projects", json=bad).status_code == 422
+
+
+def test_tracer_images_3d_projects_like_the_viewer():
+    """The 3-D video renderer: the domain centre lands mid-frame, a single hot voxel
+    lights its projected pixel (maximum-intensity projection), vessels are drawn,
+    the time bar grows, and ``spin`` turns the camera between frames."""
+    pytest.importorskip("matplotlib")
+    from perfusion.api import helpers
+
+    col, row, _ = helpers.project_3d(np.array([[5.0, 5.0, 5.0]]), np.array([5.0, 5.0, 5.0]),
+                                     10.0, 0.7, 0.45, 200)
+    assert (col[0], row[0]) == (100.0, 100.0)
+
+    mask = np.ones((5, 5, 5), bool)
+    frames = np.zeros((3, 5, 5, 5))
+    frames[1, 2, 2, 2] = 1.0                                    # centre voxel, frame 1
+    tracer = {"frames": frames, "mask": mask, "vmax": 1.0}
+    seg = [[0, 0, 0, 10, 10, 10, 1.0, 0]]                       # one artery diagonal
+    imgs = helpers.tracer_images_3d(tracer, (0, 10, 0, 10, 0, 10), seg, size=120, spin=0.0)
+    assert len(imgs) == 3
+    assert imgs[0].shape == (120, 120, 3)
+    assert imgs[0].dtype == np.uint8
+    centre = imgs[1][55:65, 55:65].astype(int)
+    assert (centre[..., 1] > 150).any()                         # yellow-green bolus
+    assert not (imgs[0][55:65, 55:65, 1] > 150).any()           # frame 0: no contrast
+    red = (imgs[0][..., 0] > 150) & (imgs[0][..., 2] < 140)
+    assert red.any()                                            # the artery is drawn
+    bars = [int((im[-1, :, 0] == 255).sum()) for im in imgs]
+    assert bars == sorted(bars)
+    assert bars[-1] == 120
+    turning = helpers.tracer_images_3d(tracer, (0, 10, 0, 10, 0, 10), seg, size=120)
+    assert not np.array_equal(turning[2], imgs[2])              # spin moves the camera

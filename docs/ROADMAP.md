@@ -710,7 +710,10 @@ Editing 3-D trees by hand is now done too (§11.4).
 - ✅ ~~**Server-side MP4** export of the flow video~~ — `GET …/tracer.mp4` (`video` extra:
   imageio-ffmpeg bundles ffmpeg), ↓ MP4 next to ↓ GIF, also in the export bundle.
 - ✅ ~~**3-D flow video**~~ — tracer transport on the voxel bed, played back in the
-  3-D viewer (`view3d?field=tracer`). An MP4 of the 3-D view is not exported yet.
+  3-D viewer (`view3d?field=tracer`), and exported as **GIF / MP4**: a server-rendered
+  maximum-intensity projection of the bolus with the trees, turning round the organ
+  (`helpers.tracer_images_3d`; ↓ GIF / ↓ MP4 in the viewer's flow card, in the bundle,
+  and MCP `export_tissue_fields(video=True)`).
 - ✅ ~~**Workspace result analyses for 3-D**~~ — tracer, kinetics, oxygen, grow, adapt,
   UQ / Sobol / calibration, the multi-compartment bed and now the **direct-connection
   model** (3-D terminal links, flow-weighted links + network bolus in the 3-D viewer, MCP

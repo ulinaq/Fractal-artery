@@ -104,6 +104,7 @@ function show3dProject() {
   }
   $("v3-an-card").hidden = direct;                 // UQ / calibration re-solve the hybrid
   syncExport();
+  syncVideo();
   $("v3-flow-desc").textContent = direct
     ? "Time a contrast bolus along the vessels and their terminal links, then play it."
     : "Advect a contrast bolus through the 3-D bed, then play it or map its kinetics.";                 // UQ / calibration re-solve the hybrid
@@ -114,6 +115,14 @@ function show3dProject() {
 
 // the active bolus animation: tissue voxels (hybrid) or network elements (direct)
 const tracerOf = (d) => (d && (d.tracer || d.net_tracer)) || null;
+
+// The flow video, rendered on the server (rotating maximum-intensity projection).
+function syncVideo() {
+  $("v3-video-row").hidden = !(data && data.has_tracer && !data.direct);
+  const q = `?spin=${$("v3-video-spin").checked}`;
+  $("v3-gif").href = `/projects/${PROJECT}/tracer.gif${q}`;
+  $("v3-mp4").href = `/projects/${PROJECT}/tracer.mp4${q}`;
+}
 
 // Export: field formats need a solved hybrid field; the vessels (.vtp) always export.
 function syncExport() {
@@ -303,6 +312,7 @@ $("v3-scrub").addEventListener("input", (e) => {
 });
 $("v3-run").addEventListener("click", () => run3d().catch((e) => { $("v3-run-info").textContent = e.message; }));
 $("v3-field").addEventListener("change", () => loadProject().catch(() => {}));
+$("v3-video-spin").addEventListener("change", syncVideo);
 $("v3-export-fmt").addEventListener("change", (e) => { delete e.target.dataset.forced; });
 $("v3-export").addEventListener("click", () => {
   window.location = `/projects/${PROJECT}/export?fmt=${$("v3-export-fmt").value}`;
