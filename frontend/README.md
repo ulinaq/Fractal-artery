@@ -82,6 +82,11 @@ no separate dev server.
   colonisation (growth steps, attraction points, step length, influence radius) or
   CCO (terminals) — then see the solved field, Strahler orders and inflow.
   *Animate growth* replays it generation by generation, then step by step.
+  **Optimise trees** (`POST /explore/optimize`) tunes the ticked branching parameters
+  for the chosen homogeneity objective in the current organ setup (2-D or 3-D),
+  searching on a coarser grid and re-scoring at your resolution (your settings are
+  kept if nothing beats them); **📤 Use optimised trees in simulation** opens the
+  result as a project — the 2-D workspace or the 3-D viewer.
   **📤 Open as project** saves the setup as a project (`POST /explore/project`):
   2-D → this workspace (editable), 3-D → the 3-D viewer (run, grow / prune / adapt,
   🌊 flow playback + kinetics, oxygen and kinetic-map fields).

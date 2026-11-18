@@ -236,14 +236,19 @@ class ShapePolygonRequest(BaseModel):
     seed: int = 0
 
 
-class ExploreOptimizeRequest(BaseModel):
-    """Optimise the tree for homogeneity (Tree Explorer 'Optimise' button)."""
+class ExploreOptimizeRequest(ExploreGrowRequest):
+    """Optimise the **current explorer setup** (its organ, roots, fill, generations —
+    2-D or 3-D) for homogeneous perfusion (Tree Explorer 'Optimise' button).
 
-    kind: str = "tof_std"
+    ``free`` picks the tunables to vary (``a_gamma``, ``v_gamma``,
+    ``length_to_radius``, ``exponent``, ``v_radius_scale``, 3-D ``twist``; default:
+    the first four, plus ``twist`` in 3-D). The search runs on a grid capped at
+    ``search_nx`` (2-D: ×``ny`` in proportion; 3-D: ``search_nx``³) for speed."""
+
     method: str = "local"                                # "local" | "global"
     maxiter: int = Field(15, ge=1, le=60)
-    nx: int = Field(50, ge=20, le=120)
-    ny: int = Field(58, ge=20, le=140)
+    free: list[str] | None = None
+    search_nx: int = Field(50, ge=12, le=120)
 
 
 class GrowRequest(BaseModel):

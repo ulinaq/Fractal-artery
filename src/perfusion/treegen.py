@@ -215,3 +215,117 @@ def homogeneity(res) -> dict:
            "tof_std": float(tof.std()) if tof.size else float("inf"),
            "tof_max": float(tof.max()) if tof.size else float("inf")}
     return out
+
+
+# ── optimisation of the explorer setup (Paper D, organ-aware) ──────────────────
+# Tunables of a GenSpec the optimiser may vary, with their bounds. Everything else
+# (organ, roots, fill, generations, resolution, seed) stays as the user set it.
+OPT_BOUNDS = {
+    "a_gamma": (1.0, 1.9),              # arterial branching asymmetry
+    "v_gamma": (1.0, 1.9),              # venous branching asymmetry
+    "length_to_radius": (4.0, 18.0),
+    "exponent": (2.0, 3.5),             # Murray bifurcation exponent
+    "v_radius_scale": (0.6, 2.0),       # venous root radius / arterial root radius
+    "twist": (0.0, 180.0),              # 3-D branching-plane rotation (deg)
+}
+OPT_DEFAULT_FREE = ("a_gamma", "v_gamma", "length_to_radius", "exponent")
+
+
+def spec_values(spec: GenSpec) -> dict:
+    """The optimisable tunables of ``spec`` (see :data:`OPT_BOUNDS`)."""
+    return {"a_gamma": spec.artery.gamma, "v_gamma": spec.vein.gamma,
+            "length_to_radius": spec.length_to_radius, "exponent": spec.exponent,
+            "v_radius_scale": spec.vein.radius / max(spec.artery.radius, 1e-12),
+            "twist": spec.twist}
+
+
+def with_values(spec: GenSpec, values: dict) -> GenSpec:
+    """A copy of ``spec`` with tunables replaced (unknown keys are ignored)."""
+    from dataclasses import replace
+
+    art, ven = spec.artery, spec.vein
+    if "a_gamma" in values:
+        art = replace(art, gamma=float(values["a_gamma"]))
+    if "v_gamma" in values:
+        ven = replace(ven, gamma=float(values["v_gamma"]))
+    if "v_radius_scale" in values:
+        ven = replace(ven, radius=float(values["v_radius_scale"]) * art.radius)
+    out = replace(spec, artery=art, vein=ven)
+    for k in ("length_to_radius", "exponent", "twist"):
+        if k in values:
+            out = replace(out, **{k: float(values[k])})
+    return out
+
+
+def objective(spec: GenSpec, kind: str = "tof_std") -> float:
+    """Homogeneity objective (:func:`homogeneity` ``[kind]``) of growing + solving
+    ``spec``; ``inf`` for a setup that does not build or solve."""
+    try:
+        art, ven, mask, domain, _ = build(spec)
+        value = homogeneity(solve(spec, art, ven, mask, domain))[kind]
+    except (ValueError, np.linalg.LinAlgError, RuntimeError):
+        return float("inf")
+    return float(value) if np.isfinite(value) else float("inf")
+
+
+@dataclass
+class SpecOptimum:
+    spec: GenSpec                 # the best setup (the input with the optimised tunables)
+    values: dict                  # best tunables (all of spec_values)
+    start: float                  # objective of the input setup
+    best: float                   # objective of the best setup
+    kind: str
+    free: list
+    n_eval: int
+    history: list                 # best-so-far objective per evaluation
+
+
+def optimize(spec: GenSpec, kind: str = "tof_std", free=None, method: str = "local",
+             maxiter: int = 15, seed: int = 0) -> SpecOptimum:
+    """Optimise the explorer setup for homogeneous perfusion **in its own organ**.
+
+    Varies the ``free`` tunables (default :data:`OPT_DEFAULT_FREE`, plus ``twist`` in
+    3-D) within :data:`OPT_BOUNDS`, keeping the organ, roots, fill, generations and
+    grid; each evaluation grows both trees and solves the hybrid model (2-D or 3-D).
+    ``method`` is ``"local"`` (bounded Nelder-Mead from the current setup) or
+    ``"global"`` (differential evolution). Fills are seeded, so the objective is
+    deterministic. Never returns a setup worse than the input.
+    """
+    from scipy.optimize import differential_evolution, minimize
+
+    if kind not in ("flux_range", "flux_std", "flux_l2", "flux_mean", "tof_std", "tof_max"):
+        raise ValueError(f"unknown objective {kind!r}")
+    if free is None:
+        free = [*OPT_DEFAULT_FREE, *(["twist"] if spec.dim == 3 else [])]
+    free = [f for f in free if f in OPT_BOUNDS and (f != "twist" or spec.dim == 3)]
+    if not free:
+        raise ValueError(f"nothing to optimise; choose from {sorted(OPT_BOUNDS)}")
+    x0 = spec_values(spec)
+    bounds = [OPT_BOUNDS[f] for f in free]
+    start = objective(spec, kind)
+    history: list[float] = []
+    best = {"f": start, "x": [x0[f] for f in free]}
+
+    def f(x):
+        val = objective(with_values(spec, dict(zip(free, x, strict=True))), kind)
+        if val < best["f"]:
+            best["f"], best["x"] = val, list(map(float, x))
+        history.append(best["f"])
+        return val if np.isfinite(val) else 1e300
+
+    if method == "global":
+        differential_evolution(f, bounds, maxiter=int(maxiter), seed=seed, popsize=6,
+                               tol=1e-3, polish=False)
+    elif method == "local":
+        lo, hi = np.array(bounds).T
+        x_init = np.clip([x0[k] for k in free], lo, hi)
+        minimize(f, x_init, method="Nelder-Mead", bounds=bounds,
+                 options={"maxfev": max(int(maxiter) * (len(free) + 1), 4),
+                          "xatol": 1e-3, "fatol": 1e-6})
+    else:
+        raise ValueError(f"unknown method {method!r}; use 'local' or 'global'")
+
+    best_spec = with_values(spec, dict(zip(free, best["x"], strict=True)))
+    return SpecOptimum(spec=best_spec, values=spec_values(best_spec), start=float(start),
+                       best=float(best["f"]), kind=kind, free=free, n_eval=len(history),
+                       history=history)

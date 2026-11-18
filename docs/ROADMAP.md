@@ -684,8 +684,13 @@ Still open from this tier: editing 3-D trees by hand.
 - **3-D segmentation from image stacks / MRA** into `node_z` networks — §4, §8. *L.*
 - **Organ library refinement** — the 3-D heart is a stylised ventricular wall; image- or
   atlas-derived organ masks would replace the analytic shapes. *M.*
-- **Explorer Optimise for the current setup** — today it optimises the asymmetries in the
-  thesis' default fractal frame, ignoring the chosen organ, roots and fill. *M.*
+- ✅ ~~**Explorer Optimise for the current setup**~~ — `treegen.optimize` (Nelder-Mead /
+  differential evolution over γ_a, γ_v, length:radius, Murray exponent, vein calibre,
+  3-D twist) on the chosen organ, roots, fill and generations, 2-D or 3-D;
+  `POST /explore/optimize` searches on a capped grid, re-scores at the user's resolution
+  and never returns a worse setup; **📤 Use optimised trees in simulation** hands it to
+  the workspace / 3-D viewer; MCP `optimize_trees_in_tissue`. (The thesis-frame
+  `optimize.optimize_tree` / MCP `optimize_tree_config` remain for Paper D.)
 
 ## 11.4 Platform & UI
 
