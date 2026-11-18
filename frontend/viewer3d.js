@@ -65,7 +65,8 @@ async function loadProject() {
     $("status").className = "status err"; return;
   }
   setData(await r.json());
-  if (data.tracer) startAnimation();
+  if (data.direct) $("v3-model").value = "direct";      // reflect the stored result's model
+  if (data.tracer || data.net_tracer) startAnimation();
   else $("v3-play-row").hidden = true;
   if (data.dim === 3) show3dProject();
   $("status").textContent = data.has_result
@@ -81,10 +82,14 @@ function show3dProject() {
   $("proj-desc").textContent = `${data.tissue || "tissue"} · grid ${data.shape.join("×")} · `
     + `${data.segments.length} vessel segments`;
   const s = data.summary;
-  const f = (v) => (Math.abs(v) < 1e-3 || Math.abs(v) > 1e4) ? v.toExponential(2) : v.toFixed(3);
+  const f = (v) => Number.isInteger(v) ? String(v)
+    : (Math.abs(v) < 1e-3 || Math.abs(v) > 1e4) ? v.toExponential(2) : v.toFixed(3);
+  const direct = !!data.direct;
+  $("v3-rhoc-row").hidden = $("v3-model").value !== "direct";
+  $("v3-field-row").hidden = direct;               // the direct model has no tissue field
   $("v3-summary").innerHTML = s && data.has_result
     ? [["arterial inflow", s.arterial_inflow], ["venous outflow", s.venous_outflow],
-       ["MTT", s.mtt], ["CTH", s.cth]]
+       ...(direct ? [["connections", s.n_connections]] : [["MTT", s.mtt], ["CTH", s.cth]])]
       .map(([k, v]) => `<div class="stat"><b>${f(v)}</b><span>${k}</span></div>`).join("")
     : "";
   if (data.oef != null) {
@@ -97,14 +102,20 @@ function show3dProject() {
   if (s && data.has_result && !$("v3-cal-target").value) {   // a sensible default target
     $("v3-cal-target").value = Number((1.2 * s.arterial_inflow).toPrecision(3));
   }
-  $("v3-an-card").hidden = false;
+  $("v3-an-card").hidden = direct;
+  $("v3-flow-desc").textContent = direct
+    ? "Time a contrast bolus along the vessels and their terminal links, then play it."
+    : "Advect a contrast bolus through the 3-D bed, then play it or map its kinetics.";                 // UQ / calibration re-solve the hybrid
   $("v3-run").textContent = data.has_result ? "↻ Re-run 3-D simulation" : "▶ Run 3-D simulation";
   $("v3-flow-card").hidden = !data.has_result;    // flow needs a solved field
   $("v3-tree-card").hidden = false;
 }
 
+// the active bolus animation: tissue voxels (hybrid) or network elements (direct)
+const tracerOf = (d) => (d && (d.tracer || d.net_tracer)) || null;
+
 function startAnimation() {
-  const t = data.tracer;
+  const t = tracerOf(data);
   $("v3-play-row").hidden = false;
   $("v3-scrub").max = t.frames.length - 1;
   anim.idx = Math.min(anim.idx, t.frames.length - 1);
@@ -112,7 +123,7 @@ function startAnimation() {
 }
 
 function showFrame() {
-  const t = data.tracer;
+  const t = tracerOf(data);
   if (!t) return;
   $("v3-scrub").value = anim.idx;
   $("v3-time").textContent = `t = ${t.times[anim.idx].toFixed(2)}`;
@@ -142,25 +153,36 @@ async function run3d() {
   const btn = $("v3-run"); btn.disabled = true;
   $("v3-run-info").textContent = "solving…";
   try {
-    const st = await runJob("run");
+    const model = $("v3-model").value;
+    const st = await runJob("run", { model, rho_c: Number($("v3-rhoc").value) || 0 });
     $("v3-run-info").textContent = st.state === "done" ? "" : (st.error || "run failed");
     $("v3-kin").textContent = "";
-    if (!["pressure", "flux", "tof"].includes($("v3-field").value)) $("v3-field").value = "pressure";
+    if (model === "direct" || !["pressure", "flux", "tof"].includes($("v3-field").value)) {
+      $("v3-field").value = "pressure";
+    }
     await loadProject();
   } finally { btn.disabled = false; }
 }
 
 async function flow3d() {
   const btn = $("v3-flow"); btn.disabled = true;
-  $("v3-kin").textContent = "advecting the bolus through the 3-D bed…";
+  $("v3-kin").textContent = data && data.direct ? "timing the bolus along the network…"
+    : "advecting the bolus through the 3-D bed…";
   try {
     const st = await runJob("tracer", { n_frames: 40 });
     if (st.state !== "done") { $("v3-kin").textContent = st.error || "flow failed"; return; }
     $("v3-field").value = "tracer";
     anim.idx = 0; anim.playing = true; $("v3-play").textContent = "⏸";
     await loadProject();
-    const k = await (await fetch(`/projects/${PROJECT}/kinetics?model=1CM`)).json();
     const f = (v) => (v == null ? "–" : Math.abs(v) < 1e-3 || Math.abs(v) > 1e4 ? v.toExponential(2) : v.toFixed(3));
+    if (data.net_tracer) {            // direct model: transit times along the network
+      const arr = data.net_tracer.arrivals.filter((a) => a != null);
+      $("v3-kin").textContent = `bolus timed along ${data.net_tracer.lines.length} vessels + links`
+        + ` · reaches ${Math.round(100 * arr.length / data.net_tracer.arrivals.length)}%`
+        + ` · last arrival t = ${f(Math.max(...arr, 0))}`;
+      return;
+    }
+    const k = await (await fetch(`/projects/${PROJECT}/kinetics?model=1CM`)).json();
     $("v3-kin").textContent = `1-compartment fit of the tissue curve: Fp = ${f(k.Fp)}, vp = ${f(k.vp)}`
       + " · pick Fp / vp / CBV / MTT for voxel maps";
   } finally { btn.disabled = false; }
@@ -270,6 +292,11 @@ $("v3-scrub").addEventListener("input", (e) => {
 });
 $("v3-run").addEventListener("click", () => run3d().catch((e) => { $("v3-run-info").textContent = e.message; }));
 $("v3-field").addEventListener("change", () => loadProject().catch(() => {}));
+$("v3-model").addEventListener("change", (e) => {
+  $("v3-rhoc-row").hidden = e.target.value !== "direct";
+  const stored = data && data.has_result ? (data.direct ? "direct" : "hybrid") : null;
+  $("v3-run").textContent = stored === e.target.value ? "↻ Re-run 3-D simulation" : "▶ Run 3-D simulation";
+});
 
 function setData(d) {
   data = d;
@@ -277,7 +304,9 @@ function setData(d) {
   center = [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2];
   span = Math.max(x1 - x0, y1 - y0, z1 - z0);
   const nPts = data.tracer ? data.tracer.xyz.length : data.pressure.voxels.length;
-  $("info").textContent = `${data.segments.length} segments · ${nPts} field points · grid ${data.shape.join("×")}`;
+  $("info").textContent = data.direct
+    ? `${data.segments.length} segments · ${data.direct.connections.length} terminal connections`
+    : `${data.segments.length} segments · ${nPts} field points · grid ${data.shape.join("×")}`;
   if (!PROJECT) { $("status").textContent = "ready"; $("status").className = "status ok"; }
 }
 
@@ -366,7 +395,7 @@ function render() {
   }
 
   if (!data.pressure.voxels.length && data.tissue_points && !data.tracer) {   // unsolved 3-D project
-    ctx.fillStyle = "rgba(52,211,153,.35)";
+    ctx.fillStyle = data.direct ? "rgba(148,163,184,.16)" : "rgba(52,211,153,.35)";   // grey under green links
     for (const v of data.tissue_points) {
       const [sx, sy] = project(v[0], v[1], v[2]);
       ctx.fillRect(sx - 1, sy - 1, 2, 2);
@@ -375,6 +404,8 @@ function render() {
 
   if (editor && editor.active) {
     editor.draw(ctx, zs);
+  } else if (data.direct && $("show-trees").checked) {
+    drawDirect(zs);
   } else if ($("show-trees").checked) {
     for (const s of data.segments) {
       const [ax, ay] = project(s[0], s[1], s[2]);
@@ -387,11 +418,50 @@ function render() {
   }
 }
 
+// A direct-connection result: the trees and their terminal links (the capillary
+// bed, green) weighted by flow — or, with a network bolus, each element lit by its
+// concentration in the current frame. Lines are drawn far-to-near.
+function drawDirect(zs) {
+  const d = data.direct, nt = data.net_tracer;
+  const items = [];
+  if (nt) {
+    const vals = nt.frames[anim.idx], vmax = nt.vmax || 1;
+    nt.lines.forEach((l, i) => items.push({ l, kind: nt.kind[i], t: Math.min(1, vals[i] / vmax), bolus: true }));
+  } else {
+    const fmax = d.flow_max || 1;
+    for (const [rows, kind] of [[d.artery, 0], [d.vein, 1], [d.connections, 2]]) {
+      for (const r of rows) items.push({ l: r, kind, t: Math.min(1, r[6] / fmax) });
+    }
+  }
+  const pts = items.map((it) => {
+    const a = project(it.l[0], it.l[1], it.l[2]), b = project(it.l[3], it.l[4], it.l[5]);
+    return { ...it, a, b, depth: (a[2] + b[2]) / 2 };
+  }).sort((p, q) => p.depth - q.depth);
+  ctx.lineCap = "round";
+  const color = ["#ff6b6b", "#5b8dff", "#10b981"];
+  for (const p of pts) {
+    if (p.bolus) {            // dim network, bright bolus
+      ctx.globalAlpha = 0.25 + 0.75 * p.t;
+      ctx.strokeStyle = p.t > 0.02 ? viridisCss(p.t) : "#334155";
+      ctx.lineWidth = Math.max(1, (p.kind === 2 ? 1.2 : 2.4) * zs * (0.6 + p.t));
+    } else if (p.kind === 2) {
+      ctx.globalAlpha = 0.25 + 0.5 * Math.sqrt(p.t);
+      ctx.strokeStyle = color[2]; ctx.lineWidth = Math.max(0.7, 0.9 * zs);
+    } else {
+      ctx.globalAlpha = 0.4 + 0.6 * p.t;
+      ctx.strokeStyle = color[p.kind]; ctx.lineWidth = Math.max(1, 5 * Math.sqrt(p.t) * zs);
+    }
+    ctx.beginPath(); ctx.moveTo(p.a[0], p.a[1]); ctx.lineTo(p.b[0], p.b[1]); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
 function loop(now) {
   if (view.spin && data) view.yaw += 0.006;
-  if (data && data.tracer && anim.playing && now - anim.last > 110) {   // ~9 frames/s
+  const tr = tracerOf(data);
+  if (tr && anim.playing && now - anim.last > 110) {   // ~9 frames/s
     anim.last = now;
-    anim.idx = (anim.idx + 1) % data.tracer.frames.length;
+    anim.idx = (anim.idx + 1) % tr.frames.length;
     showFrame();
   }
   render();

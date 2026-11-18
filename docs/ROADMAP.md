@@ -709,8 +709,9 @@ Editing 3-D trees by hand is now done too (§11.4).
 - ✅ ~~**3-D flow video**~~ — tracer transport on the voxel bed, played back in the
   3-D viewer (`view3d?field=tracer`). An MP4 of the 3-D view is not exported yet.
 - ✅ ~~**Workspace result analyses for 3-D**~~ — tracer, kinetics, oxygen, grow, adapt,
-  and now UQ / Sobol / calibration and the multi-compartment bed (see below). Still
-  2-D-only: the direct model. *M.*
+  UQ / Sobol / calibration, the multi-compartment bed and now the **direct-connection
+  model** (3-D terminal links, flow-weighted links + network bolus in the 3-D viewer, MCP
+  `direct_model_in_tissue`).
 - ✅ ~~**Hand-editing 3-D trees**~~ — the 3-D viewer's *✏️ edit the trees by hand*
   (`frontend/edit3d.js`): select nodes / vessels, drag nodes in the screen plane (rotate
   to reach depth), Shift+click to branch, split, inlet/outlet toggles, delete, undo;

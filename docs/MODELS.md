@@ -185,6 +185,8 @@ R_k = γ_n · 8 μ L_k / (π r_k⁴)
 
 Radii follow Murray's law `r_k = r_terminal · N_c^(−1/3)`. Solved with the same
 incidence-block assembly as the hybrid, closing the loop `arterial in = venous out`.
+The model is coordinate-free apart from the link search, so it runs unchanged on 3-D
+trees: `L_k` and the `ρ_c` neighbourhood are then 3-D Euclidean distances.
 
 **Network-transit kinetics** (`network_transit`) times a bolus along the vasculature:
 element transit `τ = V/|q|`, arrival time accumulated from the inlet by a

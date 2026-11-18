@@ -1375,10 +1375,49 @@ def test_2d_only_features_say_so_on_a_3d_project(client):
                                     **({"json": body} if body is not None else {}))
         assert r.status_code == 409, (path, r.status_code, r.text)
         assert "3-D project" in r.json()["detail"]
-    jid = client.post(f"/projects/{pid}/run", json={"model": "direct"}).json()["id"]
-    final = _wait_for_job(client, jid)
-    assert final["state"] == "error"
-    assert "2-D projects" in final["error"]
+
+
+def test_3d_project_direct_connection_model(client):
+    """The direct-connection model runs on a 3-D project: 3-D links, mass balance, the
+    viewer scene (trees + links by flow) and the network-timed bolus — and the hybrid
+    run afterwards replaces it."""
+    pid = _explorer_project(client, 3)["id"]
+    jid = client.post(f"/projects/{pid}/run", json={"model": "direct", "rho_c": 0}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    summary = client.get(f"/projects/{pid}/results").json()
+    assert summary["model"] == "direct"
+    assert summary["arterial_inflow"] > 0
+    assert summary["n_connections"] > 0
+
+    d = client.get(f"/projects/{pid}/direct").json()
+    assert d["dim"] == 3
+    assert len(d["artery"][0]) == len(d["connections"][0]) == 7     # [x,y,z]×2 + flow
+    assert len(d["connections"]) == summary["n_connections"]
+    assert sum(c[6] for c in d["connections"]) == pytest.approx(summary["arterial_inflow"])
+
+    v = client.get(f"/projects/{pid}/view3d").json()
+    assert v["direct"]["dim"] == 3
+    assert v["summary"]["model"] == "direct"
+    assert not v["pressure"]["voxels"]
+    r = client.get(f"/projects/{pid}/view3d?field=tof")
+    assert r.status_code == 409
+    assert "no tissue field" in r.json()["detail"]
+    assert client.get(f"/projects/{pid}/view3d?field=tracer").status_code == 409
+
+    jid = client.post(f"/projects/{pid}/tracer", json={"n_frames": 10}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    t = client.get(f"/projects/{pid}/view3d?field=tracer").json()["net_tracer"]
+    assert len(t["lines"][0]) == 6
+    assert len(t["frames"]) == 10
+    assert len(t["frames"][0]) == len(t["lines"]) == len(t["kind"])
+    assert 2 in t["kind"]                                            # connections animate
+
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]   # back to the hybrid
+    assert _wait_for_job(client, jid)["state"] == "done"
+    v = client.get(f"/projects/{pid}/view3d").json()
+    assert "direct" not in v
+    assert v["pressure"]["voxels"]
+    assert client.get(f"/projects/{pid}/direct").status_code == 409
 
 
 def test_3d_project_flow_kinetics_and_oxygen(client):

@@ -94,7 +94,8 @@ def transit_animation(art: Network, ven: Network, connections: list[Connection],
     ``x = t − T`` (its arrival time ``T``), so the wave sweeps arteries → capillary
     connections → veins. Returns a dict of arrays ready to persist / serialise:
 
-    - ``lines`` ``(n_elem, 4)`` — ``[x0, y0, x1, y1]`` per element,
+    - ``lines`` ``(n_elem, 4)`` — ``[x0, y0, x1, y1]`` per element (``(n_elem, 6)``,
+      ``[x0, y0, z0, x1, y1, z1]``, for 3-D trees),
     - ``kind`` ``(n_elem,)`` — 0 arterial, 1 venous, 2 connection,
     - ``arrivals`` ``(n_elem,)`` — element arrival time (``inf`` → never reached),
     - ``frames`` ``(n_frames, n_elem)`` — normalised concentration (peak 1),
@@ -102,23 +103,16 @@ def transit_animation(art: Network, ven: Network, connections: list[Connection],
     """
     t_art, t_ven = arrival_times(art, ven, connections, sol)
 
-    def seg_lines(net: Network) -> np.ndarray:
-        return np.column_stack([
-            net.node_x[net.seg_start], net.node_y[net.seg_start],
-            net.node_x[net.seg_end], net.node_y[net.seg_end],
-        ]).astype(float)
-
-    a_lines, v_lines = seg_lines(art), seg_lines(ven)
+    a_lines, v_lines = art.segment_lines(), ven.segment_lines()
     # an element's arrival is when the bolus enters it — its upstream (earlier) end
     a_arr = np.minimum(t_art[art.seg_start], t_art[art.seg_end])
     v_arr = np.minimum(t_ven[ven.seg_start], t_ven[ven.seg_end])
     if connections:
-        c_lines = np.array([[art.node_x[c.arterial_terminal], art.node_y[c.arterial_terminal],
-                             ven.node_x[c.venous_terminal], ven.node_y[c.venous_terminal]]
-                            for c in connections], dtype=float)
+        c_lines = np.hstack([art.positions([c.arterial_terminal for c in connections]),
+                             ven.positions([c.venous_terminal for c in connections])])
         c_arr = np.array([t_art[c.arterial_terminal] for c in connections], dtype=float)
     else:
-        c_lines, c_arr = np.zeros((0, 4)), np.zeros(0)
+        c_lines, c_arr = np.zeros((0, a_lines.shape[1])), np.zeros(0)
 
     lines = np.vstack([a_lines, v_lines, c_lines])
     kind = np.concatenate([np.zeros(len(a_lines)), np.ones(len(v_lines)),

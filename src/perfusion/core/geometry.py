@@ -64,6 +64,16 @@ class Network:
     def is_3d(self) -> bool:
         return self.node_z is not None
 
+    def positions(self, nodes=None) -> np.ndarray:
+        """Node coordinates as rows ``[x, y]`` — or ``[x, y, z]`` for a 3-D network."""
+        cols = [self.node_x, self.node_y] + ([self.node_z] if self.is_3d else [])
+        xyz = np.column_stack(cols).astype(float)
+        return xyz if nodes is None else xyz[np.asarray(nodes, dtype=int)]
+
+    def segment_lines(self) -> np.ndarray:
+        """Each segment as ``[start…, end…]`` — 4 columns in 2-D, 6 in 3-D."""
+        return np.hstack([self.positions(self.seg_start), self.positions(self.seg_end)])
+
     @property
     def n_nodes(self) -> int:
         return len(self.node_x)

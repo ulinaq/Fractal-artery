@@ -45,14 +45,16 @@ def connect_terminals(art: Network, ven: Network, rho_c: float,
     """Build direct connections between arterial and venous terminals.
 
     Each arterial terminal links to every venous terminal within Euclidean
-    distance ``rho_c`` (or, failing that, its single nearest venous terminal).
+    distance ``rho_c`` — measured in 3-D when both trees carry ``node_z`` — (or,
+    failing that, its single nearest venous terminal).
     Connection radius follows Murray's law, ``r_k = r_terminal * Nc^(-1/3)``,
     where ``Nc`` is the number of connections from that arterial terminal.
     """
     gamma = relative_capillary_resistance(n_generations)
     ta, tv = art.terminal_nodes, ven.terminal_nodes
-    art_xy = np.column_stack([art.node_x[ta], art.node_y[ta]])
-    ven_xy = np.column_stack([ven.node_x[tv], ven.node_y[tv]])
+    if art.is_3d != ven.is_3d:
+        raise ValueError("the arterial and venous trees must both be 2-D or both 3-D")
+    art_xy, ven_xy = art.positions(ta), ven.positions(tv)
 
     # Radius search with a KD-tree: O(T log T) instead of the O(T^2) double loop.
     ven_tree = cKDTree(ven_xy)
@@ -66,7 +68,7 @@ def connect_terminals(art: Network, ven: Network, rho_c: float,
         r_terminal = art.seg_radius[art.incoming_segment[a]]
         radius = r_terminal * len(near) ** (-1.0 / 3.0)
         for j in near:
-            length = float(np.hypot(*(art_xy[i] - ven_xy[j])))
+            length = float(np.linalg.norm(art_xy[i] - ven_xy[j]))
             resistance = gamma * 8.0 * viscosity * length / (np.pi * radius**4)
             connections.append(Connection(int(a), int(tv[j]), length,
                                            float(radius), float(resistance)))

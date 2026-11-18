@@ -324,7 +324,6 @@ def solve_direct_model(project, use_vessels, rho_c=0.0):
 def run_project(store, project, req: RunRequest) -> None:
     """Execute the simulation (hybrid Darcy or direct-connection) and persist it."""
     if getattr(req, "model", "hybrid") == "direct":
-        require_2d(project, "The direct-connection model")
         art, ven, sol = solve_direct_model(project, req.use_vessels, req.rho_c)
         store.save_direct_result(project, art, ven, sol)
         return

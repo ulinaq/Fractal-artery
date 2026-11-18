@@ -109,7 +109,10 @@ back in 3-D) with a tracer-kinetic fit; and map pressure / flux / time-of-flight
 O₂ saturation / consumption, the Fp / vp / CBV / MTT kinetic maps, or a
 **multi-compartment** bed (capillary exchange, arteriole / venule pressure). Its
 **Uncertainty & calibration** card runs Monte-Carlo / Sobol UQ over p_in, μ and K and
-fits one input to a measured inflow / transit time — all on the 3-D model. Interactive API docs are at `/docs`.
+fits one input to a measured inflow / transit time — all on the 3-D model. Switch the
+model to **direct — terminal connections** to close the 3-D trees with resistive links
+instead of a Darcy bed: the viewer draws the links and vessels weighted by flow, and 🌊
+flow times the bolus along the network. Interactive API docs are at `/docs`.
 See [`frontend/`](frontend/README.md) for the UI in detail.
 
 ### Back-end API
@@ -151,6 +154,7 @@ O₂ / tracer fit / multi-compartment), `tissue_uncertainty_calibration` (UQ, So
 calibration on an organ's 2-D/3-D model), `prune_vessel_tree`, `data_constrained_tree_growth`,
 `optimize_tree_config`, `adapt_vessel_network`, `strahler_morphometry`,
 `fit_tracer_kinetics`, `perfusion_parameter_maps`, `direct_transit_metrics`,
+`direct_model_in_tissue` (the direct model in a 2-D/3-D organ),
 `pulsatile_windkessel`, `multicompartment_perfusion`, `oxygen_extraction_map`,
 `heterogeneous_perfusion_lesion`, `anisotropic_perfusion_bed`,
 `calibrate_parameter_to_flow`, `uncertainty_quantification`,
