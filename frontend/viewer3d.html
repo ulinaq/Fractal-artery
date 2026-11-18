@@ -110,6 +110,21 @@
           <button id="v3-adapt" class="ghost" title="wall-shear remodelling toward Murray's law">⚖ Adapt</button>
         </div>
         <p class="muted" id="v3-tree-info"></p>
+        <label class="check"><input id="v3-edit" type="checkbox" /> ✏️ edit the trees by hand</label>
+        <div id="v3-edit-panel" hidden>
+          <p class="muted">Click a node or vessel to select it · drag a node to move it in the
+            screen plane (rotate to move along depth) · Shift+click to branch from the selected
+            node · S split · I inlet/outlet · Del delete · ⌘/Ctrl+Z undo. Drag empty space to rotate.</p>
+          <p class="muted" id="v3-sel"></p>
+          <label id="v3-rad-row" hidden>vessel radius
+            <input id="v3-rad" type="number" min="0.01" step="any" /></label>
+          <div class="row">
+            <button id="v3-split" class="ghost" hidden>Split</button>
+            <button id="v3-inlet" class="ghost" hidden>Make inlet</button>
+            <button id="v3-del" class="ghost" hidden>Delete</button>
+            <button id="v3-undo" class="ghost" disabled>↶ Undo</button>
+          </div>
+        </div>
       </section>
       <details class="card" id="v3-an-card" hidden>
         <summary>Uncertainty &amp; calibration</summary>

@@ -150,11 +150,14 @@ def vectorize(project: Project = Depends(get_project_2d),
 def get_editable(project: Project = Depends(get_project)) -> dict:
     """Node-level geometry of the arterial/venous trees, for interactive edits.
 
-    Returns each 2-D tree as a :class:`NetworkModel` (nodes + segments + radii),
-    or ``null`` when the tree is absent or 3-D (the 2-D editor cannot move it).
+    Returns each tree as a :class:`NetworkModel` (nodes + segments + radii), or
+    ``null`` when absent or of the other dimension than the project (a 2-D project's
+    editor cannot move a 3-D tree). A 3-D project's trees carry ``node_z``.
     """
+    three_d = runner.is_3d(project)
+
     def enc(net):
-        if net is None or net.is_3d:
+        if net is None or net.is_3d != three_d:
             return None
         return NetworkModel.from_core(net).model_dump()
 
@@ -162,9 +165,12 @@ def get_editable(project: Project = Depends(get_project)) -> dict:
 
 
 @router.put("/projects/{pid}/editable", response_model=ProjectInfo)
-def put_editable(body: NetworksEditIn, project: Project = Depends(get_project_2d),
+def put_editable(body: NetworksEditIn, project: Project = Depends(get_project),
                  store: ProjectStore = Depends(get_store)) -> ProjectInfo:
     """Apply moved nodes + resized segments to the stored trees.
+
+    A **3-D project** edits its 3-D trees the same way: every edit then carries
+    ``node_z`` (and a 2-D project's edits must not).
 
     A pure move/resize (no ``seg_start``/``seg_end``) keeps the topology; sending
     topology rebuilds it. Sending topology also lets the editor *create* a tree
@@ -177,27 +183,35 @@ def put_editable(body: NetworksEditIn, project: Project = Depends(get_project_2d
             return None                       # every edge deleted -> no tree
         if net is None and not topology:
             raise HTTPException(404, "project has no editable arterial/venous tree")
-        if net is not None and net.is_3d:
-            raise HTTPException(409, "a 3-D tree cannot be edited in the 2-D editor")
+        if net is not None and net.is_3d != three_d:
+            raise HTTPException(409, "a 3-D tree cannot be edited in the 2-D editor"
+                                if net.is_3d else "a 2-D tree cannot be edited in 3-D")
+        if three_d and edit.node_z is None:
+            raise HTTPException(422, "a 3-D project's tree edits need node_z")
+        if not three_d and edit.node_z is not None:
+            raise HTTPException(422, "node_z is only for 3-D projects")
         if topology:
             # topology may have changed (add/delete/new tree) -> rebuild from scratch
             return helpers.rebuild_network(net, edit.node_x, edit.node_y, edit.seg_start,
                                            edit.seg_end, edit.seg_radius,
-                                           edit.inlet_nodes, edit.root_node)
+                                           edit.inlet_nodes, edit.root_node, edit.node_z)
         # pure move/resize -> keep topology, just refresh geometry
         nx_ = np.asarray(edit.node_x, float)
         ny_ = np.asarray(edit.node_y, float)
+        nz_ = None if edit.node_z is None else np.asarray(edit.node_z, float)
         radius = np.maximum(np.asarray(edit.seg_radius, float), 1e-3)
-        if len(nx_) != net.n_nodes or len(ny_) != net.n_nodes:
+        if any(len(a) != net.n_nodes for a in (nx_, ny_, *([nz_] if three_d else []))):
             raise HTTPException(422, f"expected {net.n_nodes} nodes")
         if len(radius) != net.n_segments:
             raise HTTPException(422, f"expected {net.n_segments} segment radii")
         ss, se = net.seg_start, net.seg_end
         return dataclasses.replace(
-            net, node_x=nx_, node_y=ny_, seg_radius=radius,
-            seg_length=np.hypot(nx_[se] - nx_[ss], ny_[se] - ny_[ss]),
+            net, node_x=nx_, node_y=ny_, node_z=nz_, seg_radius=radius,
+            seg_length=helpers.segment_lengths(nx_, ny_, nz_, ss, se),
             seg_angle=np.arctan2(ny_[se] - ny_[ss], nx_[se] - nx_[ss]),
         )
+
+    three_d = runner.is_3d(project)
 
     if body.artery is None and body.vein is None:
         raise HTTPException(404, "project has no editable arterial/venous tree")

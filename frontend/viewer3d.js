@@ -5,6 +5,7 @@
 import { viridisCss } from "./palette.js";
 import { createViewport } from "./viewport.js";
 import { uqHtml } from "./uqview.js";
+import { createEditor3d } from "./edit3d.js";
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("view3d");
@@ -185,6 +186,7 @@ async function treeOp(kind) {
       msg = `Murray exponent ${r.murray_start.toFixed(2)} → ${r.murray_final.toFixed(2)} in ${r.n_iter} steps`;
     }
     info.textContent = msg + " · re-run to solve the new trees";
+    if (editor && editor.active) await editor.setActive(true);   // edit the new trees
     $("v3-field").value = "pressure"; $("v3-kin").textContent = "";
     await loadProject();
   } catch (e) {
@@ -291,6 +293,37 @@ function project(x, y, z) {
   return [sx, sy2, dy];
 }
 
+// Inverse of project(): a screen point at a given depth → world coordinates.
+function unproject(sx, sy, depth) {
+  const [rx, rz] = vp.toDomain(sx, sy);
+  const cp = Math.cos(view.pitch), sp = Math.sin(view.pitch);
+  const dy1 = depth * cp + rz * sp, dz = -depth * sp + rz * cp;     // undo the pitch
+  const cy = Math.cos(view.yaw), sy0 = Math.sin(view.yaw);
+  const dx = rx * cy + dy1 * sy0, dy = -rx * sy0 + dy1 * cy;          // undo the yaw
+  return [center[0] + dx * span, center[1] + dy * span, center[2] + dz * span];
+}
+
+// Hand-editing the 3-D trees (3-D projects only; see edit3d.js)
+const editor = PROJECT ? createEditor3d({
+  canvas, vp, projectId: PROJECT, project, unproject,
+  onInfo: (msg, err) => {
+    $("v3-tree-info").textContent = msg;
+    $("v3-tree-info").style.color = err ? "#b91c1c" : "";
+  },
+  onSaved: async () => {
+    $("v3-field").value = "pressure"; $("v3-kin").textContent = "";
+    await loadProject();
+  },
+}) : null;
+if (editor) {
+  window.viewer3d = { editor };                   // hook for browser tests / tooling
+  $("v3-edit").addEventListener("change", async (e) => {
+    if (e.target.checked) { view.spin = false; $("spin").checked = false; }
+    try { await editor.setActive(e.target.checked); }
+    catch (err) { e.target.checked = false; $("v3-tree-info").textContent = err.message; }
+  });
+}
+
 function render() {
   vp.begin();
   ctx.fillStyle = "#0b1020"; ctx.fillRect(0, 0, vp.W, vp.H);
@@ -340,7 +373,9 @@ function render() {
     }
   }
 
-  if ($("show-trees").checked) {
+  if (editor && editor.active) {
+    editor.draw(ctx, zs);
+  } else if ($("show-trees").checked) {
     for (const s of data.segments) {
       const [ax, ay] = project(s[0], s[1], s[2]);
       const [bx, by] = project(s[3], s[4], s[5]);
@@ -366,9 +401,13 @@ function loop(now) {
 // ── interaction ────────────────────────────────────────────────────────────
 let dragging = false, lastX = 0, lastY = 0;
 canvas.addEventListener("pointerdown", (e) => {
-  if (e.button !== 0) return; dragging = true; view.spin = false; $("spin").checked = false; lastX = e.clientX; lastY = e.clientY; });
-window.addEventListener("pointerup", () => { dragging = false; });
+  if (e.button !== 0) return;
+  view.spin = false; $("spin").checked = false;
+  if (editor && editor.pointerDown(e)) return;        // picked / dragging a node
+  dragging = true; lastX = e.clientX; lastY = e.clientY; });
+window.addEventListener("pointerup", () => { dragging = false; if (editor) editor.pointerUp(); });
 window.addEventListener("pointermove", (e) => {
+  if (editor && editor.pointerMove(e)) return;
   if (!dragging) return;
   view.yaw += (e.clientX - lastX) * 0.01;
   view.pitch += (e.clientY - lastY) * 0.01;

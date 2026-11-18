@@ -1,5 +1,6 @@
 """The Tree explorer: anatomical roots per organ, manual roots, 3-D fields."""
 
+import numpy as np
 import pytest
 
 from .conftest import wait_status
@@ -161,6 +162,96 @@ def test_3d_viewer_multicompartment_uncertainty_and_calibration(page, server):
     page.wait_for_function("document.querySelector('#v3-cal-out').textContent"
                            ".includes('solves')", timeout=120000)
     assert page.inner_text("#v3-cal-out").startswith("p_in = 12.")   # 1.2 × the inflow
+    assert not errors
+
+
+def test_3d_viewer_hand_edits_the_trees(page, server):
+    """Edit a 3-D project's trees in the viewer: select + resize a vessel, drag a
+    node, branch with Shift+click, toggle an outlet, delete, undo — then solve."""
+    import httpx
+
+    pid = httpx.post(server + "/explore/project", timeout=60, json={
+        "dim": 3, "shape": "heart", "fill": "none", "generations": 3,
+        "nx": 16, "name": "ui-3d-edit"}).json()["id"]
+
+    def tree(kind):
+        return httpx.get(f"{server}/projects/{pid}/editable").json()[kind]
+
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(f"{server}/viewer3d.html?project={pid}")
+    page.wait_for_selector("#v3-tree-card:not([hidden])")
+    page.check("#v3-edit")
+    page.wait_for_selector("#v3-edit-panel:not([hidden])")
+    box = page.locator("#view3d").bounding_box()
+
+    def at(kind, i):
+        x, y = page.evaluate(f"window.viewer3d.editor.screenOf('{kind}', {i})")
+        return box["x"] + x, box["y"] + y
+
+    def saved(n_before, key="seg_start", kind="artery", delta=1):
+        page.wait_for_function("!document.querySelector('#v3-tree-info').textContent"
+                               ".includes('…')")
+        for _ in range(50):
+            if len(tree(kind)[key]) == n_before + delta:
+                return
+            page.wait_for_timeout(100)
+        raise AssertionError(f"{kind} {key} did not change by {delta}")
+
+    a0 = tree("artery")
+    # select the trunk's tip node and drag it
+    tip = a0["seg_end"][0]
+    x, y = at("artery", tip)
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x + 25, y - 15, steps=5)
+    page.mouse.up()
+    page.wait_for_function("document.querySelector('#v3-tree-info').textContent"
+                           ".includes('node moved')", timeout=30000)
+    a1 = tree("artery")
+    moved = np.hypot(np.subtract(a1["node_x"], a0["node_x"]),
+                     np.subtract(a1["node_z"], a0["node_z"]))
+    assert moved.max() > 0.5                             # the node moved in 3-D
+    # Shift+click empty space: a new branch from the selected node
+    page.keyboard.down("Shift")
+    page.mouse.click(x + 70, y + 40)
+    page.keyboard.up("Shift")
+    page.wait_for_function("document.querySelector('#v3-tree-info').textContent"
+                           ".includes('branch added')", timeout=30000)
+    assert len(tree("artery")["seg_start"]) == len(a0["seg_start"]) + 1
+    # select the new vessel (between the two new nodes) and resize it
+    a2 = tree("artery")
+    s_new = len(a2["seg_start"]) - 1
+    (ax, ay), (bx, by) = at("artery", a2["seg_start"][s_new]), at("artery", a2["seg_end"][s_new])
+    page.mouse.click((ax + bx) / 2, (ay + by) / 2)
+    page.wait_for_selector("#v3-rad-row:not([hidden])")
+    page.fill("#v3-rad", "0.77")
+    page.press("#v3-rad", "Enter")
+    page.wait_for_function("document.querySelector('#v3-tree-info').textContent"
+                           ".includes('radius 0.77')", timeout=30000)
+    assert tree("artery")["seg_radius"][s_new] == pytest.approx(0.77)
+    # delete it, then undo
+    page.click("#v3-del")
+    page.wait_for_function("document.querySelector('#v3-tree-info').textContent"
+                           ".includes('vessel deleted')", timeout=30000)
+    assert len(tree("artery")["seg_start"]) == len(a2["seg_start"]) - 1
+    page.click("#v3-undo")
+    page.wait_for_function("document.querySelector('#v3-tree-info').textContent"
+                           ".includes('undone')", timeout=30000)
+    assert len(tree("artery")["seg_start"]) == len(a2["seg_start"])
+    # make a vein leaf an extra outlet with the I key
+    v = tree("vein")
+    deg = np.bincount(v["seg_start"] + v["seg_end"], minlength=len(v["node_x"]))
+    leaf = int(next(i for i in np.flatnonzero(deg == 1) if i not in v["inlet_nodes"]))
+    page.mouse.click(*at("vein", leaf))
+    page.wait_for_function("document.querySelector('#v3-inlet').textContent === 'Make outlet'")
+    page.keyboard.press("i")
+    page.wait_for_function("document.querySelector('#v3-tree-info').textContent"
+                           ".includes('outlet set')", timeout=30000)
+    assert len(tree("vein")["inlet_nodes"]) == len(v["inlet_nodes"]) + 1
+    # the edited trees solve
+    page.click("#v3-run")
+    page.wait_for_selector("#v3-flow-card:not([hidden])", timeout=120000)
     assert not errors
 
 

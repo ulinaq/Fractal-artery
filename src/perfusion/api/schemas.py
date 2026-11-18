@@ -461,6 +461,7 @@ class NetworkEditIn(BaseModel):
     seg_end: list[int] | None = None
     inlet_nodes: list[int] | None = None   # prescribed-pressure nodes (new indices)
     root_node: int | None = None
+    node_z: list[float] | None = None      # 3-D trees (3-D projects): every node's z
 
 
 class NetworksEditIn(BaseModel):

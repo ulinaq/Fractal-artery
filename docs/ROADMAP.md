@@ -669,7 +669,7 @@ Effort: **S** ≲ a day, **M** a few days, **L** a week+, **XL** research.
   *Uncertainty & calibration* card; MCP `tissue_uncertainty_calibration` and
   `tissue_perfusion_analysis(compartments=)`.
 
-Still open from this tier: editing 3-D trees by hand.
+Editing 3-D trees by hand is now done too (§11.4).
 
 ## 11.2 Modelling & numerics
 
@@ -710,7 +710,11 @@ Still open from this tier: editing 3-D trees by hand.
   3-D viewer (`view3d?field=tracer`). An MP4 of the 3-D view is not exported yet.
 - ✅ ~~**Workspace result analyses for 3-D**~~ — tracer, kinetics, oxygen, grow, adapt,
   and now UQ / Sobol / calibration and the multi-compartment bed (see below). Still
-  2-D-only: hand editing, the direct model. *M.*
+  2-D-only: the direct model. *M.*
+- ✅ ~~**Hand-editing 3-D trees**~~ — the 3-D viewer's *✏️ edit the trees by hand*
+  (`frontend/edit3d.js`): select nodes / vessels, drag nodes in the screen plane (rotate
+  to reach depth), Shift+click to branch, split, inlet/outlet toggles, delete, undo;
+  saved through `PUT /editable` with `node_z`.
 - Optional **React/Vite** rebuild and **vtk.js/WebGL** volume rendering behind the same
   API data — §5, §8. *L.*
 

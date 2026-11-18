@@ -104,7 +104,7 @@ organ** — its roots, fill and generations, 2-D or 3-D — re-scored at your re
 **🧊 3-D viewer** (`/viewer3d.html`) renders a 3-D hybrid result (trees + voxel
 field) in a rotatable, dependency-free canvas. For a **3-D project** it is a full
 workbench: run the 3-D solve; grow (CCO / colonisation), prune or Murray-adapt the 3-D
-trees; compute the **🌊 flow** (a contrast bolus advected through the voxel bed, played
+trees, or **edit them by hand** (select, drag, branch, split, set inlets/outlets, undo); compute the **🌊 flow** (a contrast bolus advected through the voxel bed, played
 back in 3-D) with a tracer-kinetic fit; and map pressure / flux / time-of-flight,
 O₂ saturation / consumption, the Fp / vp / CBV / MTT kinetic maps, or a
 **multi-compartment** bed (capillary exchange, arteriole / venule pressure). Its
