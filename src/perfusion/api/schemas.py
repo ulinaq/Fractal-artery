@@ -316,6 +316,26 @@ class PruneInfo(BaseModel):
     n_removed: int                                # segments removed
 
 
+class AnastomoseRequest(BaseModel):
+    """Add vessel loops (side-to-side anastomoses / collaterals) to the arterial *or*
+    venous tree: nearby segments on different branches are joined at their midpoints."""
+
+    target: str = "artery"                       # "artery" | "vein"
+    n_links: int = Field(4, ge=1, le=100)
+    radius_frac: float = Field(0.7, gt=0, le=1)  # link radius / thinner joined segment
+    min_detour: float = Field(3.0, gt=1)         # tree path ≥ this × straight distance
+    min_hops: int = Field(3, ge=1)               # junctions apart (no sibling shunts)
+    max_distance: float | None = Field(None, gt=0)   # default 3 × median segment length
+
+
+class AnastomoseInfo(BaseModel):
+    id: str
+    n_segments: int
+    n_terminals: int
+    n_added: int                                  # links added
+    n_loops: int                                  # independent loops in the tree now
+
+
 class AdaptRequest(BaseModel):
     """Structurally adapt vessel radii toward Murray's law (wall-shear remodelling)."""
 

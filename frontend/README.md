@@ -63,6 +63,10 @@ no separate dev server.
   CSV, or ParaView `.vti` (format picker next to Export), or grab a **PNG** of the
   current view (📷). Actions lock while a job runs; the project id is a shareable
   `?project=` link.
+- **Loops & occlusion** — the Vessels tab's *Grow / prune / loops* card has ⟳ Add loops
+  (collateral anastomoses between nearby branches of the chosen tree; terminals kept)
+  and a selected vessel has ⛔ Occlude (radius × 0.001, an embolus); the 3-D viewer has
+  ⟳ Loops and ⛔ Occlude too. Pair with Compare runs to see the collateral rescue.
 - **Compare runs (A/B)** (`compare.js`, Result tab and 3-D viewer) — 📌 Keep the
   current result as a named baseline, change something and re-run, then Compare: a
   table of what changed (inflow, MTT, …, field means) and Δ pressure / flux / TOF maps

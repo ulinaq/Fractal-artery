@@ -83,7 +83,8 @@ def test_server_registers_expected_tools():
             "tissue_perfusion_analysis", "optimize_trees_in_tissue",
             "tissue_uncertainty_calibration", "direct_model_in_tissue",
             "export_tissue_fields", "lesion_in_tissue", "compare_scenarios",
-            "experiment_in_tissue", "fit_dce_curve", "describe_model"} <= tools
+            "experiment_in_tissue", "fit_dce_curve",
+            "anastomosis_rescue", "describe_model"} <= tools
 
 
 def test_calibrate_to_flow_recovers_value():
@@ -404,3 +405,16 @@ def test_fit_dce_curve_recovers_a_synthetic_truth(dim):
     assert out["r2"] > 0.999
     with pytest.raises(ValueError, match="together"):
         mcp_server.tissue_dce_fit(times=[0, 1, 2, 3], dim=dim)
+
+
+@pytest.mark.parametrize("dim", [2, 3])
+def test_anastomosis_rescue_in_an_organ(dim):
+    out = mcp_server.tissue_anastomosis(dim=dim, shape="kidney", generations=5, n_links=6)
+    assert out["n_loops"] == out["n_links"] > 0
+    assert out["candidates"]
+    for row in out["candidates"]:
+        assert row["tree_occluded"] < 1e-6                   # a tree starves the territory
+        assert row["looped_occluded"] >= row["tree_occluded"] - 1e-9  # round-off at ~0
+    assert out["best"]["looped_occluded"] > 0.01               # loops bring some back
+    with pytest.raises(ValueError, match="segment index"):
+        mcp_server.tissue_anastomosis(dim=dim, occlude=10**6)

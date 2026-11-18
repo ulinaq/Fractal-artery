@@ -283,6 +283,56 @@ def tissue_dce_fit(times=None, tissue=None, aif=None, params: dict | None = None
     return {**out, **res}
 
 
+def tissue_anastomosis(dim: int = 2, shape: str = "kidney", generations: int = 5,
+                       fill: str = "none", n_terminals: int = 40, n_links: int = 6,
+                       radius_frac: float = 1.0, occlude: int | None = None,
+                       n_candidates: int = 6, seed: int = 0, extent: float = 1.0) -> dict:
+    """Collateral rescue in an organ (2-D or 3-D): add ``n_links`` anastomoses (loops)
+    to the arterial tree, block one branch (``occlude`` = a segment of the original
+    tree; default: try up to ``n_candidates`` mid-sized territories and report the best)
+    and compare the blood still reaching that branch's territory — the terminals it
+    fed — with the plain tree (≈ 0) versus the looped one."""
+    from . import treegen
+    from .core import anastomosis as an
+
+    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
+                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
+                           _return_model=True)
+    spec, art, ven, mask, domain = grown["_model"]
+    looped, links = an.add_anastomoses(art, n_links, radius_frac=radius_frac)
+    if not links:
+        raise ValueError("no anastomosis qualifies on this tree — grow it deeper")
+    n_term = art.terminal_nodes.size
+    order = {int(t): i for i, t in enumerate(art.terminal_nodes)}
+
+    def territory_flow(net, terr):
+        q = treegen.solve(spec, net, ven, mask, domain).solution.terminal_flux[:n_term]
+        return float(sum(q[order[int(t)]] for t in terr))
+
+    if occlude is None:
+        split = {s for link in links for s in link["segments"]}
+        sizes = {s: an.downstream_terminals(art, s).size for s in range(art.n_segments)
+                 if s not in split}
+        lo, hi = 2, max(3, n_term // 4)
+        cands = sorted((s for s, k in sizes.items() if lo <= k <= hi),
+                       key=lambda s: -sizes[s])[:n_candidates]
+    else:
+        if not 0 <= int(occlude) < art.n_segments:
+            raise ValueError(f"occlude must be a segment index in [0, {art.n_segments})")
+        cands = [int(occlude)]
+    rows = []
+    for s in cands:
+        terr = an.downstream_terminals(art, s)
+        q0 = territory_flow(art, terr)
+        rows.append({"segment": s, "territory_terminals": int(terr.size), "healthy": q0,
+                     "tree_occluded": territory_flow(an.occlude(art, s), terr) / q0,
+                     "looped_occluded": territory_flow(an.occlude(looped, s), terr) / q0})
+    best = max(rows, key=lambda r: r["looped_occluded"]) if rows else None
+    return {"dim": spec.dim, "shape": shape, "n_links": len(links),
+            "n_loops": an.n_loops(looped), "links": links, "best": best,
+            "candidates": rows}
+
+
 _SCENARIO_KEYS = ("p_in", "p_out", "permeability", "lesion")
 
 
@@ -1072,6 +1122,19 @@ def build_server():
         Returns the mean bolus arrival time by element class and the overall mean
         transit time to the venous outlet. `rho_c` is the connection search radius."""
         return direct_transit(rho_c=rho_c, p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+
+    @server.tool()
+    def anastomosis_rescue(dim: int = 2, shape: str = "kidney", generations: int = 5,
+                           fill: str = "none", n_terminals: int = 40, n_links: int = 6,
+                           radius_frac: float = 1.0, occlude: int | None = None,
+                           seed: int = 0) -> dict:
+        """Collateral flow through vessel loops (anastomoses) in an organ, 2-D or 3-D:
+        add `n_links` side-to-side links to the arterial tree, block a branch (`occlude`,
+        or try mid-sized territories) and report the fraction of that territory's flow
+        that still arrives — ~0 in a plain tree, more with loops (∝ link radius⁴)."""
+        return tissue_anastomosis(dim=dim, shape=shape, generations=generations, fill=fill,
+                                  n_terminals=n_terminals, n_links=n_links,
+                                  radius_frac=radius_frac, occlude=occlude, seed=seed)
 
     @server.tool()
     def fit_dce_curve(times: list[float] | None = None, tissue: list[float] | None = None,

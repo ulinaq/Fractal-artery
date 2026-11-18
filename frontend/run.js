@@ -45,6 +45,23 @@ export async function prune() {
   redraw();
 }
 
+// Anastomoses: join nearby branches of the chosen tree with collateral links (loops)
+export async function addLoops() {
+  requireProject();
+  const target = document.querySelector("input[name=growtarget]:checked").value;
+  await flushAll();
+  const n_links = Math.max(1, Math.round(numOf("loop-n")));
+  const info = await api("POST", `/projects/${state.project}/anastomose`, { target, n_links });
+  $("loop-info").textContent = `added ${info.n_added} ${target} link${info.n_added > 1 ? "s" : ""}`
+    + ` → ${info.n_loops} loop${info.n_loops === 1 ? "" : "s"}, ${info.n_terminals} ends kept`;
+  state.hasResult = false;
+  stopFlow(); state.tracer = null; state.fieldData = null;
+  await Promise.all([loadNetwork(), loadEditable()]);
+  recordHistory();
+  status(`${target}: ${info.n_added} anastomoses added`, "ok");
+  redraw();
+}
+
 // Monte-Carlo uncertainty quantification: run N re-solves over the checked input
 // ranges, then show each output's mean±std and a sensitivity bar per input.
 export async function runUQ() {

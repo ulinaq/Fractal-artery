@@ -18,6 +18,8 @@ from .deps import get_project, get_project_2d, get_store, project_info
 from .schemas import (
     AdaptInfo,
     AdaptRequest,
+    AnastomoseInfo,
+    AnastomoseRequest,
     GrowInfo,
     GrowRequest,
     HotspotsIn,
@@ -362,6 +364,41 @@ def prune_vessels(body: PruneRequest | None = None, project: Project = Depends(g
     return PruneInfo(id=project.id, n_segments=network.n_segments,
                      n_terminals=int(network.terminal_nodes.size),
                      n_removed=base.n_segments - network.n_segments)
+
+
+@router.post("/projects/{pid}/anastomose", response_model=AnastomoseInfo)
+def anastomose_vessels(body: AnastomoseRequest | None = None,
+                       project: Project = Depends(get_project),
+                       store: ProjectStore = Depends(get_store)) -> AnastomoseInfo:
+    """Add loops (anastomoses) to the arterial *or* venous tree (2-D or 3-D): nearby
+    segments on different branches are split at their midpoints and joined, so a
+    territory can be fed by a second route (collateral flow). Same base as grow /
+    prune; terminals are unchanged; the stale result is invalidated."""
+    from ..core.anastomosis import add_anastomoses, n_loops
+
+    req = body or AnastomoseRequest()
+    if req.target not in ("artery", "vein"):
+        raise HTTPException(422, "target must be 'artery' or 'vein'")
+    d_art, d_ven = runner.defaults_for(project)
+    if req.target == "artery":
+        polys, existing, default = project.arteries, project.artery_network, d_art
+    else:
+        polys, existing, default = project.veins, project.vein_network, d_ven
+    base = (polys and runner.network_from_strokes(polys)) or existing or default
+    network, links = add_anastomoses(base, req.n_links, max_distance=req.max_distance,
+                                     min_detour=req.min_detour, min_hops=req.min_hops,
+                                     radius_frac=req.radius_frac)
+    if not links:
+        raise HTTPException(409, "no pair of segments qualifies — raise max_distance or "
+                                 "lower min_detour / min_hops")
+    if req.target == "artery":
+        project.artery_network, project.arteries = network, []
+    else:
+        project.vein_network, project.veins = network, []
+    store.clear_result(project)
+    return AnastomoseInfo(id=project.id, n_segments=network.n_segments,
+                          n_terminals=int(network.terminal_nodes.size), n_added=len(links),
+                          n_loops=n_loops(network))
 
 
 @router.post("/projects/{pid}/adapt", response_model=AdaptInfo)
