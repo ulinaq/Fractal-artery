@@ -735,7 +735,11 @@ Editing 3-D trees by hand is now done too (§11.4).
   re-solves the project per value (p_in, p_out, μ, K; r_min_frac in 2-D) and keeps each
   result as a snapshot (`GET …/experiments` → sweep table; click a row to compare
   against it). In the Compare card of the workspace and the 3-D viewer; MCP
-  `experiment_in_tissue`. *Next:* two-parameter grids.
+  `experiment_in_tissue`. ✅ **Two-input grids**: `param2`/`values2` solve every
+  combination (≤ 48), shown as a viridis-shaded matrix of the chosen quantity (click a
+  cell to compare), with each input's elasticity `d ln y / d ln x`
+  (`core.compare.log_sensitivity` / `grid_sensitivity`) for sweeps and grids alike; MCP
+  `experiment_in_tissue(param2=, values2=)`.
 - ✅ ~~**Server-side MP4** export of the flow video~~ — `GET …/tracer.mp4` (`video` extra:
   imageio-ffmpeg bundles ffmpeg), ↓ MP4 next to ↓ GIF, also in the export bundle.
 - ✅ ~~**3-D flow video**~~ — tracer transport on the voxel bed, played back in the

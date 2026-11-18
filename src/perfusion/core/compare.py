@@ -62,6 +62,33 @@ def summary_delta(current: dict, baseline: dict) -> list[dict]:
     return rows
 
 
+def log_sensitivity(values, outputs) -> float | None:
+    """Mean elasticity ``d ln y / d ln x`` of a sweep — the slope of a least-squares fit
+    of ``ln y`` on ``ln x`` (1 ⇒ proportional, 0 ⇒ insensitive, −1 ⇒ inverse). ``None``
+    when fewer than two distinct positive inputs have positive, finite outputs."""
+    x = np.asarray(values, dtype=float)
+    y = np.asarray([np.nan if v is None else v for v in outputs], dtype=float)
+    ok = np.isfinite(x) & np.isfinite(y) & (x > 0) & (y > 0)
+    if np.unique(x[ok]).size < 2:
+        return None
+    return float(np.polyfit(np.log(x[ok]), np.log(y[ok]), 1)[0])
+
+
+def grid_sensitivity(values1, values2, table) -> tuple[float | None, float | None]:
+    """Elasticities of a two-input grid ``table[i][j] = y(values1[i], values2[j])``:
+    each input's :func:`log_sensitivity` averaged over the other input's values
+    (``None`` where no line along that axis qualifies)."""
+    t = np.asarray([[np.nan if v is None else v for v in row] for row in table], dtype=float)
+
+    def mean(slopes):
+        s = [v for v in slopes if v is not None]
+        return float(np.mean(s)) if s else None
+
+    s1 = mean(log_sensitivity(values1, t[:, j]) for j in range(t.shape[1]))
+    s2 = mean(log_sensitivity(values2, t[i, :]) for i in range(t.shape[0]))
+    return s1, s2
+
+
 def compare_results(current: dict, baseline: dict, summary_current: dict | None = None,
                     summary_baseline: dict | None = None) -> dict:
     """Full A/B comparison of two result blobs (dicts of arrays with ``mask`` and the

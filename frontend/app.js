@@ -595,7 +595,8 @@ const compare = createCompare({
   projectId: () => state.project,
   ids: { name: "cmp-name", keep: "cmp-keep", select: "cmp-snap", run: "cmp-run",
          del: "cmp-del", out: "cmp-out", maps: "cmp-maps",
-         bparam: "cmp-bparam", bvals: "cmp-bvals", brun: "cmp-brun", bout: "cmp-bout" },
+         bparam: "cmp-bparam", bvals: "cmp-bvals", brun: "cmp-brun", bout: "cmp-bout",
+         bparam2: "cmp-bparam2", bvals2: "cmp-bvals2" },
   onMap: (name, sid) => loadDeltaField(name, sid).catch((e) => status(e.message, "err")),
   onInfo: (msg, err) => { $("cmp-info").textContent = msg; $("cmp-info").style.color = err ? "#b91c1c" : ""; },
 });

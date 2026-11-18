@@ -338,7 +338,11 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   or its current result) and keeps each as a snapshot tagged in `snapshots.meta`
   (`{experiment, name, param, value}`); `GET …/experiments` groups them into sweep
   tables. `runner.check_experiment` rejects bad input before queueing (422).
-  r_min_frac is 2-D only. MCP `experiment_in_tissue` (organ sweep).
+  r_min_frac is 2-D only. MCP `experiment_in_tissue` (organ sweep). **Two-input grids**:
+  `param2`/`values2` (≤ `schemas.MAX_GRID_RUNS` = 48 combinations; meta gains
+  `param2`/`value2`, snapshot "p = a, q = b"); `list_experiments` adds `sensitivity`
+  (elasticities from `core.compare.log_sensitivity`/`grid_sensitivity`, per input). The UI
+  shows a grid as a shaded matrix (`compare.sweepHtml`); MCP `experiment_in_tissue(param2=)`.
 - **DCE-MRI fit (multi-parameter)**: `inverse.fit_dce(times, tissue, aif, grid, params)`
   fits p_in / mu / permeability / porosity (bed blood-volume fraction; tissue curve =
   porosity · mean c) by log-space `least_squares` over full simulations

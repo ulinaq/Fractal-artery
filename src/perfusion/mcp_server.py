@@ -364,25 +364,59 @@ _SUMMARY_KEYS = ("arterial_inflow", "venous_outflow", "pressure_max", "flux_mean
                  "cth")
 
 
+_EXPERIMENT_INPUTS = ("p_in", "p_out", "permeability")
+
+
 def tissue_experiment(param: str = "p_in", values=(5.0, 10.0, 20.0), dim: int = 3,
                       shape: str = "kidney", generations: int = 4, fill: str = "cco",
                       n_terminals: int = 40, baseline: dict | None = None, seed: int = 0,
-                      extent: float = 1.0) -> dict:
+                      extent: float = 1.0, param2: str | None = None,
+                      values2=None) -> dict:
     """A batch experiment in an organ (2-D or 3-D): grow the trees once, then solve
     the hybrid model for each value of ``param`` (``p_in`` / ``p_out`` /
     ``permeability``, on top of ``baseline``) and return the sweep table — inflow,
-    MTT, CTH, … per value."""
-    if param not in ("p_in", "p_out", "permeability"):
-        raise ValueError("param must be 'p_in', 'p_out' or 'permeability'")
-    vals = [float(v) for v in values]
-    if not 2 <= len(vals) <= 12:
-        raise ValueError("give 2 to 12 values")
+    MTT, CTH, … per value. With ``param2`` / ``values2`` every combination is solved (a
+    grid, ≤ 48 solves); rows then carry ``value2`` too. ``sensitivity`` gives each
+    quantity's elasticity ``d ln y / d ln input`` per input."""
+    from .core.compare import grid_sensitivity, log_sensitivity
+
+    def values_of(name, vs):
+        if name not in _EXPERIMENT_INPUTS:
+            raise ValueError(f"param must be one of {list(_EXPERIMENT_INPUTS)}")
+        out = [float(v) for v in vs]
+        if not 2 <= len(out) <= 12:
+            raise ValueError("give 2 to 12 values")
+        return out
+
+    vals = values_of(param, values)
+    if (param2 is None) != (values2 is None):
+        raise ValueError("a grid needs both param2 and values2")
+    vals2 = values_of(param2, values2) if param2 is not None else None
+    if param2 == param:
+        raise ValueError("param2 must differ from param")
+    if {param, param2} == {"p_in", "p_out"} and set(vals) & set(vals2):
+        raise ValueError("a combination makes p_in equal p_out — no pressure drop")
+    if vals2 and len(vals) * len(vals2) > 48:
+        raise ValueError(f"a grid is at most 48 solves ({len(vals)} × {len(vals2)} asked)")
     spec, run = _organ_scenarios(dim, shape, generations, fill, n_terminals, seed, extent)
     rows = []
     for v in vals:
-        _, summary = run({**(baseline or {}), param: v})
-        rows.append({"value": v, **{k: summary.get(k) for k in _SUMMARY_KEYS}})
-    return {"dim": spec.dim, "shape": shape, "param": param, "rows": rows}
+        for w in (vals2 or [None]):
+            scen = {**(baseline or {}), param: v, **({param2: w} if param2 else {})}
+            _, summary = run(scen)
+            rows.append({"value": v, **({"value2": w} if param2 else {}),
+                         **{k: summary.get(k) for k in _SUMMARY_KEYS}})
+    sens = {}
+    for key in ("arterial_inflow", "mtt", "cth", "flux_mean"):
+        if param2 is None:
+            sens[key] = {param: log_sensitivity(vals, [r[key] for r in rows])}
+        else:
+            table = [[r[key] for r in rows[i * len(vals2):(i + 1) * len(vals2)]]
+                     for i in range(len(vals))]
+            s1, s2 = grid_sensitivity(vals, vals2, table)
+            sens[key] = {param: s1, param2: s2}
+    return {"dim": spec.dim, "shape": shape, "param": param, "param2": param2, "rows": rows,
+            "sensitivity": sens}
 
 
 def _organ_scenarios(dim, shape, generations, fill, n_terminals, seed, extent):
@@ -1205,15 +1239,18 @@ def build_server():
                              dim: int = 3, shape: str = "kidney", generations: int = 4,
                              fill: str = "cco", n_terminals: int = 40,
                              baseline: dict | None = None, seed: int = 0,
-                             extent: float = 1.0) -> dict:
+                             extent: float = 1.0, param2: str | None = None,
+                             values2: list[float] | None = None) -> dict:
         """Batch experiment in an organ (2-D or 3-D): the same trees solved for each value
         of `param` (p_in, p_out or permeability; default values 5, 10, 20), on top of
         `baseline` (scenario keys as in compare_scenarios). Returns a sweep table:
-        inflow, outflow, MTT, CTH, mean flux per value."""
+        inflow, outflow, MTT, CTH, mean flux per value. Give `param2` + `values2` for a
+        two-input grid (every combination, ≤ 48 solves). `sensitivity` reports each
+        quantity's elasticity d ln y / d ln input (1 = proportional, 0 = insensitive)."""
         return tissue_experiment(param=param, values=values or (5.0, 10.0, 20.0), dim=dim,
                                  shape=shape, generations=generations, fill=fill,
                                  n_terminals=n_terminals, baseline=baseline, seed=seed,
-                                 extent=extent)
+                                 extent=extent, param2=param2, values2=values2)
 
     @server.tool()
     def compare_scenarios(dim: int = 3, shape: str = "kidney", generations: int = 4,

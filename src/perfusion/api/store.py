@@ -103,6 +103,35 @@ def _default_root() -> Path:
     return Path(env) if env else Path(tempfile.gettempdir()) / "perfusion-data"
 
 
+SENSITIVITY_KEYS = ("arterial_inflow", "mtt", "cth", "flux_mean")
+
+
+def _experiment_sensitivity(group: dict) -> dict:
+    """Per-quantity elasticities of a sweep (``{key: {param: slope}}``) or a grid
+    (``{key: {param: slope, param2: slope}}``, each averaged over the other input)."""
+    from ..core.compare import grid_sensitivity, log_sensitivity
+
+    rows, p1, p2 = group["rows"], group["param"], group["param2"]
+
+    def y(row, key):
+        return (row["summary"] or {}).get(key)
+
+    out = {}
+    if p2 is None:
+        xs = [r["value"] for r in rows]
+        for key in SENSITIVITY_KEYS:
+            out[key] = {p1: log_sensitivity(xs, [y(r, key) for r in rows])}
+        return out
+    v1 = sorted({r["value"] for r in rows})
+    v2 = sorted({r["value2"] for r in rows})
+    cell = {(r["value"], r["value2"]): r for r in rows}
+    for key in SENSITIVITY_KEYS:
+        table = [[y(cell[a, b], key) if (a, b) in cell else None for b in v2] for a in v1]
+        s1, s2 = grid_sensitivity(v1, v2, table)
+        out[key] = {p1: s1, p2: s2}
+    return out
+
+
 class ProjectStore:
     """SQLite + blob-backed project registry."""
 
@@ -400,7 +429,10 @@ class ProjectStore:
 
     def list_experiments(self, pid: str) -> list[dict]:
         """Batch experiments of a project: their snapshots grouped by experiment id, in
-        run order — ``{id, name, param, rows: [{snapshot, value, summary}]}``."""
+        run order — ``{id, name, param, param2, rows: [{snapshot, value, value2,
+        summary}], sensitivity}``. ``param2``/``value2`` are ``None`` for a one-input
+        sweep. ``sensitivity`` maps each quantity in ``SENSITIVITY_KEYS`` to its
+        elasticity ``d ln y / d ln input`` per input (``core.compare``)."""
         groups: dict[str, dict] = {}
         for s in self.list_snapshots(pid):
             m = s["meta"] or {}
@@ -408,9 +440,12 @@ class ProjectStore:
                 continue
             g = groups.setdefault(m["experiment"], {"id": m["experiment"],
                                                     "name": m.get("name"),
-                                                    "param": m["param"], "rows": []})
+                                                    "param": m["param"],
+                                                    "param2": m.get("param2"), "rows": []})
             g["rows"].append({"snapshot": s["id"], "value": m["value"],
-                              "summary": s["summary"]})
+                              "value2": m.get("value2"), "summary": s["summary"]})
+        for g in groups.values():
+            g["sensitivity"] = _experiment_sensitivity(g)
         return list(groups.values())
 
     def list_snapshots(self, pid: str) -> list[dict]:

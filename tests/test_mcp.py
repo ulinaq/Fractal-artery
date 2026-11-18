@@ -396,6 +396,27 @@ def test_experiment_in_tissue_sweep(dim):
 
 
 @pytest.mark.parametrize("dim", [2, 3])
+def test_experiment_in_tissue_grid(dim):
+    out = mcp_server.tissue_experiment(param="p_in", values=[5, 10], dim=dim,
+                                       shape="kidney", generations=3, n_terminals=12,
+                                       param2="permeability", values2=[0.5, 1, 2])
+    assert out["param2"] == "permeability"
+    assert [(r["value"], r["value2"]) for r in out["rows"]] == [
+        (a, b) for a in (5.0, 10.0) for b in (0.5, 1.0, 2.0)]
+    s = out["sensitivity"]["arterial_inflow"]
+    assert s["p_in"] == pytest.approx(1.0, abs=1e-9)
+    assert 0 < s["permeability"] < 1                      # the bed shares the resistance
+    one = mcp_server.tissue_experiment(param="p_in", values=[5, 10], dim=dim,
+                                       shape="kidney", generations=3, n_terminals=12)
+    assert one["sensitivity"]["arterial_inflow"]["p_in"] == pytest.approx(1.0, abs=1e-9)
+    with pytest.raises(ValueError, match="differ"):
+        mcp_server.tissue_experiment(param="p_in", param2="p_in", values2=[1, 2])
+    with pytest.raises(ValueError, match="at most 48"):
+        mcp_server.tissue_experiment(param="p_in", values=list(range(1, 9)),
+                                     param2="permeability", values2=list(range(1, 8)))
+
+
+@pytest.mark.parametrize("dim", [2, 3])
 def test_fit_dce_curve_recovers_a_synthetic_truth(dim):
     out = mcp_server.tissue_dce_fit(dim=dim, shape="kidney", generations=3, n_terminals=12,
                                     truth={"p_in": 15.0, "porosity": 0.25}, n_samples=30)

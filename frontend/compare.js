@@ -3,6 +3,8 @@
 // (a lesion, the vessels, p_in…), re-run, then compare: a table of what changed
 // (GET /compare) and signed difference maps (Δ = current − baseline).
 
+import { viridisCss } from "./palette.js";
+
 const LABELS = {
   arterial_inflow: "arterial inflow", venous_outflow: "venous outflow",
   pressure_max: "pressure max", flux_mean: "flux mean", mtt: "MTT", cth: "CTH", rd: "RD",
@@ -35,21 +37,60 @@ export function compareHtml(c) {
 
 // a batch experiment as a sweep table: one row per value (click a row to pick it as
 // the baseline to compare against)
-export function sweepHtml(e) {
-  const cols = [["arterial_inflow", "inflow"], ["mtt", "MTT"], ["cth", "CTH"], ["flux_mean", "flux mean"]];
-  const head = cols.map(([, l]) => `<th>${l}</th>`).join("");
-  const rows = e.rows.map((r) => `<tr data-snap="${r.snapshot}" title="compare against this run">`
-    + `<td>${fmt(r.value)}</td>${cols.map(([k]) => `<td>${fmt(r.summary && r.summary[k])}</td>`).join("")}</tr>`)
-    .join("");
-  return `<p class="muted"><b>${e.name}</b> <button class="ghost mini-btn" data-del-exp="${e.id}" `
-    + `title="delete this experiment and its runs">✕</button></p>`
-    + `<table class="cmp sweep"><tr><th>${e.param}</th>${head}</tr>${rows}</table>`;
+const SWEEP_COLS = [["arterial_inflow", "inflow"], ["mtt", "MTT"], ["cth", "CTH"], ["flux_mean", "flux mean"]];
+
+// elasticity line: "inflow ∝ p_in^1.00 · K^0.02" (d ln y / d ln input, from the sweep)
+function sensitivityHtml(e, key, label) {
+  const s = e.sensitivity && e.sensitivity[key];
+  if (!s) return "";
+  const parts = Object.entries(s).filter(([, v]) => v != null)
+    .map(([p, v]) => `${p}<sup>${v.toFixed(2)}</sup>`);
+  return parts.length
+    ? `<p class="muted sens" title="elasticity d ln y / d ln input — 1: proportional, 0: insensitive">`
+      + `${label} ∝ ${parts.join(" · ")}</p>` : "";
+}
+
+// A one-input sweep → a table (one row per value); a two-input grid → a matrix of
+// `metric` (rows: param, columns: param2) shaded on viridis. Every run is clickable
+// (data-snap) to compare against it.
+export function sweepHtml(e, metric = "arterial_inflow") {
+  const head = `<p class="muted"><b>${e.name}</b> <button class="ghost mini-btn" data-del-exp="${e.id}" `
+    + `title="delete this experiment and its runs">✕</button></p>`;
+  if (!e.param2) {
+    const cols = SWEEP_COLS.map(([, l]) => `<th>${l}</th>`).join("");
+    const rows = e.rows.map((r) => `<tr data-snap="${r.snapshot}" title="compare against this run">`
+      + `<td>${fmt(r.value)}</td>${SWEEP_COLS.map(([k]) => `<td>${fmt(r.summary && r.summary[k])}</td>`).join("")}</tr>`)
+      .join("");
+    return head + `<table class="cmp sweep"><tr><th>${e.param}</th>${cols}</tr>${rows}</table>`
+      + sensitivityHtml(e, "arterial_inflow", "inflow");
+  }
+  const v1 = [...new Set(e.rows.map((r) => r.value))].sort((a, b) => a - b);
+  const v2 = [...new Set(e.rows.map((r) => r.value2))].sort((a, b) => a - b);
+  const cell = new Map(e.rows.map((r) => [`${r.value}|${r.value2}`, r]));
+  const val = (r) => (r && r.summary ? r.summary[metric] : null);
+  const all = e.rows.map(val).filter((v) => v != null && Number.isFinite(v));
+  const lo = Math.min(...all), hi = Math.max(...all);
+  const label = (SWEEP_COLS.find(([k]) => k === metric) || [metric, metric])[1];
+  const pick = `<select class="mini" data-metric-exp="${e.id}">${SWEEP_COLS.map(([k, l]) =>
+    `<option value="${k}" ${k === metric ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+  const ax = (v) => String(+v.toPrecision(4));             // axis values: 0.5, not 0.5000
+  const rows = v1.map((a) => `<tr><th>${ax(a)}</th>${v2.map((b) => {
+    const r = cell.get(`${a}|${b}`), v = val(r);
+    if (!r) return "<td></td>";
+    const t = hi > lo ? (v - lo) / (hi - lo) : 0.5;
+    const bg = v == null ? "" : `background:${viridisCss(t)};color:${t > 0.55 ? "#111" : "#fff"}`;
+    return `<td data-snap="${r.snapshot}" style="${bg}" title="${e.param} = ${a}, ${e.param2} = ${b} — compare against this run">${fmt(v)}</td>`;
+  }).join("")}</tr>`).join("");
+  return head + `<p class="muted grid-head">${pick} · rows ${e.param}, columns ${e.param2}</p>`
+    + `<table class="cmp sweep grid"><tr><th>${e.param} ↓ ${e.param2} →</th>${v2.map((b) => `<th>${ax(b)}</th>`).join("")}</tr>${rows}</table>`
+    + sensitivityHtml(e, metric, label);
 }
 
 // Wire a compare panel. `ids` names the elements: name (text input), keep (button),
 // select, run (button), del (button), out (div), maps (row of Δ-map buttons with
 // data-delta="pressure|flux|tof"), and for batch experiments bparam (select), bvals
-// (text: the values), brun (button), bout (div). `onMap(name, sid)` shows a Δ map.
+// (text: the values), optional bparam2/bvals2 (a second input → a grid), brun
+// (button), bout (div). `onMap(name, sid)` shows a Δ map.
 export function createCompare({ projectId, ids, onMap, onInfo }) {
   const $ = (id) => document.getElementById(id);
   const el = Object.fromEntries(Object.entries(ids).map(([k, id]) => [k, $(id)]));
@@ -103,13 +144,18 @@ export function createCompare({ projectId, ids, onMap, onInfo }) {
     } catch (e) { info(e.message, true); }
   }
 
-  async function refreshBatch() {
-    if (!el.bout || !projectId()) return;
-    const { experiments } = await call("GET", "experiments");
-    el.bout.innerHTML = experiments.map(sweepHtml).join("");
-    el.bout.querySelectorAll("tr[data-snap]").forEach((tr) => tr.addEventListener("click", async () => {
-      await refresh(tr.dataset.snap);
+  const metricOf = {};                       // grid experiment id -> shown quantity
+  let experiments = [];
+
+  function renderBatch() {
+    el.bout.innerHTML = experiments.map((e) => sweepHtml(e, metricOf[e.id])).join("");
+    el.bout.querySelectorAll("[data-snap]").forEach((c) => c.addEventListener("click", async () => {
+      await refresh(c.dataset.snap);
       await compare();
+    }));
+    el.bout.querySelectorAll("[data-metric-exp]").forEach((sel) => sel.addEventListener("change", () => {
+      metricOf[sel.dataset.metricExp] = sel.value;
+      renderBatch();
     }));
     el.bout.querySelectorAll("[data-del-exp]").forEach((b) => b.addEventListener("click", async () => {
       try {
@@ -119,15 +165,31 @@ export function createCompare({ projectId, ids, onMap, onInfo }) {
     }));
   }
 
+  async function refreshBatch() {
+    if (!el.bout || !projectId()) return;
+    ({ experiments } = await call("GET", "experiments"));
+    renderBatch();
+  }
+
+  const parse = (input) => input.value.split(/[,\s]+/).filter(Boolean).map(Number);
+  const badList = (v) => v.length < 2 || v.some((x) => !Number.isFinite(x));
+
   async function runBatch() {
-    const values = el.bvals.value.split(/[,\s]+/).filter(Boolean).map(Number);
-    if (values.length < 2 || values.some((v) => !Number.isFinite(v))) {
-      info("list at least two numbers, e.g. 5, 10, 20", true); return;
+    const values = parse(el.bvals);
+    if (badList(values)) { info("list at least two numbers, e.g. 5, 10, 20", true); return; }
+    const body = { param: el.bparam.value, values };
+    if (el.bparam2 && el.bparam2.value) {          // a second input → a grid
+      const values2 = parse(el.bvals2);
+      if (badList(values2)) { info("list at least two numbers for the second input", true); return; }
+      if (el.bparam2.value === body.param) { info("pick two different inputs for a grid", true); return; }
+      Object.assign(body, { param2: el.bparam2.value, values2 });
     }
+    const n = values.length * (body.values2 ? body.values2.length : 1);
+    if (n > 48) { info(`a grid is at most 48 solves (${n} asked)`, true); return; }
     el.brun.disabled = true;
-    info(`running ${values.length} solves…`);
+    info(`running ${n} solves…`);
     try {
-      const job = await call("POST", "experiments", { param: el.bparam.value, values });
+      const job = await call("POST", "experiments", body);
       let st = job;
       while (st.state !== "done" && st.state !== "error") {
         await new Promise((r) => setTimeout(r, 400));
@@ -135,11 +197,15 @@ export function createCompare({ projectId, ids, onMap, onInfo }) {
       }
       if (st.state === "error") { info(st.error || "experiment failed", true); return; }
       await refresh(); await refreshBatch();
-      info(`${values.length} runs kept — click a row to compare against it`);
+      info(`${n} runs kept — click a ${body.param2 ? "cell" : "row"} to compare against it`);
     } catch (e) { info(e.message, true); } finally { el.brun.disabled = false; }
   }
 
   if (el.brun) el.brun.addEventListener("click", runBatch);
+  if (el.bparam2) {                            // the second input's values only with one chosen
+    const sync = () => { el.bvals2.hidden = !el.bparam2.value; };
+    el.bparam2.addEventListener("change", sync); sync();
+  }
   el.keep.addEventListener("click", keep);
   el.run.addEventListener("click", compare);
   el.del.addEventListener("click", remove);

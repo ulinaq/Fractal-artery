@@ -539,6 +539,9 @@ class DCEFitRequest(BaseModel):
     max_nfev: int = Field(80, ge=5, le=400)
 
 
+MAX_GRID_RUNS = 48   # two-input experiment: values × values2 solves at most
+
+
 class ExperimentRequest(BaseModel):
     """A batch experiment: re-solve the project once per value of one input and keep
     each result as a baseline snapshot (``"<param> = <value>"``) for comparison."""
@@ -546,6 +549,21 @@ class ExperimentRequest(BaseModel):
     param: str = "p_in"                  # p_in | p_out | mu | permeability | r_min_frac (2-D)
     values: list[float] = Field(..., min_length=2, max_length=12)
     name: str | None = Field(None, max_length=80)
+    # optional second input -> a grid: one solve per (value, value2) combination
+    param2: str | None = None
+    values2: list[float] | None = Field(None, min_length=2, max_length=12)
+
+    @model_validator(mode="after")
+    def _check_grid(self):
+        if (self.param2 is None) != (self.values2 is None):
+            raise ValueError("a grid needs both param2 and values2")
+        if self.param2 is not None:
+            if self.param2 == self.param:
+                raise ValueError("param2 must differ from param")
+            if len(self.values) * len(self.values2) > MAX_GRID_RUNS:
+                raise ValueError(f"a grid is at most {MAX_GRID_RUNS} solves "
+                                 f"({len(self.values)} × {len(self.values2)} asked)")
+        return self
 
 
 class SnapshotIn(BaseModel):

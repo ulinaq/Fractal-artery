@@ -770,6 +770,54 @@ def test_3d_batch_experiment_sweeps_permeability(client):
     assert client.get(f"/projects/{pid}").json()["has_result"] is False   # no run needed
 
 
+@pytest.mark.parametrize("dim", [2, 3])
+def test_two_input_grid_experiment(client, dim):
+    """p_in × μ grid: every combination is one snapshot; inflow ∝ Δp exactly (elasticity
+    +1), while μ only scales the vessels — the bed's resistance is set by K — so its
+    elasticity lies in (−1, 0); one-input sweeps carry their elasticity too."""
+    if dim == 3:
+        pid = _explorer_project(client, 3)["id"]
+    else:
+        pid = client.post("/projects", json={"name": "grid", "grid": SMALL_GRID,
+                                             "params": {**FAST_PARAMS, "p_out": 0}}).json()["id"]
+    body = {"param": "p_in", "values": [5, 10, 20], "param2": "mu", "values2": [0.5, 2]}
+    r = client.post(f"/projects/{pid}/experiments", json=body)
+    assert r.status_code == 200, r.text
+    assert _wait_for_job(client, r.json()["id"], timeout=180)["state"] == "done"
+    exp = client.get(f"/projects/{pid}/experiments").json()["experiments"][0]
+    assert exp["param2"] == "mu"
+    assert exp["name"] == "p_in × mu grid"
+    assert [(row["value"], row["value2"]) for row in exp["rows"]] == [
+        (a, b) for a in (5, 10, 20) for b in (0.5, 2)]
+    q = {(row["value"], row["value2"]): row["summary"]["arterial_inflow"] for row in exp["rows"]}
+    for b in (0.5, 2):
+        assert q[20, b] == pytest.approx(4 * q[5, b], rel=1e-9)
+    sens = exp["sensitivity"]["arterial_inflow"]
+    assert sens["p_in"] == pytest.approx(1.0, abs=1e-9)
+    assert -1.0 < sens["mu"] < 0.0
+    assert exp["sensitivity"]["mtt"]["p_in"] == pytest.approx(-1.0, abs=1e-6)
+    names = [sn["name"] for sn in client.get(f"/projects/{pid}/snapshots").json()["snapshots"]]
+    assert names[0] == "p_in = 5, mu = 0.5"
+    assert len(names) == 6
+
+    for bad, msg in [({**body, "param2": "p_in"}, "differ"),
+                     ({"param": "p_in", "values": [5, 10], "param2": "mu"}, "both"),
+                     ({"param": "p_in", "values": list(range(1, 8)), "param2": "mu",
+                       "values2": list(range(1, 9))}, "at most 48"),
+                     ({"param": "p_in", "values": [5, 10], "param2": "p_out",
+                       "values2": [0, 5]}, "p_in equal p_out")]:
+        r = client.post(f"/projects/{pid}/experiments", json=bad)
+        assert r.status_code == 422, bad
+        assert msg in str(r.json()["detail"])
+
+    r = client.post(f"/projects/{pid}/experiments", json={"param": "p_in", "values": [5, 10]})
+    assert _wait_for_job(client, r.json()["id"], timeout=120)["state"] == "done"
+    sweep = client.get(f"/projects/{pid}/experiments").json()["experiments"][1]
+    assert sweep["param2"] is None
+    assert sweep["rows"][0]["value2"] is None
+    assert sweep["sensitivity"]["arterial_inflow"]["p_in"] == pytest.approx(1.0, abs=1e-9)
+
+
 def test_document_roundtrip_basic(client):
     # a plain project with params, a tissue region and I/O points
     pid = client.post("/projects", json={"name": "my work", "grid": SMALL_GRID,

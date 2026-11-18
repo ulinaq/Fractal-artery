@@ -256,3 +256,9 @@ table.cmp.sweep tr[data-snap]:hover td { background: rgba(37, 99, 235, 0.08); }
 textarea[id$="dce-csv"] { width: 100%; font: 11px ui-monospace, monospace; box-sizing: border-box; }
 .dce-chart { width: 100%; height: auto; margin-top: 6px; }
 p.warn { color: #b45309; font-size: 12px; margin: 4px 0; }
+
+table.cmp.grid td[data-snap] { cursor: pointer; text-align: center; }
+table.cmp.grid td[data-snap]:hover { outline: 2px solid #2563eb; outline-offset: -2px; }
+table.cmp.grid th { text-align: center; }
+p.sens { margin: 2px 0 6px; }
+p.grid-head select.mini { width: auto; display: inline-block; }

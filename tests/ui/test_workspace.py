@@ -214,3 +214,31 @@ def test_shear_thinning_run_reports_the_viscosity_range(page, server):
     assert page.is_hidden("#shear-row")
     assert page.is_hidden("#lambda-row")
     assert not page.errors
+
+
+def test_two_input_grid_experiment(page, server):
+    """A p_in × K grid from the Result tab: a matrix of runs shaded by the chosen
+    quantity with its sensitivities; switching the quantity re-renders; clicking a
+    cell compares against that run."""
+    _new_project(page, server)
+    page.click("#btn-run")
+    wait_status(page, "solved", "failed", timeout=120000)
+    page.select_option("#cmp-bparam", "p_in")
+    page.fill("#cmp-bvals", "5, 20")
+    assert page.is_hidden("#cmp-bvals2")
+    page.select_option("#cmp-bparam2", "permeability")
+    assert page.is_visible("#cmp-bvals2")
+    page.fill("#cmp-bvals2", "0.5, 1, 2")
+    page.click("#cmp-brun")
+    page.wait_for_function("document.querySelector('#cmp-info').textContent.includes('runs kept')",
+                           timeout=120000)
+    cells = page.locator("#cmp-bout table.grid td[data-snap]")
+    assert cells.count() == 6
+    assert "p_in" in page.text_content("#cmp-bout p.sens")
+    page.select_option("#cmp-bout select[data-metric-exp]", "mtt")
+    page.wait_for_function("document.querySelector('#cmp-bout p.sens').textContent"
+                           ".startsWith('MTT')")
+    cells.nth(5).click()
+    page.wait_for_selector("#cmp-out table.cmp")
+    assert "p_in = 20, permeability = 2" in page.inner_text("#cmp-out")
+    assert not page.errors

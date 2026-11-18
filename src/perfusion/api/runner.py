@@ -380,8 +380,23 @@ EXPERIMENT_PARAMS = {"p_in": "params", "p_out": "params", "mu": "params",
 _POSITIVE = {"mu", "permeability", "r_min_frac"}
 
 
-def check_experiment(project, param: str, values) -> None:
-    """Reject an experiment that cannot run, before it is queued (``InputError``)."""
+def check_experiment(project, param: str, values, param2: str | None = None,
+                     values2=None) -> None:
+    """Reject an experiment that cannot run, before it is queued (``InputError``) —
+    one input, or a grid over two (every combination must be solvable)."""
+    _check_input(project, param, values)
+    if param2 is None:
+        return
+    if param2 == param:
+        raise InputError("the two inputs of a grid must differ")
+    _check_input(project, param2, values2)
+    if {param, param2} == {"p_in", "p_out"}:
+        a, b = (values, values2) if param == "p_in" else (values2, values)
+        if any(float(i) == float(o) for i in a for o in b):
+            raise InputError("a combination makes p_in equal p_out — no pressure drop")
+
+
+def _check_input(project, param: str, values) -> None:
     if param not in EXPERIMENT_PARAMS:
         raise InputError(f"param must be one of {sorted(EXPERIMENT_PARAMS)}")
     if param == "r_min_frac" and is_3d(project):
@@ -407,21 +422,30 @@ def project_with(project, param: str, value: float):
 
 
 def run_experiment(store, project, req) -> list[dict]:
-    """Solve the project once per value of ``req.param`` and keep each result as a
-    snapshot named ``"<param> = <value>"``, tagged with this experiment (so the batch
-    lists as a sweep and every member can be compared). The project's own current
-    result is left as it was."""
+    """Solve the project once per value of ``req.param`` — or, with ``req.param2``, once
+    per combination of the two inputs (a grid) — and keep each result as a snapshot
+    named ``"<param> = <value>[, <param2> = <value2>]"``, tagged with this experiment (so
+    the batch lists as a sweep / grid and every member can be compared). The project's
+    own current result is left as it was."""
     import uuid
 
-    check_experiment(project, req.param, req.values)
+    param2 = getattr(req, "param2", None)
+    check_experiment(project, req.param, req.values, param2, getattr(req, "values2", None))
     eid = uuid.uuid4().hex[:8]
-    name = req.name or f"{req.param} sweep"
+    name = req.name or (f"{req.param} × {param2} grid" if param2 else f"{req.param} sweep")
+    combos = ([(v, w) for v in req.values for w in req.values2] if param2
+              else [(v, None) for v in req.values])
     out = []
-    for v in req.values:
-        result = solve(project_with(project, req.param, v), use_vessels=True)
-        out.append(store.save_snapshot_result(
-            project, result, f"{req.param} = {v:g}",
-            meta={"experiment": eid, "name": name, "param": req.param, "value": float(v)}))
+    for v, w in combos:
+        model = project_with(project, req.param, v)
+        label = f"{req.param} = {v:g}"
+        meta = {"experiment": eid, "name": name, "param": req.param, "value": float(v)}
+        if param2:
+            model = project_with(model, param2, w)
+            label += f", {param2} = {w:g}"
+            meta.update(param2=param2, value2=float(w))
+        result = solve(model, use_vessels=True)
+        out.append(store.save_snapshot_result(project, result, label, meta=meta))
     return out
 
 
