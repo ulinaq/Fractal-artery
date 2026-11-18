@@ -318,6 +318,13 @@ def test_3d_viewer_compares_runs(page, server):
                            " === 'd_flux' && document.querySelector('#status').textContent"
                            ".includes('solved')", timeout=60000)
     assert page.evaluate("window.viewer3d.data().delta") is True
+    assert page.locator("#v3-cmp-bparam option[value=r_min_frac]").count() == 0   # 2-D only
+    page.select_option("#v3-cmp-bparam", "permeability")
+    page.fill("#v3-cmp-bvals", "0.5, 2")
+    page.click("#v3-cmp-brun")
+    page.wait_for_function("document.querySelector('#v3-cmp-info').textContent"
+                           ".includes('runs kept')", timeout=120000)
+    assert page.locator("#v3-cmp-bout tr[data-snap]").count() == 2
     assert not errors
 
 

@@ -325,6 +325,13 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   The maths is `core.compare` (pure NumPy, 2-D/3-D); a direct result has no field to keep
   (409). UI: `frontend/compare.js` (shared panel; diverging ramp in `palette.js`) in the
   2-D Result tab and the 3-D viewer; MCP `compare_scenarios` (same trees, two settings).
+  **Batch experiments**: `POST /projects/{id}/experiments {param, values}` is one job
+  (`runner.run_experiment`, job kind `experiment`) that solves a *copy* of the project
+  per value (`runner.project_with`; params or grid K — never mutates the stored project
+  or its current result) and keeps each as a snapshot tagged in `snapshots.meta`
+  (`{experiment, name, param, value}`); `GET …/experiments` groups them into sweep
+  tables. `runner.check_experiment` rejects bad input before queueing (422).
+  r_min_frac is 2-D only. MCP `experiment_in_tissue` (organ sweep).
 - **Browser tests**: `tests/ui/` (Playwright; `--extra ui`), run in the CI `ui` job.
 
 ## Gotchas

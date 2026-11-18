@@ -83,7 +83,7 @@ def test_server_registers_expected_tools():
             "tissue_perfusion_analysis", "optimize_trees_in_tissue",
             "tissue_uncertainty_calibration", "direct_model_in_tissue",
             "export_tissue_fields", "lesion_in_tissue", "compare_scenarios",
-            "describe_model"} <= tools
+            "experiment_in_tissue", "describe_model"} <= tools
 
 
 def test_calibrate_to_flow_recovers_value():
@@ -378,3 +378,17 @@ def test_compare_scenarios_in_an_organ(dim):
     assert {r["key"]: r for r in les["summary"]}["arterial_inflow"]["diff"] <= 1e-12
     with pytest.raises(ValueError, match="unknown scenario keys"):
         mcp_server.tissue_compare(dim=dim, change={"pressure": 3})
+
+
+@pytest.mark.parametrize("dim", [2, 3])
+def test_experiment_in_tissue_sweep(dim):
+    out = mcp_server.tissue_experiment(param="p_in", values=[5, 10, 20], dim=dim,
+                                       shape="kidney", generations=3, n_terminals=12)
+    q = [r["arterial_inflow"] for r in out["rows"]]
+    assert q[0] == pytest.approx(0.5 * q[1], rel=1e-9)        # linear in the drop
+    assert q[2] == pytest.approx(2.0 * q[1], rel=1e-9)
+    k = mcp_server.tissue_experiment(param="permeability", values=[0.5, 2], dim=dim,
+                                     shape="kidney", generations=3, n_terminals=12)
+    assert k["rows"][0]["arterial_inflow"] < k["rows"][1]["arterial_inflow"]
+    with pytest.raises(ValueError, match="param must be"):
+        mcp_server.tissue_experiment(param="mu")

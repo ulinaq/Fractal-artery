@@ -246,17 +246,50 @@ def tissue_compare(dim: int = 3, shape: str = "kidney", generations: int = 4,
     ``{"center": [...] (default the tissue centroid), "radius_frac": 0.2,
     "permeability": 0.05}``.
     """
-    from . import io as perfio
-    from . import treegen
     from .core.compare import compare_results
-    from .core.geometry import rasterize_regions
+
 
     a = dict(baseline or {})
     b = {**a, **(change or {})}
-    for scen in (a, b):
-        bad = set(scen) - set(_SCENARIO_KEYS)
-        if bad:
-            raise ValueError(f"unknown scenario keys {sorted(bad)}; use {list(_SCENARIO_KEYS)}")
+    spec, run = _organ_scenarios(dim, shape, generations, fill, n_terminals, seed, extent)
+    (fa, sa), (fb, sb) = run(a), run(b)
+    out = compare_results(fb, fa, sb, sa)
+    out["summary"] = [r for r in out["summary"] if r["key"] in _SUMMARY_KEYS]
+    return {"dim": spec.dim, "shape": shape, "baseline": a, "changed": b, **out}
+
+
+_SUMMARY_KEYS = ("arterial_inflow", "venous_outflow", "pressure_max", "flux_mean", "mtt",
+                 "cth")
+
+
+def tissue_experiment(param: str = "p_in", values=(5.0, 10.0, 20.0), dim: int = 3,
+                      shape: str = "kidney", generations: int = 4, fill: str = "cco",
+                      n_terminals: int = 40, baseline: dict | None = None, seed: int = 0,
+                      extent: float = 1.0) -> dict:
+    """A batch experiment in an organ (2-D or 3-D): grow the trees once, then solve
+    the hybrid model for each value of ``param`` (``p_in`` / ``p_out`` /
+    ``permeability``, on top of ``baseline``) and return the sweep table — inflow,
+    MTT, CTH, … per value."""
+    if param not in ("p_in", "p_out", "permeability"):
+        raise ValueError("param must be 'p_in', 'p_out' or 'permeability'")
+    vals = [float(v) for v in values]
+    if not 2 <= len(vals) <= 12:
+        raise ValueError("give 2 to 12 values")
+    spec, run = _organ_scenarios(dim, shape, generations, fill, n_terminals, seed, extent)
+    rows = []
+    for v in vals:
+        _, summary = run({**(baseline or {}), param: v})
+        rows.append({"value": v, **{k: summary.get(k) for k in _SUMMARY_KEYS}})
+    return {"dim": spec.dim, "shape": shape, "param": param, "rows": rows}
+
+
+def _organ_scenarios(dim, shape, generations, fill, n_terminals, seed, extent):
+    """Grow an organ's trees once; return ``(spec, run)`` where ``run(scenario)`` solves
+    the hybrid model under a scenario (``_SCENARIO_KEYS``) → ``(fields, summary)``."""
+    from . import io as perfio
+    from . import treegen
+    from .core.geometry import rasterize_regions
+
     grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
                            n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
                            _return_model=True)
@@ -278,16 +311,15 @@ def tissue_compare(dim: int = 3, shape: str = "kidney", generations: int = 4,
             "value": float(les.get("permeability", 0.05))}], base=k)
 
     def run(scen):
+        bad = set(scen) - set(_SCENARIO_KEYS)
+        if bad:
+            raise ValueError(f"unknown scenario keys {sorted(bad)}; use {list(_SCENARIO_KEYS)}")
         res = treegen.solve(spec, art, ven, mask, domain, p_in=float(scen.get("p_in", 10.0)),
                             p_out=float(scen.get("p_out", 0.0)), permeability=k_field(scen))
         fields = {"pressure": res.pressure, "flux": res.flux, "tof": res.tof, "mask": mask}
         return fields, perfio.results_summary(res)
 
-    (fa, sa), (fb, sb) = run(a), run(b)
-    out = compare_results(fb, fa, sb, sa)
-    keep = {"arterial_inflow", "venous_outflow", "pressure_max", "flux_mean", "mtt", "cth"}
-    out["summary"] = [r for r in out["summary"] if r["key"] in keep]
-    return {"dim": spec.dim, "shape": shape, "baseline": a, "changed": b, **out}
+    return spec, run
 
 
 def tissue_lesion(dim: int = 3, shape: str = "kidney", generations: int = 4,
@@ -988,6 +1020,21 @@ def build_server():
         Returns the mean bolus arrival time by element class and the overall mean
         transit time to the venous outlet. `rho_c` is the connection search radius."""
         return direct_transit(rho_c=rho_c, p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+
+    @server.tool()
+    def experiment_in_tissue(param: str = "p_in", values: list[float] | None = None,
+                             dim: int = 3, shape: str = "kidney", generations: int = 4,
+                             fill: str = "cco", n_terminals: int = 40,
+                             baseline: dict | None = None, seed: int = 0,
+                             extent: float = 1.0) -> dict:
+        """Batch experiment in an organ (2-D or 3-D): the same trees solved for each value
+        of `param` (p_in, p_out or permeability; default values 5, 10, 20), on top of
+        `baseline` (scenario keys as in compare_scenarios). Returns a sweep table:
+        inflow, outflow, MTT, CTH, mean flux per value."""
+        return tissue_experiment(param=param, values=values or (5.0, 10.0, 20.0), dim=dim,
+                                 shape=shape, generations=generations, fill=fill,
+                                 n_terminals=n_terminals, baseline=baseline, seed=seed,
+                                 extent=extent)
 
     @server.tool()
     def compare_scenarios(dim: int = 3, shape: str = "kidney", generations: int = 4,

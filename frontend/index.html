@@ -217,6 +217,18 @@
           <button class="ghost" data-delta="tof">Δ TOF</button>
         </div>
         <div id="cmp-out"></div>
+        <h3>Batch experiment</h3>
+        <p class="muted">Re-solve once per value and keep every run as a baseline.</p>
+        <div class="row">
+          <select id="cmp-bparam">
+            <option value="p_in">p_in</option><option value="p_out">p_out</option>
+            <option value="mu">μ (viscosity)</option><option value="permeability">K (bed)</option>
+            <option value="r_min_frac">r_min_frac (tree depth)</option>
+          </select>
+          <input id="cmp-bvals" value="5, 10, 20" title="values, comma-separated" />
+          <button id="cmp-brun">▶ Run batch</button>
+        </div>
+        <div id="cmp-bout"></div>
         <p class="muted" id="cmp-info"></p>
       </details>
 

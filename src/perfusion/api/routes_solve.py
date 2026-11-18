@@ -14,6 +14,7 @@ from . import helpers, runner
 from .deps import get_jobs, get_project, get_project_2d, get_store
 from .schemas import (
     CalibrateRequest,
+    ExperimentRequest,
     FieldResponse,
     JobInfo,
     RunRequest,
@@ -41,6 +42,42 @@ def run_tracer(body: TracerRequest | None = None, project: Project = Depends(get
     req = body or TracerRequest()
     jid = jobs.submit(project.id, "tracer", req.model_dump())
     return JobInfo(**jobs.get(jid))
+
+
+@router.post("/projects/{pid}/experiments", response_model=JobInfo)
+def run_experiment(body: ExperimentRequest, project: Project = Depends(get_project),
+                   jobs=Depends(get_jobs)) -> JobInfo:
+    """A batch experiment as one job: re-solve once per value of ``param`` (p_in,
+    p_out, mu, permeability; r_min_frac on 2-D) and keep each result as a snapshot to
+    compare (``GET …/experiments`` lists the sweep). The current result is untouched."""
+    try:
+        runner.check_experiment(project, body.param, body.values)
+    except runner.InputError as e:
+        raise HTTPException(422, str(e)) from None
+    jid = jobs.submit(project.id, "experiment", body.model_dump())
+    return JobInfo(**jobs.get(jid))
+
+
+@router.get("/projects/{pid}/experiments")
+def list_experiments(pid: str, project: Project = Depends(get_project),
+                     store: ProjectStore = Depends(get_store)) -> dict:
+    """The project's batch experiments, each a sweep table: one row per value with its
+    snapshot id and result summary (inflow, MTT, CTH, …)."""
+    return {"experiments": store.list_experiments(pid)}
+
+
+@router.delete("/projects/{pid}/experiments/{eid}", status_code=204)
+def delete_experiment(pid: str, eid: str, project: Project = Depends(get_project),
+                      store: ProjectStore = Depends(get_store)):
+    """Delete a batch experiment and all its snapshots."""
+    from fastapi.responses import Response
+
+    group = next((g for g in store.list_experiments(pid) if g["id"] == eid), None)
+    if group is None:
+        raise HTTPException(404, f"no experiment {eid!r} in this project")
+    for row in group["rows"]:
+        store.delete_snapshot(pid, row["snapshot"])
+    return Response(status_code=204)
 
 
 @router.get("/jobs", response_model=list[JobInfo])
