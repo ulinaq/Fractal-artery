@@ -450,12 +450,38 @@ def test_explore_evaluate_returns_field_tree_objective(client):
     assert {s[5] for s in d["segments"]} == {0, 1}   # artery + vein
 
 
-def test_explore_optimize_improves(client):
-    o = client.post("/explore/optimize", json={"kind": "flux_std", "method": "local",
-                                               "maxiter": 6, "nx": 40, "ny": 46}).json()
-    assert o["best"] <= o["start"] + 1e-9
+@pytest.mark.parametrize("dim", [2, 3])
+def test_explore_optimize_tunes_the_organ_setup_and_feeds_the_simulation(client, dim):
+    """Optimise is organ-aware (the chosen shape, its roots, the fill) in 2-D and 3-D,
+    and the optimised setup becomes a runnable project for the simulation page."""
+    setup = {"dim": dim, "shape": "kidney", "fill": "cco", "n_terminals": 20,
+             "generations": 3, "nx": 16 if dim == 3 else 50, "ny": 58, "kind": "tof_std"}
+    o = client.post("/explore/optimize", json={**setup, "maxiter": 5}).json()
+    assert o["dim"] == dim
     assert o["n_eval"] > 0
+    assert o["best"] <= o["start"] + 1e-9                # never worse than the input
     assert 1.0 <= o["a_gamma"] <= 1.9
+    assert ("twist" in o["free"]) == (dim == 3)
+    assert len(o["history"]) == o["n_eval"]
+
+    best = {**setup, "length_to_radius": o["length_to_radius"], "exponent": o["exponent"],
+            "twist": o["twist"],
+            "artery": {"gamma": o["a_gamma"]},
+            "vein": {"gamma": o["v_gamma"], "radius": o["v_radius"], "angle": -90.0}}
+    grown = client.post("/explore/grow", json=best).json()
+    if dim == 2:                  # 'best' is scored at the user's own resolution
+        assert grown["objective"] == pytest.approx(o["best"], rel=1e-6)
+    made = client.post("/explore/project", json={**best, "name": "optimised"}).json()
+    assert made["open"] == (f"/?project={made['id']}" if dim == 2
+                            else f"/viewer3d.html?project={made['id']}")
+    jid = client.post(f"/projects/{made['id']}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+
+
+def test_explore_optimize_rejects_bad_input(client):
+    assert client.post("/explore/optimize", json={"kind": "nope"}).status_code == 422
+    assert client.post("/explore/optimize",
+                       json={"free": ["not_a_param"]}).status_code == 422
 
 
 def test_explorer_page_served(client):

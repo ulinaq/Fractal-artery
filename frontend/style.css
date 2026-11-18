@@ -225,3 +225,7 @@ button.link-danger:hover:not(:disabled) { color: #b91c1c; }
 .rootmode button { padding: 4px 9px; font-size: 12px; white-space: nowrap; }
 #btn-project { width: 100%; }
 .v3sum { padding: 8px 0 0; border: none; gap: 14px; }
+
+/* explorer optimiser: which parameters to vary */
+.optfree { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8px; margin: 4px 0 8px; }
+.optfree label.check { margin: 2px 0; font-size: 12.5px; }

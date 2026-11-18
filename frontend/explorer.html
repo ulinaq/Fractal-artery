@@ -119,11 +119,11 @@
           </span>
         </label>
         <label>length : radius <span class="rv" id="v-ltr"></span>
-          <input id="ltr" type="range" min="3" max="20" step="0.5" value="10" /></label>
+          <input id="ltr" type="range" min="3" max="20" step="any" value="10" /></label>
         <label>Murray exponent <span class="rv" id="v-exponent"></span>
-          <input id="exponent" type="range" min="2" max="3.5" step="0.05" value="2.8" /></label>
+          <input id="exponent" type="range" min="2" max="3.5" step="any" value="2.8" /></label>
         <label class="d3" title="rotation of each bifurcation's plane relative to its parent's (90° = alternating, like real trees)">branch-plane twist (°) <span class="rv" id="v-twist"></span>
-          <input id="twist" type="range" min="0" max="180" step="5" value="90" /></label>
+          <input id="twist" type="range" min="0" max="180" step="any" value="90" /></label>
         <label class="d3" title="seeded random variation of branching angles, twist and segment lengths">randomness <span class="rv" id="v-jitter"></span>
           <input id="jitter" type="range" min="0" max="1" step="0.05" value="0.3" /></label>
         <p class="muted d3">Asymmetry γ and the Murray exponent set the child calibres
@@ -202,11 +202,19 @@
         <p class="muted" id="obj-info">—</p>
       </details>
 
-      <details class="card d2">
-        <summary>Optimise asymmetry</summary>
-        <p class="muted">Search the branching asymmetries γ, length:radius and
-          Murray exponent for the most homogeneous perfusion (in the thesis' default
-          fractal frame), then load the best values.</p>
+      <details class="card" id="opt-card">
+        <summary>Optimise trees</summary>
+        <p class="muted">Search the branching parameters for the most homogeneous
+          perfusion (the objective above) <b>in this organ</b>, with its roots, fill and
+          generations — 2-D or 3-D. The best values are loaded into the controls.</p>
+        <div class="optfree">
+          <label class="check"><input type="checkbox" value="a_gamma" checked /> artery γ</label>
+          <label class="check"><input type="checkbox" value="v_gamma" checked /> vein γ</label>
+          <label class="check"><input type="checkbox" value="length_to_radius" checked /> length : radius</label>
+          <label class="check"><input type="checkbox" value="exponent" checked /> Murray exponent</label>
+          <label class="check"><input type="checkbox" value="v_radius_scale" /> vein calibre</label>
+          <label class="check d3"><input type="checkbox" value="twist" checked /> 3-D twist</label>
+        </div>
         <label>method
           <select id="method">
             <option value="local">local (Nelder-Mead)</option>
@@ -214,8 +222,9 @@
           </select>
         </label>
         <label>max iterations <input id="maxiter" type="number" value="15" min="1" max="60" /></label>
-        <button id="btn-opt" class="primary">Optimise tree</button>
+        <button id="btn-opt" class="primary">Optimise trees</button>
         <p class="muted" id="opt-info"></p>
+        <button id="btn-opt-use" hidden title="open the optimised trees + tissue as a project in the simulation page">📤 Use optimised trees in simulation</button>
       </details>
     </aside>
 

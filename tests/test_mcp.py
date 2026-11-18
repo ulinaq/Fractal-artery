@@ -78,7 +78,8 @@ def test_server_registers_expected_tools():
             "multicompartment_perfusion",
             "adapt_vessel_network", "uncertainty_quantification",
             "sobol_sensitivity_indices", "calibrate_parameter_to_flow",
-            "tissue_perfusion_analysis", "describe_model"} <= tools
+            "tissue_perfusion_analysis", "optimize_trees_in_tissue",
+            "describe_model"} <= tools
 
 
 def test_calibrate_to_flow_recovers_value():
@@ -262,3 +263,14 @@ def test_tissue_analysis_runs_the_same_chain_in_2d_and_3d(dim):
     if dim == 3:
         a = r["adaptation"]
         assert abs(a["murray_final"] - 3) <= abs(a["murray_start"] - 3)
+
+
+@pytest.mark.parametrize("dim", [2, 3])
+def test_optimize_tissue_trees_improves_in_the_organ(dim):
+    r = mcp_server.optimize_tissue_trees(dim=dim, shape="kidney", generations=3,
+                                         n_terminals=15, maxiter=4)
+    assert r["dim"] == dim
+    assert r["n_eval"] > 0
+    assert r["best"] <= r["start"]
+    assert ("twist" in r["free"]) == (dim == 3)
+    assert 1.0 <= r["values"]["a_gamma"] <= 1.9

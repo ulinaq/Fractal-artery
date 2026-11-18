@@ -82,23 +82,50 @@ def explore(req: ExploreRequest) -> dict:
 
 @router.post("/explore/optimize")
 def explore_optimize(req: ExploreOptimizeRequest) -> dict:
-    """Optimise the tree for the chosen homogeneity objective; return the best
-    tunables and the before/after objective (bounded budget — runs inline)."""
-    grid = Grid(nx=req.nx, ny=req.ny, lx=140.0, ly=160.0)
-    start = optimize.objective(optimize.default_alpha(), kind=req.kind, grid=grid,
-                               domain_limit=_DOMAIN, r_min_frac=_RMIN)
+    """Optimise the current explorer setup — in its own organ, with its roots and
+    fill, 2-D or 3-D — for the chosen homogeneity objective (``kind``). Returns the
+    best tunables (load them into the explorer, or send the setup to the simulation
+    page via ``POST /explore/project``) and the before/after objective."""
+    from dataclasses import replace
+
+    from .. import treegen
+
     try:
-        r = optimize.optimize_tree(kind=req.kind, grid=grid, domain_limit=_DOMAIN,
-                                   method=req.method, maxiter=req.maxiter, r_min_frac=_RMIN)
+        spec = grow_spec(req)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from None
-    a = r.alpha
-    improvement = (start - r.objective) / start if np.isfinite(start) and start > 0 else 0.0
+    n = int(req.search_nx)
+    if spec.dim == 3:
+        search = replace(spec, nx=min(spec.nx, min(n, 32)))
+    else:                                   # keep the aspect ratio of the user's grid
+        nx = min(spec.nx, n)
+        search = replace(spec, nx=nx, ny=max(12, round(spec.ny * nx / spec.nx)))
+    try:
+        r = treegen.optimize(search, kind=req.kind, free=req.free, method=req.method,
+                             maxiter=req.maxiter, seed=req.seed)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    # the search ran on a coarser grid: re-score both setups at the user's resolution
+    # and never hand back something worse than what they had there
+    best_spec = treegen.with_values(spec, {k: r.values[k] for k in r.free})
+    if search.nx == spec.nx and search.ny == spec.ny:
+        start, best = r.start, r.best
+    else:
+        start, best = treegen.objective(spec, req.kind), treegen.objective(best_spec, req.kind)
+    kept = not best < start
+    if kept:
+        best_spec, best = spec, start
+    improvement = (start - best) / start if np.isfinite(start) and start > 0 else 0.0
+    v = treegen.spec_values(best_spec)
     return {
-        "kind": r.kind, "start": start, "best": r.objective,
-        "improvement": improvement, "n_eval": r.n_eval, "success": r.success,
-        "a_gamma": a[0], "v_gamma": a[1], "length_to_radius": a[2],
-        "rv_scale": a[3], "exponent": a[8],
+        "kind": r.kind, "dim": spec.dim, "start": start, "best": best,
+        "improvement": improvement, "kept_original": kept, "n_eval": r.n_eval,
+        "free": r.free, "search": {"start": r.start, "best": r.best, "nx": search.nx,
+                                   "ny": search.ny},
+        "history": [h if np.isfinite(h) else None for h in r.history],
+        "a_gamma": v["a_gamma"], "v_gamma": v["v_gamma"],
+        "length_to_radius": v["length_to_radius"], "exponent": v["exponent"],
+        "v_radius": best_spec.vein.radius, "twist": v["twist"],
     }
 
 

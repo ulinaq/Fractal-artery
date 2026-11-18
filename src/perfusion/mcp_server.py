@@ -486,6 +486,30 @@ def tissue_analysis(dim: int = 3, shape: str = "kidney", generations: int = 4,
     return out
 
 
+def optimize_tissue_trees(dim: int = 2, shape: str = "kidney", kind: str = "tof_std",
+                          free=None, method: str = "local", maxiter: int = 15,
+                          generations: int = 4, fill: str = "cco", n_terminals: int = 40,
+                          extent: float = 1.0, seed: int = 0) -> dict:
+    """Optimise artery + vein trees for homogeneous perfusion **in a given organ**
+    (Paper D, organ-aware; 2-D or 3-D). Grows the organ's trees from its anatomical
+    roots with ``fill``, then searches the ``free`` tunables (``a_gamma``, ``v_gamma``,
+    ``length_to_radius``, ``exponent``, ``v_radius_scale``, 3-D ``twist``) to minimise
+    the homogeneity objective ``kind`` (``tof_std``, ``tof_max``, ``flux_std``,
+    ``flux_range``, ``flux_l2``). Returns the before/after objective and best values."""
+    from . import treegen
+
+    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
+                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
+                           _return_model=True)
+    spec = grown["_model"][0]
+    r = treegen.optimize(spec, kind=kind, free=free, method=method,
+                         maxiter=int(np.clip(maxiter, 1, 60)), seed=seed)
+    gain = (r.start - r.best) / r.start if np.isfinite(r.start) and r.start > 0 else 0.0
+    return {"dim": spec.dim, "shape": shape, "kind": kind, "start": r.start, "best": r.best,
+            "improvement": gain, "n_eval": r.n_eval, "free": r.free,
+            "values": {k: float(v) for k, v in r.values.items()}}
+
+
 def data_constrained_growth(hotspot_weight: float = 8.0, radius_frac: float = 0.22,
                             n_points: int = 500, seed: int = 0) -> dict:
     """Data-constrained vascular growth toward a target perfusion-density map.
@@ -790,6 +814,23 @@ def build_server():
                               artery_direction=artery_direction,
                               vein_direction=vein_direction, artery_angle=artery_angle,
                               vein_angle=vein_angle, solve=solve, seed=seed, extent=extent)
+
+    @server.tool()
+    def optimize_trees_in_tissue(dim: int = 2, shape: str = "kidney", kind: str = "tof_std",
+                                 free: list[str] | None = None, method: str = "local",
+                                 maxiter: int = 15, generations: int = 4, fill: str = "cco",
+                                 n_terminals: int = 40, extent: float = 1.0,
+                                 seed: int = 0) -> dict:
+        """Optimise artery + vein trees for homogeneous perfusion in a chosen organ
+        (2-D or 3-D; anatomical roots, space-filling `fill`). Varies `free` from
+        a_gamma, v_gamma, length_to_radius, exponent, v_radius_scale, twist (3-D) to
+        minimise `kind` (tof_std, tof_max, flux_std, flux_range, flux_l2); `method`
+        local (Nelder-Mead) or global (differential evolution). Returns before/after
+        objective and the best values."""
+        return optimize_tissue_trees(dim=dim, shape=shape, kind=kind, free=free,
+                                     method=method, maxiter=maxiter, generations=generations,
+                                     fill=fill, n_terminals=n_terminals, extent=extent,
+                                     seed=seed)
 
     @server.tool()
     def tissue_perfusion_analysis(dim: int = 3, shape: str = "kidney", generations: int = 4,

@@ -594,35 +594,45 @@ async function animate() {
 $("btn-animate").addEventListener("click", animate);
 
 // ── send the current setup to a project (2-D → workspace, 3-D → 3-D viewer) ─────
-async function toProject() {
+async function toProject(tag = "") {
   const btn = $("btn-project"); btn.disabled = true;
   status("creating project…");
   try {
     const shape = S.dim === 3 ? $("shape3").value : (S.polygon ? "custom" : $("shape2").value);
-    const made = await post("/explore/project",
-                            { ...request({ solve: false }), name: `explorer ${shape} (${S.dim}-D)` });
+    const name = `${tag ? tag + " " : ""}explorer ${shape} (${S.dim}-D)`;
+    const made = await post("/explore/project", { ...request({ solve: false }), name });
     status("project created", "ok");
     window.open(made.open, "_blank");
   } catch (e) { status(e.message, "err"); }
   finally { btn.disabled = false; }
 }
-$("btn-project").addEventListener("click", toProject);
+$("btn-project").addEventListener("click", () => toProject());
 
-// ── optimise (2-D default frame): loads the best asymmetry / L:R / exponent ────
+// ── optimise the current setup (organ, roots, fill; 2-D or 3-D) ────────────────
 async function optimise() {
   const btn = $("btn-opt"), label = btn.textContent;
+  const free = [...document.querySelectorAll(".optfree input:checked")]
+    .map((c) => c.value).filter((v) => v !== "twist" || S.dim === 3);
+  if (!free.length) { $("opt-info").textContent = "tick at least one parameter to optimise"; return; }
   btn.disabled = true; btn.textContent = "Optimising…";
-  $("opt-info").textContent = "searching…";
-  status("optimising… (this runs several solves)");
+  $("btn-opt-use").hidden = true;
+  $("opt-info").textContent = "searching… (each step grows + solves the trees)";
+  status("optimising…");
   try {
     const o = await post("/explore/optimize", {
-      kind: $("kind").value, method: $("method").value,
-      maxiter: num("maxiter") || 15, nx: 50, ny: 58,
+      ...request({ solve: true }), free, method: $("method").value, maxiter: num("maxiter") || 15,
     });
-    $("a-gamma").value = (+o.a_gamma).toFixed(2); $("v-gamma").value = (+o.v_gamma).toFixed(2);
+    $("a-gamma").value = (+o.a_gamma).toFixed(3); $("v-gamma").value = (+o.v_gamma).toFixed(3);
     $("ltr").value = o.length_to_radius; $("exponent").value = o.exponent;
-    $("opt-info").textContent =
-      `${o.kind}: ${fmt(o.start)} → ${fmt(o.best)} (${(o.improvement * 100).toFixed(1)}% better, ${o.n_eval} evals)`;
+    $("v-radius").value = (+o.v_radius).toFixed(3);
+    if (S.dim === 3) $("twist").value = o.twist;
+    const pct = (o.improvement * 100).toFixed(1);
+    $("opt-info").textContent = o.kept_original
+      ? `${o.kind}: no better setup at this resolution (${o.n_eval} solves) — kept yours. `
+        + "Loaded into the controls."
+      : `${o.kind}: ${fmt(o.start)} → ${fmt(o.best)} (${pct}% better at this resolution, `
+        + `${o.n_eval} solves). Loaded into the controls.`;
+    $("btn-opt-use").hidden = false;
     await evaluate();
     status("optimised", "ok");
   } catch (e) {
@@ -633,6 +643,7 @@ async function optimise() {
   }
 }
 $("btn-opt").addEventListener("click", optimise);
+$("btn-opt-use").addEventListener("click", () => toProject("optimised"));
 
 // shape dropdowns come from the organ library (GET /shapes)
 async function loadShapes() {

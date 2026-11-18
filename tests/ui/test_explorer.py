@@ -123,3 +123,38 @@ def test_3d_project_grow_flow_kinetics_and_oxygen_in_the_viewer(page, server):
     assert page.is_visible("#v3-k-row")
     assert page.is_hidden("#v3-play-row")
     assert not errors
+
+
+@pytest.mark.parametrize("dim", [2, 3])
+def test_optimise_in_the_organ_then_use_it_in_the_simulation(page, server, dim):
+    """Optimise tunes the current organ setup (2-D or 3-D), loads the best values,
+    and '📤 Use optimised trees in simulation' opens them as a runnable project."""
+    page.goto(server + "/explorer.html")
+    _ready(page)
+    if dim == 3:
+        page.click("#dim-3")
+        page.wait_for_timeout(300)
+        _ready(page)
+    page.select_option("#fill", "cco")
+    _ready(page)
+    page.click("#opt-card summary")
+    page.fill("#maxiter", "3")
+    before = page.input_value("#a-gamma")
+    page.click("#btn-opt")
+    page.wait_for_function("document.querySelector('#opt-info').textContent.includes('Loaded')",
+                           timeout=180000)
+    info = page.inner_text("#opt-info")
+    assert "% better" in info or "kept yours" in info
+    assert page.is_visible("#btn-opt-use")
+    assert page.input_value("#a-gamma") != before or "kept yours" in info
+    with page.context.expect_page() as new:
+        page.click("#btn-opt-use")
+    sim = new.value
+    sim.wait_for_load_state()
+    want = "/?project=" if dim == 2 else "/viewer3d.html?project="
+    assert want in sim.url
+    if dim == 2:                                  # the workspace opened it, trees editable
+        wait_status(sim, "opened")
+        assert "artery segments" in sim.inner_text("#node-info")
+    else:
+        sim.wait_for_selector("#proj-card:not([hidden])")
