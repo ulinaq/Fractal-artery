@@ -334,6 +334,58 @@ def solve_direct_model(project, use_vessels, rho_c=0.0):
     return art, ven, sol
 
 
+# -- batch experiments --------------------------------------------------------- #
+# input -> where it lives on the project; r_min_frac only reshapes the 2-D default trees
+EXPERIMENT_PARAMS = {"p_in": "params", "p_out": "params", "mu": "params",
+                     "permeability": "grid", "r_min_frac": "params"}
+_POSITIVE = {"mu", "permeability", "r_min_frac"}
+
+
+def check_experiment(project, param: str, values) -> None:
+    """Reject an experiment that cannot run, before it is queued (``InputError``)."""
+    if param not in EXPERIMENT_PARAMS:
+        raise InputError(f"param must be one of {sorted(EXPERIMENT_PARAMS)}")
+    if param == "r_min_frac" and is_3d(project):
+        raise InputError("r_min_frac only shapes the 2-D default trees; on a 3-D project "
+                         "vary p_in, p_out, mu or permeability")
+    vals = [float(v) for v in values]
+    if not all(np.isfinite(vals)):
+        raise InputError("experiment values must be finite numbers")
+    if param in _POSITIVE and min(vals) <= 0:
+        raise InputError(f"{param} must be positive")
+    p_in, p_out = project.params.p_in, project.params.p_out
+    if param in ("p_in", "p_out") and any(
+            (v if param == "p_in" else p_in) == (p_out if param == "p_in" else v)
+            for v in vals):
+        raise InputError("a value makes p_in equal p_out — no pressure drop to drive flow")
+
+
+def project_with(project, param: str, value: float):
+    """A copy of ``project`` with one input changed (the stored project is untouched)."""
+    if EXPERIMENT_PARAMS[param] == "grid":
+        return replace(project, grid=project.grid.model_copy(update={param: float(value)}))
+    return replace(project, params=project.params.model_copy(update={param: float(value)}))
+
+
+def run_experiment(store, project, req) -> list[dict]:
+    """Solve the project once per value of ``req.param`` and keep each result as a
+    snapshot named ``"<param> = <value>"``, tagged with this experiment (so the batch
+    lists as a sweep and every member can be compared). The project's own current
+    result is left as it was."""
+    import uuid
+
+    check_experiment(project, req.param, req.values)
+    eid = uuid.uuid4().hex[:8]
+    name = req.name or f"{req.param} sweep"
+    out = []
+    for v in req.values:
+        result = solve(project_with(project, req.param, v), use_vessels=True)
+        out.append(store.save_snapshot_result(
+            project, result, f"{req.param} = {v:g}",
+            meta={"experiment": eid, "name": name, "param": req.param, "value": float(v)}))
+    return out
+
+
 def run_project(store, project, req: RunRequest) -> None:
     """Execute the simulation (hybrid Darcy or direct-connection) and persist it."""
     if getattr(req, "model", "hybrid") == "direct":

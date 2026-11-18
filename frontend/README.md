@@ -66,7 +66,9 @@ no separate dev server.
 - **Compare runs (A/B)** (`compare.js`, Result tab and 3-D viewer) — 📌 Keep the
   current result as a named baseline, change something and re-run, then Compare: a
   table of what changed (inflow, MTT, …, field means) and Δ pressure / flux / TOF maps
-  on a diverging ramp (blue = lower than the baseline, red = higher).
+  on a diverging ramp (blue = lower than the baseline, red = higher). **Batch
+  experiment**: pick an input (p_in, p_out, μ, K; tree depth in 2-D) and values, ▶ Run
+  batch — every run is kept and listed in a sweep table; click a row to compare.
 - **Flow video** — play/scrub an animation of a contrast bolus washing through
   the tissue (`POST/GET /projects/{id}/tracer`), and download it as an animated
   GIF (`tracer.gif`, needs the `image` extra) or MP4 (`tracer.mp4`, needs the

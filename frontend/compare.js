@@ -32,9 +32,23 @@ export function compareHtml(c) {
     + `<table class="cmp"><tr><th></th><th>baseline</th><th>now</th><th>Δ</th></tr>${rows}${fields}</table>${note}`;
 }
 
+// a batch experiment as a sweep table: one row per value (click a row to pick it as
+// the baseline to compare against)
+export function sweepHtml(e) {
+  const cols = [["arterial_inflow", "inflow"], ["mtt", "MTT"], ["cth", "CTH"], ["flux_mean", "flux mean"]];
+  const head = cols.map(([, l]) => `<th>${l}</th>`).join("");
+  const rows = e.rows.map((r) => `<tr data-snap="${r.snapshot}" title="compare against this run">`
+    + `<td>${fmt(r.value)}</td>${cols.map(([k]) => `<td>${fmt(r.summary && r.summary[k])}</td>`).join("")}</tr>`)
+    .join("");
+  return `<p class="muted"><b>${e.name}</b> <button class="ghost mini-btn" data-del-exp="${e.id}" `
+    + `title="delete this experiment and its runs">✕</button></p>`
+    + `<table class="cmp sweep"><tr><th>${e.param}</th>${head}</tr>${rows}</table>`;
+}
+
 // Wire a compare panel. `ids` names the elements: name (text input), keep (button),
 // select, run (button), del (button), out (div), maps (row of Δ-map buttons with
-// data-delta="pressure|flux|tof"). `onMap(name, sid)` shows a difference map.
+// data-delta="pressure|flux|tof"), and for batch experiments bparam (select), bvals
+// (text: the values), brun (button), bout (div). `onMap(name, sid)` shows a Δ map.
 export function createCompare({ projectId, ids, onMap, onInfo }) {
   const $ = (id) => document.getElementById(id);
   const el = Object.fromEntries(Object.entries(ids).map(([k, id]) => [k, $(id)]));
@@ -84,15 +98,55 @@ export function createCompare({ projectId, ids, onMap, onInfo }) {
     try {
       await call("DELETE", `snapshots/${el.select.value}`);
       el.out.innerHTML = ""; el.maps.hidden = true;
-      await refresh();
+      await refresh(); await refreshBatch();
     } catch (e) { info(e.message, true); }
   }
 
+  async function refreshBatch() {
+    if (!el.bout || !projectId()) return;
+    const { experiments } = await call("GET", "experiments");
+    el.bout.innerHTML = experiments.map(sweepHtml).join("");
+    el.bout.querySelectorAll("tr[data-snap]").forEach((tr) => tr.addEventListener("click", async () => {
+      await refresh(tr.dataset.snap);
+      await compare();
+    }));
+    el.bout.querySelectorAll("[data-del-exp]").forEach((b) => b.addEventListener("click", async () => {
+      try {
+        await call("DELETE", `experiments/${b.dataset.delExp}`);
+        await refresh(); await refreshBatch();
+      } catch (e) { info(e.message, true); }
+    }));
+  }
+
+  async function runBatch() {
+    const values = el.bvals.value.split(/[,\s]+/).filter(Boolean).map(Number);
+    if (values.length < 2 || values.some((v) => !Number.isFinite(v))) {
+      info("list at least two numbers, e.g. 5, 10, 20", true); return;
+    }
+    el.brun.disabled = true;
+    info(`running ${values.length} solves…`);
+    try {
+      const job = await call("POST", "experiments", { param: el.bparam.value, values });
+      let st = job;
+      while (st.state !== "done" && st.state !== "error") {
+        await new Promise((r) => setTimeout(r, 400));
+        st = await (await fetch(`/jobs/${job.id}`)).json();
+      }
+      if (st.state === "error") { info(st.error || "experiment failed", true); return; }
+      await refresh(); await refreshBatch();
+      info(`${values.length} runs kept — click a row to compare against it`);
+    } catch (e) { info(e.message, true); } finally { el.brun.disabled = false; }
+  }
+
+  if (el.brun) el.brun.addEventListener("click", runBatch);
   el.keep.addEventListener("click", keep);
   el.run.addEventListener("click", compare);
   el.del.addEventListener("click", remove);
   el.select.addEventListener("change", () => { el.out.innerHTML = ""; el.maps.hidden = true; });
   el.maps.querySelectorAll("[data-delta]").forEach((b) => b.addEventListener("click",
     () => onMap(b.dataset.delta, el.select.value)));
-  return { refresh, compare, selected: () => el.select.value };
+  return {
+    refresh: async (id) => { await refresh(id); await refreshBatch(); },
+    compare, selected: () => el.select.value,
+  };
 }

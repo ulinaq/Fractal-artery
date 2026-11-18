@@ -714,8 +714,11 @@ Editing 3-D trees by hand is now done too (§11.4).
   summary deltas + per-field change stats, `core.compare`) and draw signed Δ maps with a
   diverging ramp — 2-D Result tab and 3-D viewer (`frontend/compare.js`); MCP
   `compare_scenarios` (two settings on the same organ trees).
-- **Batch experiments** — `POST /experiments` (§3): a parameter grid run as one job, its
-  results kept as snapshots for comparison — §9.5. *M.*
+- ✅ ~~**Batch experiments**~~ — `POST …/experiments {param, values}`: one job that
+  re-solves the project per value (p_in, p_out, μ, K; r_min_frac in 2-D) and keeps each
+  result as a snapshot (`GET …/experiments` → sweep table; click a row to compare
+  against it). In the Compare card of the workspace and the 3-D viewer; MCP
+  `experiment_in_tissue`. *Next:* two-parameter grids.
 - ✅ ~~**Server-side MP4** export of the flow video~~ — `GET …/tracer.mp4` (`video` extra:
   imageio-ffmpeg bundles ffmpeg), ↓ MP4 next to ↓ GIF, also in the export bundle.
 - ✅ ~~**3-D flow video**~~ — tracer transport on the voxel bed, played back in the

@@ -134,8 +134,10 @@ class ProjectStore:
                 """CREATE TABLE IF NOT EXISTS snapshots (
                        id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
                        name TEXT NOT NULL, created_at TEXT NOT NULL,
-                       summary TEXT )"""
+                       summary TEXT, meta TEXT )"""
             )
+            if "meta" not in {r["name"] for r in con.execute("PRAGMA table_info(snapshots)")}:
+                con.execute("ALTER TABLE snapshots ADD COLUMN meta TEXT")
             # migrate DBs created before these columns existed
             cols = {r["name"] for r in con.execute("PRAGMA table_info(projects)")}
             for col in ("regions", "lesions", "hotspots", "inlets", "outlets"):
@@ -355,21 +357,50 @@ class ProjectStore:
             raise FileNotFoundError("no field result to snapshot")
         sid = uuid.uuid4().hex[:10]
         shutil.copyfile(src, self.snapshot_path(project.id, sid))
+        return self._insert_snapshot(project.id, sid, name, project.summary)
+
+    def save_snapshot_result(self, project: Project, result, name: str,
+                             meta: dict | None = None) -> dict:
+        """Keep a freshly solved result (not the project's current one) as a snapshot —
+        a batch experiment's member; ``meta`` tags it (experiment id, param, value)."""
+        sid = uuid.uuid4().hex[:10]
+        io.save_results(result, self.snapshot_path(project.id, sid))
+        return self._insert_snapshot(project.id, sid, name, io.results_summary(result), meta)
+
+    def _insert_snapshot(self, pid, sid, name, summary, meta=None) -> dict:
         with self._txn() as con:
             n = con.execute("SELECT COUNT(*) FROM snapshots WHERE project_id=?",
-                            (project.id,)).fetchone()[0]
-            row = {"id": sid, "project_id": project.id,
+                            (pid,)).fetchone()[0]
+            row = {"id": sid, "project_id": pid,
                    "name": (name or "").strip() or f"run {n + 1}", "created_at": _now(),
-                   "summary": json.dumps(project.summary)}
-            con.execute("INSERT INTO snapshots VALUES (:id, :project_id, :name, "
-                        ":created_at, :summary)", row)
+                   "summary": json.dumps(summary),
+                   "meta": json.dumps(meta) if meta else None}
+            con.execute("INSERT INTO snapshots (id, project_id, name, created_at, summary, "
+                        "meta) VALUES (:id, :project_id, :name, :created_at, :summary, "
+                        ":meta)", row)
         return self._snapshot_info(row)
 
     @staticmethod
     def _snapshot_info(row) -> dict:
-        summary = row["summary"]
+        summary, meta = row["summary"], row["meta"]
         return {"id": row["id"], "name": row["name"], "created_at": row["created_at"],
-                "summary": json.loads(summary) if summary else None}
+                "summary": json.loads(summary) if summary else None,
+                "meta": json.loads(meta) if meta else None}
+
+    def list_experiments(self, pid: str) -> list[dict]:
+        """Batch experiments of a project: their snapshots grouped by experiment id, in
+        run order — ``{id, name, param, rows: [{snapshot, value, summary}]}``."""
+        groups: dict[str, dict] = {}
+        for s in self.list_snapshots(pid):
+            m = s["meta"] or {}
+            if "experiment" not in m:
+                continue
+            g = groups.setdefault(m["experiment"], {"id": m["experiment"],
+                                                    "name": m.get("name"),
+                                                    "param": m["param"], "rows": []})
+            g["rows"].append({"snapshot": s["id"], "value": m["value"],
+                              "summary": s["summary"]})
+        return list(groups.values())
 
     def list_snapshots(self, pid: str) -> list[dict]:
         with self._txn() as con:

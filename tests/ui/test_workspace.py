@@ -134,3 +134,24 @@ def test_compare_runs_with_a_kept_baseline(page, server):
     ramp = page.eval_on_selector("#cb-ramp", "e => e.style.background")
     assert "rgb(33, 102, 172)" in ramp                           # the diverging ramp
     assert not page.errors
+
+
+def test_batch_experiment_sweep_table(page, server):
+    """Run a p_in sweep from the Result tab: the sweep table lists each value with its
+    inflow, and clicking a row compares against that run."""
+    _new_project(page, server)
+    page.click("#btn-run")
+    wait_status(page, "solved", "failed", timeout=120000)
+    page.select_option("#cmp-bparam", "p_in")
+    page.fill("#cmp-bvals", "5, 20")
+    page.click("#cmp-brun")
+    page.wait_for_function("document.querySelector('#cmp-info').textContent.includes('runs kept')",
+                           timeout=120000)
+    rows = page.locator("#cmp-bout tr[data-snap]")
+    assert rows.count() == 2
+    assert page.inner_text("#cmp-snap").split("\n") == ["p_in = 5", "p_in = 20"]
+    rows.nth(1).click()
+    page.wait_for_selector("#cmp-out table.cmp")
+    assert "p_in = 20" in page.inner_text("#cmp-out")
+    assert page.input_value("#cmp-snap") == rows.nth(1).get_attribute("data-snap")
+    assert not page.errors

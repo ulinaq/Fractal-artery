@@ -504,6 +504,15 @@ class JobInfo(BaseModel):
     updated_at: str | None = None
 
 
+class ExperimentRequest(BaseModel):
+    """A batch experiment: re-solve the project once per value of one input and keep
+    each result as a baseline snapshot (``"<param> = <value>"``) for comparison."""
+
+    param: str = "p_in"                  # p_in | p_out | mu | permeability | r_min_frac (2-D)
+    values: list[float] = Field(..., min_length=2, max_length=12)
+    name: str | None = Field(None, max_length=80)
+
+
 class SnapshotIn(BaseModel):
     """Keep the current result as a named baseline (default name: "run N")."""
 

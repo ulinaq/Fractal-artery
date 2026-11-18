@@ -633,6 +633,75 @@ def test_snapshot_and_compare_runs(client):
     assert "no tissue field" in r.json()["detail"]
 
 
+def test_batch_experiment_sweeps_p_in(client):
+    """A p_in sweep as one job: one snapshot per value, grouped as an experiment; the
+    linear model's inflow scales with the drop p_in − p_out; the current result and
+    the stored parameters are untouched; members compare like any baseline."""
+    pid = client.post("/projects", json={"name": "sweep", "grid": SMALL_GRID,
+                                         "params": {**FAST_PARAMS, "p_in": 10, "p_out": 0}}
+                      ).json()["id"]
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    before = client.get(f"/projects/{pid}/results").json()
+
+    r = client.post(f"/projects/{pid}/experiments",
+                    json={"param": "p_in", "values": [5, 10, 20], "name": "pressure"})
+    assert r.status_code == 200, r.text
+    assert _wait_for_job(client, r.json()["id"], timeout=120)["state"] == "done"
+    exps = client.get(f"/projects/{pid}/experiments").json()["experiments"]
+    assert len(exps) == 1
+    exp = exps[0]
+    assert exp["name"] == "pressure"
+    assert exp["param"] == "p_in"
+    assert [row["value"] for row in exp["rows"]] == [5, 10, 20]
+    q = [row["summary"]["arterial_inflow"] for row in exp["rows"]]
+    assert q[1] == pytest.approx(before["arterial_inflow"], rel=1e-9)    # = current run
+    assert q[0] == pytest.approx(0.5 * q[1], rel=1e-9)
+    assert q[2] == pytest.approx(2.0 * q[1], rel=1e-9)
+
+    assert client.get(f"/projects/{pid}/results").json() == before        # untouched
+    assert client.get(f"/projects/{pid}").json()["params"]["p_in"] == 10
+    names = [sn["name"] for sn in client.get(f"/projects/{pid}/snapshots").json()["snapshots"]]
+    assert names == ["p_in = 5", "p_in = 10", "p_in = 20"]
+    cmp = client.get(f"/projects/{pid}/compare?snapshot={exp['rows'][2]['snapshot']}").json()
+    rows = {row["key"]: row for row in cmp["summary"]}
+    assert rows["arterial_inflow"]["rel"] == pytest.approx(-0.5, rel=1e-9)
+
+    assert client.delete(f"/projects/{pid}/experiments/{exp['id']}").status_code == 204
+    assert client.get(f"/projects/{pid}/experiments").json()["experiments"] == []
+    assert client.get(f"/projects/{pid}/snapshots").json()["snapshots"] == []
+    assert client.delete(f"/projects/{pid}/experiments/{exp['id']}").status_code == 404
+
+
+def test_batch_experiment_validation(client):
+    pid = client.post("/projects", json={"name": "bad", "grid": SMALL_GRID,
+                                         "params": {**FAST_PARAMS, "p_out": 0}}).json()["id"]
+    for body, msg in [({"param": "hematocrit", "values": [0.3, 0.4]}, "param must be"),
+                      ({"param": "mu", "values": [1, -1]}, "positive"),
+                      ({"param": "p_in", "values": [0, 10]}, "p_in equal p_out")]:
+        r = client.post(f"/projects/{pid}/experiments", json=body)
+        assert r.status_code == 422, body
+        assert msg in r.json()["detail"]
+    r = client.post(f"/projects/{pid}/experiments", json={"param": "p_in", "values": [5]})
+    assert r.status_code == 422                                   # at least two values
+
+
+def test_3d_batch_experiment_sweeps_permeability(client):
+    """On a 3-D project: a K sweep (the bed gets more permeable → more inflow);
+    r_min_frac is 2-D only."""
+    pid = _explorer_project(client, 3)["id"]
+    r = client.post(f"/projects/{pid}/experiments",
+                    json={"param": "r_min_frac", "values": [0.1, 0.2]})
+    assert r.status_code == 422
+    r = client.post(f"/projects/{pid}/experiments",
+                    json={"param": "permeability", "values": [0.5, 1, 2]})
+    assert _wait_for_job(client, r.json()["id"], timeout=120)["state"] == "done"
+    rows = client.get(f"/projects/{pid}/experiments").json()["experiments"][0]["rows"]
+    q = [row["summary"]["arterial_inflow"] for row in rows]
+    assert q[0] < q[1] < q[2]
+    assert client.get(f"/projects/{pid}").json()["has_result"] is False   # no run needed
+
+
 def test_document_roundtrip_basic(client):
     # a plain project with params, a tissue region and I/O points
     pid = client.post("/projects", json={"name": "my work", "grid": SMALL_GRID,

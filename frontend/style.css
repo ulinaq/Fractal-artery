@@ -245,3 +245,6 @@ table.cmp th, table.cmp td { text-align: right; padding: 2px 4px; border-bottom:
 table.cmp th:first-child, table.cmp td:first-child { text-align: left; }
 table.cmp td.dn { color: #2563eb; font-weight: 600; }
 table.cmp td.up { color: #c2410c; font-weight: 600; }
+table.cmp.sweep tr[data-snap] { cursor: pointer; }
+table.cmp.sweep tr[data-snap]:hover td { background: rgba(37, 99, 235, 0.08); }
+.mini-btn { padding: 0 6px; font-size: 11px; margin: 0 0 0 6px; }

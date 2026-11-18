@@ -80,7 +80,8 @@ right-drag / Space+drag = pan, ＋ − ⤢ buttons).
   video** (+ GIF / MP4), transit-time distribution, tracer-kinetic fits and maps,
   pulsatile, multi-compartment, oxygen and uncertainty analyses, export, and **Compare
   runs (A/B)**: keep a result as a baseline, change something, re-run, and see what
-  changed plus Δ maps (also in the 3-D viewer).
+  changed plus Δ maps (also in the 3-D viewer) — or run a **batch experiment** (one
+  input over several values in one job) and compare its runs from a sweep table.
 
 🐸 **Frog** loads a real segmented frog-tongue system in one click. Set a New
 project's **domain size** and grid in Parameters. Projects are shareable by URL
@@ -164,7 +165,8 @@ calibration on an organ's 2-D/3-D model), `prune_vessel_tree`, `data_constrained
 `direct_model_in_tissue` (the direct model in a 2-D/3-D organ), `export_tissue_fields`
 (an organ model's fields + vessels as CSV / VTI / VTP files, optionally the flow video),
 `pulsatile_windkessel`, `multicompartment_perfusion`, `oxygen_extraction_map`,
-`compare_scenarios` (A/B: two settings on the same organ trees), `heterogeneous_perfusion_lesion`, `lesion_in_tissue` (a lesion's perfusion deficit in a
+`compare_scenarios` (A/B: two settings on the same organ trees), `experiment_in_tissue`
+(a parameter sweep in an organ), `heterogeneous_perfusion_lesion`, `lesion_in_tissue` (a lesion's perfusion deficit in a
 2-D/3-D organ), `anisotropic_perfusion_bed`,
 `calibrate_parameter_to_flow`, `uncertainty_quantification`,
 `sobol_sensitivity_indices`. The bundled [`.mcp.json`](.mcp.json) registers it for

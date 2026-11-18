@@ -388,7 +388,8 @@ const editor = PROJECT ? createEditor3d({
 const compare = PROJECT ? createCompare({
   projectId: () => PROJECT,
   ids: { name: "v3-cmp-name", keep: "v3-cmp-keep", select: "v3-cmp-snap", run: "v3-cmp-run",
-         del: "v3-cmp-del", out: "v3-cmp-out", maps: "v3-cmp-maps" },
+         del: "v3-cmp-del", out: "v3-cmp-out", maps: "v3-cmp-maps",
+         bparam: "v3-cmp-bparam", bvals: "v3-cmp-bvals", brun: "v3-cmp-brun", bout: "v3-cmp-bout" },
   onMap: (name) => { $("v3-field").value = `d_${name}`; loadProject().catch(() => {}); },
   onInfo: (msg, err) => {
     $("v3-cmp-info").textContent = msg;

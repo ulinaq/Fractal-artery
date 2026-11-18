@@ -131,6 +131,7 @@ function resetGeometry() {
   state.network = null; state.fieldData = null; state.direct = null;
   $("summary").innerHTML = ""; $("run-info").textContent = "";   // previous project's result
   $("cmp-out").innerHTML = ""; $("cmp-info").textContent = ""; $("cmp-maps").hidden = true;
+  $("cmp-bout").innerHTML = "";
   $("cmp-snap").innerHTML = '<option value="">no baseline yet</option>';
   ["cmp-snap", "cmp-run", "cmp-del"].forEach((id) => ($(id).disabled = true));
   clearEditDirty(); clearTissueDirty();
@@ -585,7 +586,8 @@ async function openProject(id) {
 const compare = createCompare({
   projectId: () => state.project,
   ids: { name: "cmp-name", keep: "cmp-keep", select: "cmp-snap", run: "cmp-run",
-         del: "cmp-del", out: "cmp-out", maps: "cmp-maps" },
+         del: "cmp-del", out: "cmp-out", maps: "cmp-maps",
+         bparam: "cmp-bparam", bvals: "cmp-bvals", brun: "cmp-brun", bout: "cmp-bout" },
   onMap: (name, sid) => loadDeltaField(name, sid).catch((e) => status(e.message, "err")),
   onInfo: (msg, err) => { $("cmp-info").textContent = msg; $("cmp-info").style.color = err ? "#b91c1c" : ""; },
 });
