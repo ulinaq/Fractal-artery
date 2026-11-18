@@ -428,6 +428,14 @@ Total compliance `C_total = 2π·compliance·Σ(r² L)`.
 surrogate: variance `V = Σ_{α≠0} c_α²`, `S1_i = Σ_{α: supp={i}} c_α²/V`,
 `ST_i = Σ_{α: i∈supp} c_α²/V` (so `ST ≥ S1`), with the fit `R²`.
 
+**Sweep sensitivity (`core.compare`)** — a batch experiment's elasticity of a quantity
+`y` to an input `x` is the least-squares slope `s = d ln y / d ln x` of `ln y` on `ln x`
+(`log_sensitivity`; `y ∝ x^s`, so 1 = proportional, 0 = insensitive). For a two-input
+grid `y(a_i, b_j)`, `grid_sensitivity` averages the slope along each axis over the other
+input's values. In the linear hybrid model inflow is exactly ∝ Δp (`s = 1`); μ scales only
+the vessels and K only the bed, so with `Q ∝ 1/(μ R_vessels + R_bed/K)` their
+elasticities give each part's share of the resistance: `−s_μ + s_K = 1` (locally).
+
 **Inverse / calibration (`inverse.py`)** — bounded 1-D search (`minimize_scalar`) over
 forward solves to recover an input (`K`, `p_in`, `μ`, …) so a measured QoI matches a
 target.

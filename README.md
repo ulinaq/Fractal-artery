@@ -85,7 +85,8 @@ right-drag / Space+drag = pan, ＋ − ⤢ buttons).
   pulsatile, multi-compartment, oxygen and uncertainty analyses, export, and **Compare
   runs (A/B)**: keep a result as a baseline, change something, re-run, and see what
   changed plus Δ maps (also in the 3-D viewer) — or run a **batch experiment** (one
-  input over several values in one job) and compare its runs from a sweep table; and
+  input over several values, or a **grid** over two inputs, in one job) and compare its
+  runs from a sweep table / shaded grid with each input's sensitivity; and
   **Fit to DCE-MRI**: paste a measured tissue curve + AIF and fit several inputs at once
   (flow-setting p_in, blood-volume porosity, K, μ) with error bars.
 
@@ -175,7 +176,7 @@ calibration on an organ's 2-D/3-D model), `prune_vessel_tree`, `data_constrained
 flow round a blocked branch through vessel loops), `shear_thinning_blood` (Newtonian vs
 Carreau blood: inflow, resistance and the flow–pressure exponent), `compare_scenarios` (A/B: two
 settings on the same organ trees), `experiment_in_tissue`
-(a parameter sweep in an organ), `heterogeneous_perfusion_lesion`, `lesion_in_tissue` (a lesion's perfusion deficit in a
+(a parameter sweep or two-input grid in an organ, with sensitivities), `heterogeneous_perfusion_lesion`, `lesion_in_tissue` (a lesion's perfusion deficit in a
 2-D/3-D organ), `anisotropic_perfusion_bed`,
 `calibrate_parameter_to_flow`, `uncertainty_quantification`,
 `sobol_sensitivity_indices`. The bundled [`.mcp.json`](.mcp.json) registers it for

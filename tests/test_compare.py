@@ -50,3 +50,27 @@ def test_compare_results_across_grids_falls_back_to_the_summary():
     assert out["same_grid"] is False
     assert out["fields"] == {}
     assert out["summary"][0]["rel"] == pytest.approx(1.0)
+
+
+def test_log_sensitivity_recovers_power_laws():
+    from perfusion.core.compare import log_sensitivity
+
+    x = [1.0, 2.0, 4.0, 8.0]
+    assert log_sensitivity(x, [3 * v**1.5 for v in x]) == pytest.approx(1.5)
+    assert log_sensitivity(x, [2.0 / v for v in x]) == pytest.approx(-1.0)
+    assert log_sensitivity(x, [7.0] * 4) == pytest.approx(0.0, abs=1e-12)
+    # non-positive / missing outputs are skipped; < 2 usable inputs -> None
+    assert log_sensitivity(x, [None, 2.0, 4.0, -1]) == pytest.approx(1.0)
+    assert log_sensitivity([1.0, 1.0], [1.0, 2.0]) is None
+    assert log_sensitivity([0.0, -1.0], [1.0, 2.0]) is None
+
+
+def test_grid_sensitivity_separates_the_two_inputs():
+    from perfusion.core.compare import grid_sensitivity
+
+    a, b = [1.0, 2.0, 5.0], [0.5, 1.0, 3.0, 9.0]
+    table = [[x**2 * y**-0.5 for y in b] for x in a]          # y = a^2 b^-1/2
+    s1, s2 = grid_sensitivity(a, b, table)
+    assert s1 == pytest.approx(2.0)
+    assert s2 == pytest.approx(-0.5)
+    assert grid_sensitivity(a, b, [[None] * 4] * 3) == (None, None)

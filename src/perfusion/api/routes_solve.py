@@ -77,10 +77,12 @@ def get_dce_fit(pid: str, project: Project = Depends(get_project),
 def run_experiment(body: ExperimentRequest, project: Project = Depends(get_project),
                    jobs=Depends(get_jobs)) -> JobInfo:
     """A batch experiment as one job: re-solve once per value of ``param`` (p_in,
-    p_out, mu, permeability; r_min_frac on 2-D) and keep each result as a snapshot to
-    compare (``GET …/experiments`` lists the sweep). The current result is untouched."""
+    p_out, mu, permeability; r_min_frac on 2-D) — or per combination with ``param2`` /
+    ``values2`` (a grid, ≤ 48 solves) — and keep each result as a snapshot to compare
+    (``GET …/experiments`` lists the sweep / grid with its sensitivities). The current
+    result is untouched."""
     try:
-        runner.check_experiment(project, body.param, body.values)
+        runner.check_experiment(project, body.param, body.values, body.param2, body.values2)
     except runner.InputError as e:
         raise HTTPException(422, str(e)) from None
     jid = jobs.submit(project.id, "experiment", body.model_dump())

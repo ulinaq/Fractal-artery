@@ -75,7 +75,10 @@ no separate dev server.
   table of what changed (inflow, MTT, …, field means) and Δ pressure / flux / TOF maps
   on a diverging ramp (blue = lower than the baseline, red = higher). **Batch
   experiment**: pick an input (p_in, p_out, μ, K; tree depth in 2-D) and values, ▶ Run
-  batch — every run is kept and listed in a sweep table; click a row to compare.
+  batch — every run is kept and listed in a sweep table; click a row to compare. Pick
+  a second input (× …) for a **grid**: every combination is solved and shown as a
+  shaded matrix of inflow / MTT / CTH / flux (picker), click a cell to compare; each
+  experiment lists its sensitivities (`inflow ∝ p_in^1.00 · μ^-1.00`).
 - **Fit to DCE-MRI** (`dcefit.js`, Result tab and the 3-D viewer's analyses card) —
   paste `t, tissue, aif` CSV (or take this project's own tracer curve), tick the inputs
   to fit with bounds, Fit: values ± 1σ, R², warnings for correlated / bound-limited
