@@ -151,6 +151,19 @@
           </div>
         </div>
       </section>
+      <section class="card" id="v3-reg-card" hidden>
+        <h2>Lesions &amp; hotspots</h2>
+        <p class="muted">Spheres in the tissue. A <b style="color:#f59e0b">lesion</b> lowers the
+          permeability K inside it (re-run to see the perfusion deficit); a
+          <b style="color:#c084fc">hotspot</b> raises growth demand, so 🌱 Grow puts more vessels
+          there. Drag a sphere's centre dot to move it (rotate the view to move it in depth).</p>
+        <div class="row">
+          <button id="v3-add-lesion" class="ghost">＋ lesion</button>
+          <button id="v3-add-hotspot" class="ghost">＋ hotspot</button>
+        </div>
+        <div id="v3-reg-list"></div>
+        <p class="muted" id="v3-reg-info"></p>
+      </section>
       <details class="card" id="v3-an-card" hidden>
         <summary>Uncertainty &amp; calibration</summary>
         <p class="muted">Re-solve the 3-D model many times. The trees stay fixed and one

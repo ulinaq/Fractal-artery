@@ -6,6 +6,7 @@ import { viridisCss } from "./palette.js";
 import { createViewport } from "./viewport.js";
 import { uqHtml } from "./uqview.js";
 import { createEditor3d } from "./edit3d.js";
+import { createRegions3d } from "./regions3d.js";
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("view3d");
@@ -111,6 +112,7 @@ function show3dProject() {
   $("v3-run").textContent = data.has_result ? "↻ Re-run 3-D simulation" : "▶ Run 3-D simulation";
   $("v3-flow-card").hidden = !data.has_result;    // flow needs a solved field
   $("v3-tree-card").hidden = false;
+  if ($("v3-reg-card").hidden) { $("v3-reg-card").hidden = false; regions.load(); }
 }
 
 // the active bolus animation: tissue voxels (hybrid) or network elements (direct)
@@ -376,8 +378,21 @@ const editor = PROJECT ? createEditor3d({
     await loadProject();
   },
 }) : null;
+// Lesions & hotspots (spheres) on a 3-D project (see regions3d.js)
+const regions = PROJECT ? createRegions3d({
+  projectId: PROJECT, project, unproject, scene: () => data,
+  onInfo: (msg, err) => {
+    $("v3-reg-info").textContent = msg;
+    $("v3-reg-info").style.color = err ? "#b91c1c" : "";
+  },
+  onSaved: async () => { $("v3-field").value = "pressure"; await loadProject(); },
+}) : null;
+if (regions) {
+  $("v3-add-lesion").addEventListener("click", () => regions.add("lesion"));
+  $("v3-add-hotspot").addEventListener("click", () => regions.add("hotspot"));
+}
 if (editor) {
-  window.viewer3d = { editor };                   // hook for browser tests / tooling
+  window.viewer3d = { editor, regions, project };                   // hook for browser tests / tooling
   $("v3-edit").addEventListener("change", async (e) => {
     if (e.target.checked) { view.spin = false; $("spin").checked = false; }
     try { await editor.setActive(e.target.checked); }
@@ -434,6 +449,7 @@ function render() {
     }
   }
 
+  if (regions && data.dim === 3) regions.draw(ctx);
   if (editor && editor.active) {
     editor.draw(ctx, zs);
   } else if (data.direct && $("show-trees").checked) {
@@ -506,10 +522,16 @@ canvas.addEventListener("pointerdown", (e) => {
   if (e.button !== 0) return;
   view.spin = false; $("spin").checked = false;
   if (editor && editor.pointerDown(e)) return;        // picked / dragging a node
+  if (regions && data && data.dim === 3 && regions.pointerDown(canvas, e)) return;
   dragging = true; lastX = e.clientX; lastY = e.clientY; });
-window.addEventListener("pointerup", () => { dragging = false; if (editor) editor.pointerUp(); });
+window.addEventListener("pointerup", () => {
+  dragging = false;
+  if (editor) editor.pointerUp();
+  if (regions) regions.pointerUp();
+});
 window.addEventListener("pointermove", (e) => {
   if (editor && editor.pointerMove(e)) return;
+  if (regions && regions.pointerMove(canvas, e)) return;
   if (!dragging) return;
   view.yaw += (e.clientX - lastX) * 0.01;
   view.pitch += (e.clientY - lastY) * 0.01;

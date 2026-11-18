@@ -195,10 +195,13 @@ def grid_for(spec: GenSpec, mask, domain):
 
 
 def solve(spec: GenSpec, art: Network, ven: Network, mask, domain,
-          p_in: float = 10.0, p_out: float = 0.0):
-    """Solve the hybrid perfusion model on the tissue (2-D or 3-D)."""
+          p_in: float = 10.0, p_out: float = 0.0, permeability=None):
+    """Solve the hybrid perfusion model on the tissue (2-D or 3-D); ``permeability``
+    (a per-cell field shaped like ``mask``) makes the bed heterogeneous."""
     prm = Parameters(p_in=p_in, p_out=p_out)
     grid = grid_for(spec, mask, domain)
+    if permeability is not None:
+        grid.permeability = np.asarray(permeability, dtype=float)
     if spec.dim == 3:
         from .core.pipeline3d import run_hybrid_3d
 

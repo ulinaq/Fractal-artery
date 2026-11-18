@@ -115,7 +115,9 @@ instead of a Darcy bed: the viewer draws the links and vessels weighted by flow,
 flow times the bolus along the network. Export the result from the same card: fields as
 `.npz`, CSV (`x,y,z` + fields per voxel) or a ParaView `.vti` volume, the vessels as
 `.vtp`, everything as one zip, or the view as a PNG — and, after 🌊 flow, the bolus as a
-**GIF / MP4** (a maximum-intensity projection turning round the organ). Interactive API docs are at `/docs`.
+**GIF / MP4** (a maximum-intensity projection turning round the organ). Its **Lesions &
+hotspots** card places spheres in the organ: a low-permeability lesion (re-run to see the
+deficit) or a growth hotspot that 🌱 Grow fills more densely. Interactive API docs are at `/docs`.
 See [`frontend/`](frontend/README.md) for the UI in detail.
 
 ### Back-end API
@@ -160,7 +162,8 @@ calibration on an organ's 2-D/3-D model), `prune_vessel_tree`, `data_constrained
 `direct_model_in_tissue` (the direct model in a 2-D/3-D organ), `export_tissue_fields`
 (an organ model's fields + vessels as CSV / VTI / VTP files, optionally the flow video),
 `pulsatile_windkessel`, `multicompartment_perfusion`, `oxygen_extraction_map`,
-`heterogeneous_perfusion_lesion`, `anisotropic_perfusion_bed`,
+`heterogeneous_perfusion_lesion`, `lesion_in_tissue` (a lesion's perfusion deficit in a
+2-D/3-D organ), `anisotropic_perfusion_bed`,
 `calibrate_parameter_to_flow`, `uncertainty_quantification`,
 `sobol_sensitivity_indices`. The bundled [`.mcp.json`](.mcp.json) registers it for
 Claude Code automatically when working in this repo.

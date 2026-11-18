@@ -1362,6 +1362,100 @@ def _explorer_project(client, dim, **kw):
     return r.json()
 
 
+def _sphere_in_tissue(client, pid, frac=0.2):
+    """A sphere at the 3-D tissue's centroid, radius ``frac`` × the box size."""
+    v = client.get(f"/projects/{pid}/view3d").json()
+    pts = np.asarray(v["tissue_points"])
+    dom = v["domain"]
+    size = min(dom[1] - dom[0], dom[3] - dom[2], dom[5] - dom[4])
+    return pts.mean(axis=0).tolist(), frac * size
+
+
+def _flux_and_mask(client, pid):
+    import io as stdio
+
+    with np.load(stdio.BytesIO(client.get(f"/projects/{pid}/export?fmt=npz").content)) as d:
+        return d["flux"], d["mask"], d["domain_limit"]
+
+
+def test_3d_lesion_sphere_cuts_local_perfusion(client):
+    """A low-K sphere on a 3-D project: stored, solved as a heterogeneous K field, and
+    the Darcy flux inside it drops — while the bed still conserves mass."""
+    pid = _explorer_project(client, 3)["id"]
+    center, radius = _sphere_in_tissue(client, pid)
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    flux0, mask, dl = _flux_and_mask(client, pid)
+
+    r = client.put(f"/projects/{pid}/lesions", json={"lesions": [
+        {"center": center, "radius": radius, "permeability": 0.02}]})
+    assert r.status_code == 200, r.text
+    assert client.get(f"/projects/{pid}").json()["has_result"] is False      # invalidated
+    got = client.get(f"/projects/{pid}/lesions").json()["lesions"][0]
+    assert got["center"] == pytest.approx(center)
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    res = client.get(f"/projects/{pid}/results").json()
+    assert res["arterial_inflow"] == pytest.approx(res["venous_outflow"], rel=1e-6)
+    flux1, _, _ = _flux_and_mask(client, pid)
+
+    from perfusion.core.geometry import rasterize_regions
+
+    inside = rasterize_regions(mask.shape, dl, [{"center": center, "radius": radius,
+                                                 "value": 1.0}], base=0.0).astype(bool)
+    inside &= mask
+    assert inside.sum() > 10
+    assert np.nanmean(flux1[inside]) < 0.5 * np.nanmean(flux0[inside])
+
+    # the sphere travels with the project document
+    doc = client.get(f"/projects/{pid}/document").json()
+    pid2 = client.post("/projects/import", json=doc).json()["id"]
+    assert client.get(f"/projects/{pid2}/lesions").json()["lesions"][0]["radius"] == radius
+
+
+def test_region_shapes_must_match_the_project_dimension(client):
+    pid3 = _explorer_project(client, 3)["id"]
+    tri = {"polygon": [[0, 0], [10, 0], [0, 10]], "permeability": 0.1}
+    r = client.put(f"/projects/{pid3}/lesions", json={"lesions": [tri]})
+    assert r.status_code == 422
+    assert "sphere" in r.json()["detail"]
+    pid2 = client.post("/projects", json={"name": "2d", "grid": SMALL_GRID}).json()["id"]
+    ball = {"center": [0, 50, 5], "radius": 10, "weight": 3}
+    r = client.put(f"/projects/{pid2}/hotspots", json={"hotspots": [ball]})
+    assert r.status_code == 422
+    disc = {"center": [0, 60], "radius": 15, "permeability": 0.05}       # discs work in 2-D
+    assert client.put(f"/projects/{pid2}/lesions", json={"lesions": [disc]}).status_code == 200
+    jid = client.post(f"/projects/{pid2}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    bad = client.put(f"/projects/{pid2}/lesions", json={"lesions": [{"center": [0, 1]}]})
+    assert bad.status_code == 422                                         # needs a radius
+
+
+def test_3d_hotspot_sphere_attracts_growth(client):
+    """A demand sphere on a 3-D project biases 🌱 Grow (CCO): more of the new
+    terminals land inside it than without."""
+    def inside_fraction(with_hotspot):
+        pid = _explorer_project(client, 3, fill="none")["id"]
+        center, radius = _sphere_in_tissue(client, pid, frac=0.15)
+        if with_hotspot:
+            r = client.put(f"/projects/{pid}/hotspots", json={"hotspots": [
+                {"center": center, "radius": radius, "weight": 40}]})
+            assert r.status_code == 200, r.text
+        def nodes():
+            a = client.get(f"/projects/{pid}/editable").json()["artery"]
+            return np.round(np.column_stack([a["node_x"], a["node_y"], a["node_z"]]), 6)
+
+        before = {tuple(p) for p in nodes()}
+        r = client.post(f"/projects/{pid}/grow", json={"target": "artery", "method": "cco",
+                                                       "n_points": 40})
+        assert r.status_code == 200, r.text
+        new = np.array([p for p in nodes() if tuple(p) not in before])     # grown nodes
+        assert len(new) > 20
+        return np.mean(np.linalg.norm(new - center, axis=1) <= 1.5 * radius)
+
+    assert inside_fraction(True) > inside_fraction(False) + 0.1
+
+
 def test_explorer_3d_result_becomes_a_runnable_3d_project(client):
     made = _explorer_project(client, 3)
     pid = made["id"]

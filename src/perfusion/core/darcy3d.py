@@ -30,7 +30,7 @@ class Grid3D:
     lx: float = 1.0
     ly: float = 1.0
     lz: float = 1.0
-    permeability: float = 1.0
+    permeability: float | np.ndarray = 1.0   # scalar K, or a per-voxel (nx, ny, nz) field
     thickness: float = 1.0                 # unused in 3-D; kept for API symmetry
     porosity: float = 1.0                  # pore fraction (time-of-flight pore volume)
     mask: np.ndarray | None = None         # (nx, ny, nz) bool; True = active
@@ -45,6 +45,16 @@ class Grid3D:
         self.hz = self.lz / self.nz
         if self.mask is None:
             self.mask = np.ones((self.nx, self.ny, self.nz), dtype=bool)
+        if np.ndim(self.permeability) and np.shape(self.permeability) != (
+                self.nx, self.ny, self.nz):
+            raise ValueError(f"permeability field {np.shape(self.permeability)} must be "
+                             f"({self.nx}, {self.ny}, {self.nz})")
+
+    def permeability_field(self) -> np.ndarray:
+        """Per-voxel permeability ``(nx, ny, nz)`` (broadcasts a scalar K)."""
+        if np.ndim(self.permeability) == 0:
+            return np.full((self.nx, self.ny, self.nz), float(self.permeability))
+        return np.asarray(self.permeability, dtype=float)
 
     @property
     def n_cells(self) -> int:
@@ -68,11 +78,16 @@ class Grid3D:
 
 
 def _face_transmissibilities(grid: Grid3D):
-    """Per-direction face transmissibility (scalar; uniform grid + scalar K)."""
-    k = grid.permeability
-    tx = k * grid.hy * grid.hz / grid.hx
-    ty = k * grid.hx * grid.hz / grid.hy
-    tz = k * grid.hx * grid.hy / grid.hz
+    """Interior-face transmissibilities ``(tx, ty, tz)``, shapes ``(nx-1, ny, nz)``,
+    ``(nx, ny-1, nz)``, ``(nx, ny, nz-1)``. The face permeability is the **harmonic
+    mean** of its two voxels (as in 2-D, Eq. 5.1) — exact for a uniform K, and a
+    low-K voxel throttles all six of its faces."""
+    from .darcy import _harmonic
+
+    k = grid.permeability_field()
+    tx = _harmonic(k[:-1, :, :], k[1:, :, :]) * grid.hy * grid.hz / grid.hx
+    ty = _harmonic(k[:, :-1, :], k[:, 1:, :]) * grid.hx * grid.hz / grid.hy
+    tz = _harmonic(k[:, :, :-1], k[:, :, 1:]) * grid.hx * grid.hy / grid.hz
     return tx, ty, tz
 
 
@@ -98,10 +113,10 @@ def tpfa_operator_3d(grid: Grid3D) -> sp.csr_matrix:
     for owner, neigh, t in faces:
         o, m = owner.ravel(order="F"), neigh.ravel(order="F")
         keep = active[o] & active[m]                 # both cells active
-        o, m = o[keep], m[keep]
+        o, m, t = o[keep], m[keep], t.ravel(order="F")[keep]
         rows.extend((o, m))
         cols.extend((m, o))
-        vals.extend((np.full(o.size, -t), np.full(m.size, -t)))
+        vals.extend((-t, -t))
         np.add.at(diag, o, t)
         np.add.at(diag, m, t)
 

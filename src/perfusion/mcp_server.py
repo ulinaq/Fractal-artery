@@ -231,6 +231,56 @@ def _transit_stats(art, ven, conns, sol) -> dict:
             "mtt_to_outlet": float(mtt.mean()) if mtt.size else None}
 
 
+def tissue_lesion(dim: int = 3, shape: str = "kidney", generations: int = 4,
+                  fill: str = "cco", n_terminals: int = 40, center=None,
+                  radius_frac: float = 0.2, permeability: float = 0.05, seed: int = 0,
+                  extent: float = 1.0) -> dict:
+    """A low-permeability lesion in an organ (2-D disc / 3-D sphere): grow trees into
+    ``shape``, solve the healthy bed, then the bed with K = ``permeability`` inside a
+    ball (``center``, default the tissue centroid; radius = ``radius_frac`` × box size)
+    — and report the perfusion deficit: mean Darcy flux inside the lesion before/after,
+    the remaining fraction, and the change in total inflow. Vessel terminals *inside*
+    the lesion still deliver their blood (it must leave through the low-K tissue), so
+    a lesion that swallows many terminals cuts the local flux less than K alone
+    suggests."""
+    from . import treegen
+    from .core.geometry import rasterize_regions
+
+    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
+                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
+                           _return_model=True)
+    spec, art, ven, mask, domain = grown["_model"]
+    lim = np.asarray(domain, dtype=float)
+    if center is None:
+        idx = np.argwhere(mask)
+        h = (lim[1::2] - lim[0::2]) / np.array(mask.shape)
+        center = (lim[0::2] + (idx.mean(axis=0) + 0.5) * h).tolist()
+    if len(center) != mask.ndim:
+        raise ValueError(f"center needs {mask.ndim} values on a {mask.ndim}-D organ")
+    radius = float(radius_frac) * float((lim[1::2] - lim[0::2]).min())
+    inside = rasterize_regions(mask.shape, domain, [{"center": center, "radius": radius,
+                                                     "value": 1.0}], base=0.0) > 0
+    inside &= mask
+    if not inside.any():
+        raise ValueError("the lesion misses the tissue; move its center or enlarge it")
+    healthy = treegen.solve(spec, art, ven, mask, domain)
+    kfield = np.where(inside, float(permeability), 1.0)
+    lesioned = treegen.solve(spec, art, ven, mask, domain, permeability=kfield)
+
+    def inflow(res):
+        q = res.solution.terminal_flux
+        return float(q[q > 0].sum())
+
+    before = float(np.nanmean(healthy.flux[inside]))
+    after = float(np.nanmean(lesioned.flux[inside]))
+    return {"dim": spec.dim, "shape": shape, "center": [float(c) for c in center],
+            "radius": radius, "permeability": float(permeability),
+            "lesion_cells": int(inside.sum()), "tissue_cells": int(mask.sum()),
+            "flux_inside_healthy": before, "flux_inside_lesion": after,
+            "remaining_fraction": after / before if before > 0 else None,
+            "inflow_healthy": inflow(healthy), "inflow_lesion": inflow(lesioned)}
+
+
 def tissue_export(out_dir: str, dim: int = 3, shape: str = "kidney",
                   generations: int = 4, fill: str = "cco", n_terminals: int = 40,
                   seed: int = 0, extent: float = 1.0, video: bool = False,
@@ -879,6 +929,22 @@ def build_server():
         Returns the mean bolus arrival time by element class and the overall mean
         transit time to the venous outlet. `rho_c` is the connection search radius."""
         return direct_transit(rho_c=rho_c, p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+
+    @server.tool()
+    def lesion_in_tissue(dim: int = 3, shape: str = "kidney", generations: int = 4,
+                         fill: str = "cco", n_terminals: int = 40,
+                         center: list[float] | None = None, radius_frac: float = 0.2,
+                         permeability: float = 0.05, seed: int = 0,
+                         extent: float = 1.0) -> dict:
+        """Perfusion deficit of a low-permeability lesion in an organ, 2-D (disc) or
+        3-D (sphere): solve the healthy and the lesioned bed (K = `permeability`
+        inside the ball at `center` — default the tissue centroid — of radius
+        `radius_frac` × box size) and return the mean Darcy flux inside the lesion
+        before/after, the remaining fraction and the total inflow of each."""
+        return tissue_lesion(dim=dim, shape=shape, generations=generations, fill=fill,
+                             n_terminals=n_terminals, center=center,
+                             radius_frac=radius_frac, permeability=permeability,
+                             seed=seed, extent=extent)
 
     @server.tool()
     def export_tissue_fields(out_dir: str, dim: int = 3, shape: str = "kidney",

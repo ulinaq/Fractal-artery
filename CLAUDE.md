@@ -302,9 +302,16 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   `tracer.npz`. **3-D flow videos**: `tracer.gif`/`tracer.mp4` on a 3-D project render
   `helpers.tracer_images_3d` — a maximum-intensity projection of the bolus + the trees,
   seen through `helpers.project_3d` (the same camera as `viewer3d.js`'s `project` — keep
-  them in step), turning once round the organ unless `spin=false`. Still 2-D-only
-  (`deps.get_project_2d` → 409): masks/lesions/hotspots and the raw `GET /tracer` /
-  `results/field` grids. New
+  them in step), turning once round the organ unless `spin=false`. **Lesions & hotspots
+  in 3-D** are spheres (`center` [x,y,z] + `radius`; schemas `_Region` = polygon *or*
+  ball, discs allowed in 2-D, `PUT` checks the shape matches the project's dimension).
+  `geometry.rasterize_regions` rasterises polygons/discs/spheres (later wins);
+  `runner.build_grid3d` turns lesions into a per-voxel `Grid3D.permeability` field and
+  `darcy3d._face_transmissibilities` uses the harmonic mean per face (a uniform field must
+  stay identical to the scalar — tested); hotspots become the 3-D growth `density`. The
+  viewer edits them in `frontend/regions3d.js`; the 2-D Tissue editor turns a disc into a
+  32-gon on load. Still 2-D-only (`deps.get_project_2d` → 409): drawn tissue masks and
+  the raw `GET /tracer` / `results/field` grids. New
   project features must either work in 3-D or be guarded. Oxygen's Damköhler rate is
   scaled by the *active* tissue volume (`oxygen.solve_oxygen`) — keep it that way.
 - **Default trees** (no vessels drawn): `runner.default_trees` fits the thesis trees

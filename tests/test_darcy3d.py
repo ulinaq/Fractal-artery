@@ -1,6 +1,7 @@
 """Tests for the 3-D structured Darcy grid + TPFA operator (Phase 4 foundation)."""
 
 import numpy as np
+import pytest
 import scipy.sparse.linalg as spla
 
 from perfusion.core.darcy3d import (
@@ -96,3 +97,34 @@ def test_source_sink_darcy_solve():
     assert np.allclose(residual, 0.0, atol=1e-8)
     # pressure is higher at the source than the sink -> flow a -> b
     assert p[a] > p[b]
+
+
+def test_uniform_permeability_field_matches_the_scalar():
+    """A constant per-voxel K field assembles the same operator as the scalar K."""
+    g_scalar = Grid3D(nx=4, ny=3, nz=5, permeability=2.5)
+    g_field = Grid3D(nx=4, ny=3, nz=5, permeability=np.full((4, 3, 5), 2.5))
+    diff = tpfa_operator_3d(g_scalar) - tpfa_operator_3d(g_field)
+    assert abs(diff).max() < 1e-12
+
+
+def test_low_permeability_slab_follows_the_series_law():
+    """Flow along x through layers of K: the flux is the harmonic (series) average —
+    the face between a K=1 and a K=k voxel uses 2k/(1+k) (Eq. 5.1)."""
+    nx, k = 6, 0.1
+    kf = np.ones((nx, 2, 2))
+    kf[3] = k                                          # one low-K slab across the bed
+    grid = Grid3D(nx=nx, ny=2, nz=2, lx=nx, ly=2.0, lz=2.0, permeability=kf)
+    p = _solve_x_ramp(grid, p_lo=1.0, p_hi=0.0)
+    fx, _, _ = face_fluxes_3d(grid, p)
+    flux = fx[:, 0, 0]
+    assert np.allclose(flux, flux[0])                  # conserved through every face
+    # Dirichlet layers at x=0, nx-1: faces 0..4 in series with K_face = 1 except the two
+    # touching the slab (2k/(1+k)); unit face area and spacing
+    faces = np.ones(nx - 1)
+    faces[2] = faces[3] = 2 * k / (1 + k)
+    assert flux[0] == pytest.approx(1.0 / np.sum(1.0 / faces))
+
+
+def test_permeability_field_must_match_the_grid():
+    with pytest.raises(ValueError, match="must be"):
+        Grid3D(nx=3, ny=3, nz=3, permeability=np.ones((3, 3, 2)))
