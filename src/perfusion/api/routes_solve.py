@@ -422,6 +422,7 @@ def _view3d_volume(project, store, field: str, k: float = 1.0, n: int = 3,
     xyz = np.round(lo + (idx + 0.5) * h, 1)
     out = {"shape": [grid.nx, grid.ny, grid.nz], "domain": [float(v) for v in dom],
            "segments": segments, "has_result": project.has_result, "dim": 3,
+           "has_tracer": project.has_tracer,
            "tissue": project.grid.tissue, "field": field,
            "pressure": {"min": 0.0, "max": 0.0, "voxels": []},
            "tissue_points": xyz.tolist()}
@@ -521,8 +522,8 @@ def _require_field_result(project, store) -> None:
 def export_bundle(pid: str, project: Project = Depends(get_project),
                   store: ProjectStore = Depends(get_store)):
     """One zip with everything: npz + CSV + VTK fields (2-D or 3-D), summary/meta
-    JSON, and — if a tracer exists — its frames (``tracer.npz``) plus, in 2-D, the
-    tracer GIF / MP4."""
+    JSON, and — if a tracer exists — its frames (``tracer.npz``) plus the tracer
+    GIF / MP4."""
     import contextlib
     import json
     import zipfile
@@ -552,12 +553,12 @@ def export_bundle(pid: str, project: Project = Depends(get_project),
         z.writestr("meta.json", json.dumps(meta, indent=2))
         if project.has_tracer:
             z.write(store.tracer_path(pid), "tracer.npz")
-        if project.has_tracer and not project.grid.is_3d:     # GIF / MP4 are 2-D renders
-            tracer = store.load_tracer(pid)
+        if project.has_tracer:
+            tracer, scene = store.load_tracer(pid), _video_scene(project)
             with contextlib.suppress(ImportError):   # GIF needs the image extra
-                z.writestr("tracer.gif", helpers.render_gif(tracer))
+                z.writestr("tracer.gif", helpers.render_gif(tracer, scene=scene))
             with contextlib.suppress(ImportError):   # MP4 needs the video extra
-                z.writestr("tracer.mp4", helpers.render_mp4(tracer))
+                z.writestr("tracer.mp4", helpers.render_mp4(tracer, scene=scene))
     return FileResponse(out, media_type="application/zip", filename=f"{name}.zip")
 
 
@@ -574,15 +575,31 @@ def tracer_frames(pid: str, project: Project = Depends(get_project_2d),
                       times=data["times"].tolist(), vmax=float(data["vmax"]), frames=out)
 
 
+def _video_scene(project, spin: bool = True) -> dict | None:
+    """What a 3-D tracer video draws besides the voxels: the domain and the vessel
+    segments ``[x0,y0,z0,x1,y1,z1,r,kind]`` (``None`` for a 2-D project)."""
+    if not project.grid.is_3d:
+        return None
+    _, dom = runner.build_grid3d(project)
+    art, ven = runner.build_networks(project, use_vessels=True, defaults=True)
+    segments = [[*sg, k] for net, k in ((art, 0), (ven, 1)) if net is not None
+                for sg in helpers.segment_lines_3d(net)]
+    return {"domain": [float(v) for v in dom], "segments": segments,
+            "spin": 2 * np.pi if spin else 0.0}
+
+
 @router.get("/projects/{pid}/tracer.gif")
-def tracer_gif(pid: str, project: Project = Depends(get_project_2d),
+def tracer_gif(pid: str, spin: bool = True, project: Project = Depends(get_project),
                store: ProjectStore = Depends(get_store)):
+    """The tracer flow video as an animated GIF. On a 3-D project each frame is a
+    maximum-intensity projection of the bolus with the trees, seen like the 3-D viewer
+    and (``spin``) turning once around the organ over the clip."""
     from fastapi.responses import Response
 
     if not project.has_tracer:
         raise HTTPException(409, "no tracer yet; POST to /tracer first")
     try:
-        gif = helpers.render_gif(store.load_tracer(pid))
+        gif = helpers.render_gif(store.load_tracer(pid), scene=_video_scene(project, spin))
     except ImportError:
         raise HTTPException(501, "GIF export needs the 'image' extra: "
                                  "uv sync --extra image") from None
@@ -607,15 +624,18 @@ def demo3d(gen: int = 6, model: str = "synthetic") -> dict:
 
 
 @router.get("/projects/{pid}/tracer.mp4")
-def tracer_mp4(pid: str, fps: int = 12, project: Project = Depends(get_project_2d),
+def tracer_mp4(pid: str, fps: int = 12, spin: bool = True,
+               project: Project = Depends(get_project),
                store: ProjectStore = Depends(get_store)):
-    """The tracer flow video as an H.264 MP4 (server-side ffmpeg)."""
+    """The tracer flow video as an H.264 MP4 (server-side ffmpeg); a 3-D project
+    renders as in ``tracer.gif``."""
     from fastapi.responses import Response
 
     if not project.has_tracer:
         raise HTTPException(409, "no tracer yet; POST to /tracer first")
     try:
-        mp4 = helpers.render_mp4(store.load_tracer(pid), fps=int(np.clip(fps, 1, 60)))
+        mp4 = helpers.render_mp4(store.load_tracer(pid), fps=int(np.clip(fps, 1, 60)),
+                                 scene=_video_scene(project, spin))
     except ImportError:
         raise HTTPException(501, "MP4 export needs the 'video' extra: "
                                  "uv sync --extra video") from None

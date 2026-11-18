@@ -107,7 +107,8 @@ no separate dev server.
   **model** picker also runs the **direct — terminal connections** model (ρc search
   radius): links (green) and vessels are drawn by flow, and 🌊 flow plays the bolus
   timed along the network. An export row saves the fields (`.npz` / `.csv` / `.vti`), the
-  vessels (`.vtp`), a zip bundle, or a 📷 PNG of the view.
+  vessels (`.vtp`), a zip bundle, or a 📷 PNG of the view; after 🌊 flow, ↓ GIF / ↓ MP4
+  download the bolus rendered on the server (rotating maximum-intensity projection).
 
 The left-panel **tools are contextual**: picking a tab above the canvas
 (Vessels · Tissue · Result, keys 1–3) shows just that tool card; Project,

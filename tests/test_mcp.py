@@ -335,3 +335,11 @@ def test_export_tissue_fields(tmp_path, dim):
         assert Path(path).stat().st_size > 0
     header = Path(out["files"]["fields.csv"]).read_text().splitlines()[0]
     assert header == ("x,y,z," if dim == 3 else "x,y,") + "pressure,flux,tof"
+
+
+def test_export_tissue_fields_with_a_3d_video(tmp_path):
+    pytest.importorskip("imageio")
+    out = mcp_server.tissue_export(str(tmp_path), dim=3, shape="kidney", generations=3,
+                                   n_terminals=10, video=True, n_frames=8)
+    gif = Path(out["files"]["tracer.gif"])
+    assert gif.read_bytes()[:6] in (b"GIF87a", b"GIF89a")

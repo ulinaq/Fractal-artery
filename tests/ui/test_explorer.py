@@ -120,6 +120,13 @@ def test_3d_project_grow_flow_kinetics_and_oxygen_in_the_viewer(page, server):
     assert page.is_visible("#v3-play-row")
     assert page.input_value("#v3-field") == "tracer"
     assert page.is_hidden("#v3-k-row")
+    assert page.is_visible("#v3-video-row")                      # server-rendered video
+    assert page.get_attribute("#v3-mp4", "href").endswith("tracer.mp4?spin=true")
+    page.uncheck("#v3-video-spin")
+    assert page.get_attribute("#v3-gif", "href").endswith("tracer.gif?spin=false")
+    with page.expect_download(timeout=60000) as dl:
+        page.click("#v3-gif")
+    assert Path(dl.value.path()).read_bytes()[:6] in (b"GIF87a", b"GIF89a")
     page.select_option("#v3-field", "saturation")
     page.wait_for_function("document.querySelector('#v3-summary').textContent"
                            ".includes('O₂ extraction')", timeout=60000)

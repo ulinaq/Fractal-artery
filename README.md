@@ -114,7 +114,8 @@ model to **direct — terminal connections** to close the 3-D trees with resisti
 instead of a Darcy bed: the viewer draws the links and vessels weighted by flow, and 🌊
 flow times the bolus along the network. Export the result from the same card: fields as
 `.npz`, CSV (`x,y,z` + fields per voxel) or a ParaView `.vti` volume, the vessels as
-`.vtp`, everything as one zip, or the view as a PNG. Interactive API docs are at `/docs`.
+`.vtp`, everything as one zip, or the view as a PNG — and, after 🌊 flow, the bolus as a
+**GIF / MP4** (a maximum-intensity projection turning round the organ). Interactive API docs are at `/docs`.
 See [`frontend/`](frontend/README.md) for the UI in detail.
 
 ### Back-end API
@@ -157,7 +158,7 @@ calibration on an organ's 2-D/3-D model), `prune_vessel_tree`, `data_constrained
 `optimize_tree_config`, `adapt_vessel_network`, `strahler_morphometry`,
 `fit_tracer_kinetics`, `perfusion_parameter_maps`, `direct_transit_metrics`,
 `direct_model_in_tissue` (the direct model in a 2-D/3-D organ), `export_tissue_fields`
-(an organ model's fields + vessels as CSV / VTI / VTP files),
+(an organ model's fields + vessels as CSV / VTI / VTP files, optionally the flow video),
 `pulsatile_windkessel`, `multicompartment_perfusion`, `oxygen_extraction_map`,
 `heterogeneous_perfusion_lesion`, `anisotropic_perfusion_bed`,
 `calibrate_parameter_to_flow`, `uncertainty_quantification`,

@@ -233,12 +233,15 @@ def _transit_stats(art, ven, conns, sol) -> dict:
 
 def tissue_export(out_dir: str, dim: int = 3, shape: str = "kidney",
                   generations: int = 4, fill: str = "cco", n_terminals: int = 40,
-                  seed: int = 0, extent: float = 1.0) -> dict:
+                  seed: int = 0, extent: float = 1.0, video: bool = False,
+                  n_frames: int = 40) -> dict:
     """Grow trees into an organ (2-D or 3-D), solve the hybrid model and write the result
     for ParaView / spreadsheets into ``out_dir``: ``fields.csv`` (cell centres + pressure,
     flux, time-of-flight per active cell/voxel), ``fields.vti`` (VTK ImageData),
     ``results.npz`` and ``artery.vtp`` / ``vein.vtp`` (vessel PolyData with radius and
-    flow). Returns the written paths and a short summary."""
+    flow). With ``video``, also a contrast bolus as ``tracer.gif`` / ``tracer.mp4``
+    (3-D: a rotating maximum-intensity projection with the trees; MP4 needs the
+    ``video`` extra). Returns the written paths and a short summary."""
     from pathlib import Path
 
     from . import io as perfio
@@ -257,6 +260,25 @@ def tissue_export(out_dir: str, dim: int = 3, shape: str = "kidney",
              "artery.vtp": perfio.network_to_vtp(art, out / "artery.vtp",
                                                  flow=res.solution.q_a),
              "vein.vtp": perfio.network_to_vtp(ven, out / "vein.vtp", flow=res.solution.q_v)}
+    if video:
+        import contextlib
+
+        from .api import helpers
+
+        fr, _, _ = _organ_tracer(res, n_frames)
+        fin = fr[:, mask]
+        vmax = float(np.nanpercentile(fin, 99)) if fin.size else 1.0
+        tracer = {"frames": fr, "mask": mask, "vmax": vmax if vmax > 0 else 1.0}
+        scene = None
+        if spec.dim == 3:
+            segs = [[*sg, k] for net, k in ((art, 0), (ven, 1))
+                    for sg in helpers.segment_lines_3d(net)]
+            scene = {"domain": [float(v) for v in domain], "segments": segs}
+        (out / "tracer.gif").write_bytes(helpers.render_gif(tracer, scene=scene))
+        files["tracer.gif"] = out / "tracer.gif"
+        with contextlib.suppress(ImportError):           # MP4 needs the video extra
+            (out / "tracer.mp4").write_bytes(helpers.render_mp4(tracer, scene=scene))
+            files["tracer.mp4"] = out / "tracer.mp4"
     q = res.solution.terminal_flux
     return {"dim": spec.dim, "shape": shape, "grid": list(mask.shape),
             "active_cells": int(mask.sum()), "inflow": float(q[q > 0].sum()),
@@ -492,6 +514,25 @@ def generate_trees(dim: int = 2, shape: str = "ellipse", generations: int = 4,
     return out
 
 
+def _organ_tracer(res, n_frames: int = 30):
+    """Advect a unit-peak gamma-variate bolus through a solved bed (2-D or 3-D);
+    returns ``(frames, times, aif)`` sampled at ``n_frames`` snapshots."""
+    from .core import tkm, transport
+
+    finite = res.tof[np.isfinite(res.tof)]
+    duration = 5.0 * max(float(np.percentile(finite, 80)) if finite.size else 5.0, 1e-3)
+    n_frames = int(np.clip(n_frames, 8, 120))
+    n_steps = max(n_frames, 400)
+    t = np.arange(n_steps) * duration / n_steps
+    aif = tkm.gamma_variate_aif(t, t0=0.08 * duration, A=3.0, B=0.06 * duration)
+    aif = aif / aif.max()
+    frames = transport.transport_forward(res.grid, res.fx, res.fy, res.sources,
+                                         res.solution.terminal_flux, aif, t[1] - t[0],
+                                         theta=1.0, fz=getattr(res, "fz", None))
+    stride = max(1, n_steps // n_frames)
+    return frames[::stride][:n_frames], t[::stride][:n_frames], aif[::stride][:n_frames]
+
+
 def tissue_analysis(dim: int = 3, shape: str = "kidney", generations: int = 4,
                     fill: str = "cco", n_terminals: int = 40, extent: float = 1.0,
                     k: float = 1.0, adapt: bool = False, n_frames: int = 30,
@@ -509,7 +550,7 @@ def tissue_analysis(dim: int = 3, shape: str = "kidney", generations: int = 4,
       exchange ``beta``): capillary perfusion + each compartment's mean pressure.
     """
     from . import treegen
-    from .core import tkm, transport
+    from .core import tkm
     from .core.oxygen import oxygen_from_result
     from .core.parameters import Parameters
     from .core.perfusion_metrics import transit_metrics
@@ -536,17 +577,7 @@ def tissue_analysis(dim: int = 3, shape: str = "kidney", generations: int = 4,
     ox = oxygen_from_result(res, k=float(k))
     out["oxygen"] = {"k": float(k), "oef": ox.oef}
 
-    finite = res.tof[np.isfinite(res.tof)]
-    duration = 5.0 * max(float(np.percentile(finite, 80)) if finite.size else 5.0, 1e-3)
-    n_frames = int(np.clip(n_frames, 8, 120))
-    n_steps = max(n_frames, 400)
-    t = np.arange(n_steps) * duration / n_steps
-    aif = tkm.gamma_variate_aif(t, t0=0.08 * duration, A=3.0, B=0.06 * duration)
-    aif = aif / aif.max()
-    frames = transport.transport_forward(res.grid, res.fx, res.fy, res.sources, q, aif,
-                                         t[1] - t[0], theta=1.0, fz=getattr(res, "fz", None))
-    stride = max(1, n_steps // n_frames)
-    fr, tt, ca = frames[::stride][:n_frames], t[::stride][:n_frames], aif[::stride][:n_frames]
+    fr, tt, ca = _organ_tracer(res, n_frames)
     conc = np.array([float(f[mask].mean()) for f in fr])
     fit = tkm.fit(tt, ca, conc, model=model)
 
@@ -852,13 +883,17 @@ def build_server():
     @server.tool()
     def export_tissue_fields(out_dir: str, dim: int = 3, shape: str = "kidney",
                              generations: int = 4, fill: str = "cco", n_terminals: int = 40,
-                             seed: int = 0, extent: float = 1.0) -> dict:
+                             seed: int = 0, extent: float = 1.0, video: bool = False,
+                             n_frames: int = 40) -> dict:
         """Solve an organ model (2-D or 3-D: trees grown into `shape`) and write it to
         `out_dir` for ParaView / spreadsheets: fields.csv (x,y[,z] + pressure, flux,
         time-of-flight per active cell), fields.vti (VTK ImageData volume), results.npz,
-        artery.vtp / vein.vtp (vessels with radius + flow). Returns the file paths."""
+        artery.vtp / vein.vtp (vessels with radius + flow). `video=True` adds the contrast
+        bolus as tracer.gif / tracer.mp4 (3-D: a rotating maximum-intensity projection
+        with the trees). Returns the file paths."""
         return tissue_export(out_dir, dim=dim, shape=shape, generations=generations,
-                             fill=fill, n_terminals=n_terminals, seed=seed, extent=extent)
+                             fill=fill, n_terminals=n_terminals, seed=seed, extent=extent,
+                             video=video, n_frames=n_frames)
 
     @server.tool()
     def direct_model_in_tissue(dim: int = 3, shape: str = "kidney", generations: int = 4,
