@@ -14,6 +14,7 @@ from . import helpers, runner
 from .deps import get_jobs, get_project, get_project_2d, get_store
 from .schemas import (
     CalibrateRequest,
+    DCEFitRequest,
     ExperimentRequest,
     FieldResponse,
     JobInfo,
@@ -42,6 +43,34 @@ def run_tracer(body: TracerRequest | None = None, project: Project = Depends(get
     req = body or TracerRequest()
     jid = jobs.submit(project.id, "tracer", req.model_dump())
     return JobInfo(**jobs.get(jid))
+
+
+@router.post("/projects/{pid}/fit-dce", response_model=JobInfo)
+def fit_dce(body: DCEFitRequest, project: Project = Depends(get_project),
+            jobs=Depends(get_jobs)) -> JobInfo:
+    """Fit several model inputs at once (e.g. ``p_in`` ~ flow and ``porosity`` ~ blood
+    volume) so the simulated tissue curve matches a measured DCE-MRI curve — a job of
+    full forward simulations (hybrid solve → bolus transport). ``GET`` returns the fit."""
+    from ..inverse import DCE_PARAMS
+
+    bad = [n for n in body.params if n not in DCE_PARAMS]
+    if bad or not body.params:
+        raise HTTPException(422, f"fit one or more of {list(DCE_PARAMS)}")
+    if not (len(body.times) == len(body.tissue) == len(body.aif)):
+        raise HTTPException(422, "times, tissue and aif need the same number of samples")
+    jid = jobs.submit(project.id, "dce_fit", body.model_dump())
+    return JobInfo(**jobs.get(jid))
+
+
+@router.get("/projects/{pid}/fit-dce")
+def get_dce_fit(pid: str, project: Project = Depends(get_project),
+                store: ProjectStore = Depends(get_store)) -> dict:
+    """The latest DCE-MRI fit: fitted values ± standard errors, correlations, R², the
+    model curve and warnings (strong correlation / a value at its bound)."""
+    fit = store.load_dce_fit(pid)
+    if fit is None:
+        raise HTTPException(404, "no DCE fit yet; POST to /fit-dce first")
+    return fit
 
 
 @router.post("/projects/{pid}/experiments", response_model=JobInfo)

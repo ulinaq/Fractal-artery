@@ -687,8 +687,13 @@ Editing 3-D trees by hand is now done too (§11.4).
 - **Growing anastomoses / loopy venous growth** (loop-closure heuristics; the solver
   already handles loops) — §9.3. *XL.*
 - **Data-constrained growth matched to Strahler statistics** (follow-up in §9.3). *M.*
-- **Inverse estimation from real DCE-MRI curves** beyond the 1-D calibration
-  (`inverse.calibrate`) — multi-parameter fit of the hybrid model. *L.*
+- ✅ ~~**Inverse estimation from real DCE-MRI curves**~~ — `inverse.fit_dce`: several
+  inputs at once (p_in ~ flow, porosity ~ blood volume, K, μ) fitted to a measured tissue
+  curve + AIF by bounded log-space least squares over full forward simulations, with
+  standard errors, the correlation matrix (flags non-separable pairs) and R²; 2-D and
+  3-D. `POST/GET …/fit-dce` (job), a *Fit to DCE-MRI* panel (`frontend/dcefit.js`) in the
+  Result tab and the 3-D viewer, MCP `fit_dce_curve` (incl. a synthetic identifiability
+  check).
 - **GPU / matrix-free `darcy3d`** (cupy) — needs hardware; deferred. *L.*
 - ◑ Newton with an analytic Jacobian — *deliberately not added* (the factorisation-reusing
   fixed point is faster and reduces exactly to the linear solve). Units via pint —

@@ -20,7 +20,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 from . import runner
-from .schemas import ExperimentRequest, RunRequest, TracerRequest
+from .schemas import DCEFitRequest, ExperimentRequest, RunRequest, TracerRequest
 
 
 def _new_id() -> str:
@@ -34,6 +34,8 @@ def execute_job(store, jid: str, project_id: str, kind: str, req_data: dict) -> 
         project = store.get(project_id)
         if kind == "tracer":
             runner.run_tracer(store, project, TracerRequest(**req_data))
+        elif kind == "dce_fit":
+            runner.fit_dce_project(store, project, DCEFitRequest(**req_data))
         elif kind == "experiment":
             runner.run_experiment(store, project, ExperimentRequest(**req_data))
         else:

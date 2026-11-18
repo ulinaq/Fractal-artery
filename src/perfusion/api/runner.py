@@ -334,6 +334,42 @@ def solve_direct_model(project, use_vessels, rho_c=0.0):
     return art, ven, sol
 
 
+# -- multi-parameter DCE-MRI fit ---------------------------------------------- #
+def fit_dce_project(store, project, req) -> dict:
+    """Fit the project's model (2-D or 3-D, its trees and tissue) to a measured DCE-MRI
+    curve (``inverse.fit_dce``) and keep the fit (inputs + result) for ``GET``."""
+    from dataclasses import asdict
+
+    from ..inverse import DCE_PARAMS, fit_dce
+
+    bad = [n for n in req.params if n not in DCE_PARAMS]
+    if bad:
+        raise InputError(f"cannot fit {bad}; choose from {list(DCE_PARAMS)}")
+    if not (len(req.times) == len(req.tissue) == len(req.aif)):
+        raise InputError("times, tissue and aif need the same number of samples")
+    grid, dom = build_grid(project)
+    if "permeability" in req.params and np.ndim(grid.permeability):
+        raise InputError("fitting K replaces the lesion permeability field — remove the "
+                         "lesions first, or fit p_in / porosity / mu")
+    if is_3d(project):
+        art, ven = build_networks(project, use_vessels=True, defaults=True)
+    else:
+        _, art, ven = validate_run(project, use_vessels=True)
+    base = project.params.model_dump()
+    try:
+        fit = fit_dce(req.times, req.tissue, req.aif, grid,
+                      {k: tuple(v) for k, v in req.params.items()}, base=base,
+                      domain_limit=tuple(dom), art=art, ven=ven, max_nfev=req.max_nfev)
+    except ValueError as e:
+        raise InputError(str(e)) from None
+    payload = {"input": {"times": list(req.times), "tissue": list(req.tissue),
+                         "aif": list(req.aif),
+                         "params": {k: list(v) for k, v in req.params.items()}},
+               **asdict(fit)}
+    store.save_dce_fit(project.id, payload)
+    return payload
+
+
 # -- batch experiments --------------------------------------------------------- #
 # input -> where it lives on the project; r_min_frac only reshapes the 2-D default trees
 EXPERIMENT_PARAMS = {"p_in": "params", "p_out": "params", "mu": "params",

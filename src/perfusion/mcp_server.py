@@ -231,6 +231,58 @@ def _transit_stats(art, ven, conns, sol) -> dict:
             "mtt_to_outlet": float(mtt.mean()) if mtt.size else None}
 
 
+def tissue_dce_fit(times=None, tissue=None, aif=None, params: dict | None = None,
+                   dim: int = 3, shape: str = "kidney", generations: int = 4,
+                   fill: str = "cco", n_terminals: int = 40, truth: dict | None = None,
+                   noise: float = 0.0, n_samples: int = 40, seed: int = 0,
+                   extent: float = 1.0) -> dict:
+    """Fit several model inputs at once (``params``: name → [lo, hi]; default p_in and
+    porosity) to a DCE-MRI tissue curve on organ-grown trees (2-D or 3-D).
+
+    Give ``times``/``tissue``/``aif`` for real data. Without them a **synthetic**
+    acquisition is simulated from ``truth`` (default p_in 14, porosity 0.3) with
+    relative Gaussian ``noise`` — a check of what the curve can identify. Returns the
+    fitted values ± standard errors, the correlation matrix, R² and warnings."""
+    from dataclasses import asdict, replace
+
+    from . import treegen
+    from .core import tkm
+    from .inverse import fit_dce, simulate_tissue_curve
+    from .uq import _sample_solver
+
+    params = {k: tuple(v) for k, v in (params or {"p_in": (1, 50),
+                                                  "porosity": (0.02, 1)}).items()}
+    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
+                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
+                           _return_model=True)
+    spec, art, ven, mask, domain = grown["_model"]
+    grid = treegen.grid_for(spec, mask, domain)
+    base = {"p_in": 10.0, "p_out": 0.0}
+    out = {"dim": spec.dim, "shape": shape}
+    if times is None:
+        truth = {"p_in": 14.0, "porosity": 0.3, **(truth or {})}
+        solve = _sample_solver(["p_in"], grid, domain, art, ven, None)
+        true_res = solve(Parameters(**{**base, "p_in": truth["p_in"]}),
+                         replace(grid, porosity=truth["porosity"]))
+        tof = true_res.tof[np.isfinite(true_res.tof)]
+        t_end = 1.2 * float(np.percentile(tof, 80)) * truth["porosity"]
+        times = np.linspace(0.0, t_end, int(n_samples))
+        aif = tkm.gamma_variate_aif(times, t0=0.05 * t_end, A=3.0, B=0.05 * t_end)
+        aif = aif / aif.max()
+        tissue = simulate_tissue_curve(true_res, times, aif, porosity=truth["porosity"])
+        if noise > 0:
+            rng = np.random.default_rng(seed)
+            tissue = tissue + noise * tissue.max() * rng.standard_normal(tissue.size)
+        out["synthetic"] = {"truth": truth, "noise": noise}
+    elif tissue is None or aif is None:
+        raise ValueError("give times, tissue and aif together (or none for a synthetic test)")
+    fit = fit_dce(times, tissue, aif, grid, params, base=base, domain_limit=domain,
+                  art=art, ven=ven)
+    res = asdict(fit)
+    res.pop("model")
+    return {**out, **res}
+
+
 _SCENARIO_KEYS = ("p_in", "p_out", "permeability", "lesion")
 
 
@@ -1020,6 +1072,22 @@ def build_server():
         Returns the mean bolus arrival time by element class and the overall mean
         transit time to the venous outlet. `rho_c` is the connection search radius."""
         return direct_transit(rho_c=rho_c, p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
+
+    @server.tool()
+    def fit_dce_curve(times: list[float] | None = None, tissue: list[float] | None = None,
+                      aif: list[float] | None = None, params: dict | None = None,
+                      dim: int = 3, shape: str = "kidney", generations: int = 4,
+                      fill: str = "cco", n_terminals: int = 40, truth: dict | None = None,
+                      noise: float = 0.0, seed: int = 0) -> dict:
+        """Fit several hybrid-model inputs at once to a DCE-MRI tissue curve in an organ
+        (2-D or 3-D): `params` maps p_in / porosity / permeability / mu to [lo, hi]
+        bounds (default p_in ~ flow and porosity ~ blood volume). Pass measured `times`,
+        `tissue`, `aif`; or omit them to fit a synthetic curve simulated from `truth` with
+        relative `noise` (an identifiability check). Returns fitted values ± 1-sigma
+        errors, the correlation matrix, R² and warnings (e.g. p_in and mu correlate)."""
+        return tissue_dce_fit(times=times, tissue=tissue, aif=aif, params=params, dim=dim,
+                              shape=shape, generations=generations, fill=fill,
+                              n_terminals=n_terminals, truth=truth, noise=noise, seed=seed)
 
     @server.tool()
     def experiment_in_tissue(param: str = "p_in", values: list[float] | None = None,

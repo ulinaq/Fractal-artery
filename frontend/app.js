@@ -25,6 +25,7 @@ import {
   runTransient, runUQ, stopFlow, stopTimer, syncFlowUI, toggleFlowPlay, loadDeltaField,
 } from "./run.js";
 import { createCompare } from "./compare.js";
+import { mountDceFit } from "./dcefit.js";
 
 // ── undo / redo (workspace geometry history) ───────────────────────────────────
 // Snapshots the editable geometry after each action — vessel networks (incl.
@@ -591,4 +592,7 @@ const compare = createCompare({
   onMap: (name, sid) => loadDeltaField(name, sid).catch((e) => status(e.message, "err")),
   onInfo: (msg, err) => { $("cmp-info").textContent = msg; $("cmp-info").style.color = err ? "#b91c1c" : ""; },
 });
-state.onResultView = () => compare.refresh().catch(() => {});
+// fit the model to a measured DCE-MRI curve (several inputs at once)
+const dce = mountDceFit($("dce-box"), { projectId: () => state.project, prefix: "dce-" });
+state.onResultView = () => Promise.all([compare.refresh().catch(() => {}),
+                                        dce.load().catch(() => {})]);

@@ -342,6 +342,17 @@ class ProjectStore:
         with np.load(self._nettracer_path(pid)) as d:
             return {k: d[k] for k in d.files}
 
+    # -- DCE-MRI fit (latest per project) ------------------------------------ #
+    def _dcefit_path(self, pid: str) -> Path:
+        return self.blobs / f"{pid}.dcefit.json"
+
+    def save_dce_fit(self, pid: str, payload: dict) -> None:
+        self._dcefit_path(pid).write_text(json.dumps(payload))
+
+    def load_dce_fit(self, pid: str) -> dict | None:
+        p = self._dcefit_path(pid)
+        return json.loads(p.read_text()) if p.exists() else None
+
     # -- result snapshots (run comparison / A-B) ------------------------------ #
     def snapshot_path(self, pid: str, sid: str) -> Path:
         return self.blobs / f"{pid}.snap.{sid}.npz"

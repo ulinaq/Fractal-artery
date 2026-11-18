@@ -83,7 +83,7 @@ def test_server_registers_expected_tools():
             "tissue_perfusion_analysis", "optimize_trees_in_tissue",
             "tissue_uncertainty_calibration", "direct_model_in_tissue",
             "export_tissue_fields", "lesion_in_tissue", "compare_scenarios",
-            "experiment_in_tissue", "describe_model"} <= tools
+            "experiment_in_tissue", "fit_dce_curve", "describe_model"} <= tools
 
 
 def test_calibrate_to_flow_recovers_value():
@@ -392,3 +392,15 @@ def test_experiment_in_tissue_sweep(dim):
     assert k["rows"][0]["arterial_inflow"] < k["rows"][1]["arterial_inflow"]
     with pytest.raises(ValueError, match="param must be"):
         mcp_server.tissue_experiment(param="mu")
+
+
+@pytest.mark.parametrize("dim", [2, 3])
+def test_fit_dce_curve_recovers_a_synthetic_truth(dim):
+    out = mcp_server.tissue_dce_fit(dim=dim, shape="kidney", generations=3, n_terminals=12,
+                                    truth={"p_in": 15.0, "porosity": 0.25}, n_samples=30)
+    assert out["synthetic"]["truth"]["p_in"] == 15.0
+    assert out["params"]["p_in"] == pytest.approx(15.0, rel=1e-3)
+    assert out["params"]["porosity"] == pytest.approx(0.25, rel=1e-3)
+    assert out["r2"] > 0.999
+    with pytest.raises(ValueError, match="together"):
+        mcp_server.tissue_dce_fit(times=[0, 1, 2, 3], dim=dim)
