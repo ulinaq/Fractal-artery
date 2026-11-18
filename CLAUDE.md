@@ -173,6 +173,13 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   (+`radius_to_um`); `run_hybrid` then passes a per-tree `(mu_art, mu_ven)` pair
   of per-segment viscosities to the solvers. `_resistances` accepts a scalar or a
   per-tree pair.
+- **Shear-thinning (Carreau) blood**: `Parameters.shear_thinning` (+`carreau_lambda`,
+  `carreau_n`, `carreau_mu0_ratio`) wraps any network solve in
+  `viscosity.solve_shear_thinning` (Picard on the per-segment factor from the wall shear
+  rate `4|Q|/(πr³)`), via `pipeline.shear_thinning_solve` in both `run_hybrid` and
+  `run_hybrid_3d`; the result's `rheology` dict feeds `viscosity_factor_*` into the
+  summary. `carreau_mu0_ratio=1` must stay identical to the Newtonian solve (tested).
+  Run option `RunRequest.shear_thinning`/`carreau_lambda`; MCP `shear_thinning_blood`.
 - **Nonlinear solve is a fixed-point** that reuses one LU factorisation of the
   linear operator (`solve_nonlinear`), ~12× faster than the old dense-Jacobian
   Newton and reducing exactly to `solve_linear` when `junction_loss=False`.

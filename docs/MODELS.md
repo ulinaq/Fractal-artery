@@ -57,6 +57,26 @@ corr  = (d/(d−1.1))²                                            (Eq. 4.5, wal
 μ_rel = (1 + (μ₀.₄₅ − 1)·((1−H_D)^C − 1)/((1−0.45)^C − 1)·corr)·corr
 ```
 
+**Shear-thinning blood — Carreau law** (`viscosity.carreau_factor`,
+`viscosity.solve_shear_thinning`; `Parameters.shear_thinning`). Red cells aggregate at low
+shear, so blood thickens where flow is slow. Each segment's viscosity is its Newtonian
+(high-shear, optionally Fåhræus–Lindqvist) value times
+
+```
+γ̇_w = 4|Q| / (π r³)                                           (Poiseuille wall shear rate)
+f(γ̇) = 1 + (μ₀/μ∞ − 1) · (1 + (λ γ̇)²)^((n−1)/2)                (Carreau)
+```
+
+with blood constants n = 0.3568, μ₀/μ∞ = 56/3.45 ≈ 16.2 (Cho & Kensey 1991) and the time
+constant λ in model time units (`carreau_lambda`, default 3000 — thinning sets in where
+λγ̇ ≈ 1). Solved by Picard iteration on the per-segment factor (solve → shear rates →
+factors → re-solve) until `max |Δ ln f| ≤ 10⁻⁶`; in the power-law range one step contracts
+by `1 − n`, so it converges for any `n ∈ (0, 1]`. It wraps any network solve (linear,
+nonlinear junction losses, elasticity, phase separation) in 2-D and 3-D
+(`run_hybrid` / `run_hybrid_3d`); `μ₀/μ∞ = 1` reduces exactly to the Newtonian solve.
+Consequence: flow grows *faster* than linearly with the pressure drop (`Q ∝ Δp^k`,
+k ≈ 1.2 in the organ demos) and slow vessels slow further (MTT rises more than inflow falls).
+
 **Pries–Secomb phase separation** (RBC skimming at a bifurcation,
 `hematocrit.phase_separation_fraction`, Pries–Secomb–Gaehtgens 1990). The fraction of
 RBCs entering daughter α given its blood-flow fraction `FQ_B` (`d` in µm):

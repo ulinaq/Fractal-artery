@@ -56,7 +56,10 @@ no separate dev server.
 - **Grow** — grow the arterial tree into the tissue (space colonisation or CCO,
   via the method picker; `POST /projects/{id}/grow`); the grown tree is overlaid.
 - **Run** — solve the hybrid model as an async job (`POST …/run` + poll
-  `/jobs/{id}`).
+  `/jobs/{id}`). Options: nonlinear junction losses, phase separation, wall
+  elasticity and **shear-thinning blood** (Carreau law, time constant λ — the
+  summary then shows the viscosity-factor range); the 3-D viewer has the same
+  shear-thinning option.
 - **Result** — view the pressure / flux / time-of-flight field as a
   colour-blind-safe *viridis* heatmap with the vascular network overlaid and a
   colour bar; read the inflow/outflow summary; **export** the fields as `.npz`,

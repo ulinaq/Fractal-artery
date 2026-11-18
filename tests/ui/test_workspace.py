@@ -196,3 +196,21 @@ def test_add_loops_then_solve(page, server):
     wait_status(page, "solved", "failed", timeout=120000)
     assert "solved" in page.inner_text("#status")
     assert not page.errors
+
+
+def test_shear_thinning_run_reports_the_viscosity_range(page, server):
+    """Tick shear-thinning blood: its λ shows, the run reports the Carreau viscosity
+    range, and the option hides for the direct-connection model."""
+    _new_project(page, server)
+    assert page.is_hidden("#lambda-row")
+    page.check("#shear-thin")
+    assert page.is_visible("#lambda-row")
+    page.click("#btn-run")
+    wait_status(page, "solved", "failed", timeout=120000)
+    # the summary fills in just after the "solved" status
+    page.wait_for_function("document.querySelector('#summary').textContent"
+                           ".includes('viscosity × max')", timeout=30000)
+    page.select_option("#run-model", "direct")
+    assert page.is_hidden("#shear-row")
+    assert page.is_hidden("#lambda-row")
+    assert not page.errors

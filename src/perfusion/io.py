@@ -90,7 +90,17 @@ def results_summary(result: HybridResult) -> dict:
         "mtt": tm.mtt,          # mean transit time (flow-weighted)
         "cth": tm.cth,          # capillary transit-time heterogeneity (std dev)
         "rd": tm.rd,            # relative dispersion = cth / mtt
+        **_rheology_summary(getattr(result, "rheology", None)),
     }
+
+
+def _rheology_summary(info: dict | None) -> dict:
+    """Shear-thinning solve diagnostics (the Carreau viscosity-factor range)."""
+    if not info:
+        return {}
+    return {"viscosity_factor_min": info["factor_min"],
+            "viscosity_factor_max": info["factor_max"],
+            "rheology_iterations": int(info["iterations"])}
 
 
 def save_results(result: HybridResult, path: str | Path) -> Path:

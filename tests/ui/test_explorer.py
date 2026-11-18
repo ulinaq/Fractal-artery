@@ -497,3 +497,26 @@ def test_optimise_in_the_organ_then_use_it_in_the_simulation(page, server, dim):
         assert "artery segments" in sim.inner_text("#node-info")
     else:
         sim.wait_for_selector("#proj-card:not([hidden])")
+
+
+def test_3d_viewer_shear_thinning_run(page, server):
+    """Shear-thinning blood in the 3-D viewer: λ appears with the checkbox and the run
+    summary shows the viscosity range; the option hides for the direct model."""
+    import httpx
+
+    pid = httpx.post(server + "/explore/project", timeout=60, json={
+        "dim": 3, "shape": "heart", "fill": "cco", "n_terminals": 12, "generations": 3,
+        "nx": 16, "name": "ui-3d-carreau"}).json()["id"]
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(f"{server}/viewer3d.html?project={pid}")
+    page.wait_for_selector("#v3-an-card:not([hidden])")
+    assert page.is_hidden("#v3-lambda-row")
+    page.check("#v3-shear")
+    assert page.is_visible("#v3-lambda-row")
+    page.click("#v3-run")
+    page.wait_for_function("document.querySelector('#v3-summary').textContent"
+                           ".includes('viscosity')", timeout=120000)
+    page.select_option("#v3-model", "direct")
+    assert page.is_hidden("#v3-shear-row")
+    assert not errors

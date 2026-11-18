@@ -58,6 +58,14 @@ class Parameters:
     fahraeus_lindqvist: bool = False
     radius_to_um: float = 1.0  # model-radius -> micrometre conversion for the FL law
 
+    # Shear-thinning blood (Carreau law, viscosity.carreau_factor): each segment's
+    # viscosity is its Newtonian value x a factor that rises from 1 (high shear) to
+    # carreau_mu0_ratio (at rest) as the wall shear rate falls below ~1/carreau_lambda.
+    shear_thinning: bool = False
+    carreau_lambda: float = 3000.0   # time constant, model time units
+    carreau_n: float = 0.3568        # power-law index (blood, Cho & Kensey 1991)
+    carreau_mu0_ratio: float = 16.23  # zero-shear / high-shear viscosity (56 / 3.45)
+
     # Arterial geometry
     r0: float = 2.0           # initial (root) radius
     length_to_radius: float = 10.0

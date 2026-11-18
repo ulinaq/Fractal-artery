@@ -2042,3 +2042,28 @@ def test_tracer_images_3d_projects_like_the_viewer():
     assert bars[-1] == 120
     turning = helpers.tracer_images_3d(tracer, (0, 10, 0, 10, 0, 10), seg, size=120)
     assert not np.array_equal(turning[2], imgs[2])              # spin moves the camera
+
+
+@pytest.mark.parametrize("dim", [2, 3])
+def test_run_with_shear_thinning_blood(client, dim):
+    if dim == 3:
+        pid = _explorer_project(client, 3)["id"]
+    else:
+        pid = client.post("/projects", json={"name": "carreau",
+                                             "grid": {"nx": 40, "ny": 46}}).json()["id"]
+
+    def run(**kw):
+        jid = client.post(f"/projects/{pid}/run", json=kw).json()["id"]
+        assert _wait_for_job(client, jid)["state"] == "done"
+        return client.get(f"/projects/{pid}/results").json()
+
+    newt = run()
+    assert "viscosity_factor_max" not in newt
+    thin = run(shear_thinning=True, carreau_lambda=3000)
+    assert 0 < thin["arterial_inflow"] < newt["arterial_inflow"]
+    assert thin["arterial_inflow"] == pytest.approx(thin["venous_outflow"], rel=1e-6)
+    assert 1.0 <= thin["viscosity_factor_min"] < thin["viscosity_factor_max"]
+    assert thin["rheology_iterations"] >= 1
+    bad = client.post(f"/projects/{pid}/run", json={"shear_thinning": True,
+                                                    "carreau_lambda": 0})
+    assert bad.status_code == 422

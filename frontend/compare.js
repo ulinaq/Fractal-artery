@@ -8,9 +8,10 @@ const LABELS = {
   pressure_max: "pressure max", flux_mean: "flux mean", mtt: "MTT", cth: "CTH", rd: "RD",
   tof_max: "TOF max", flux_range: "flux range", pressure_min: "pressure min",
   flux_std: "flux std", tof_mean: "TOF mean", tof_std: "TOF std",
+  viscosity_factor_min: "viscosity × min", viscosity_factor_max: "viscosity × max",
 };
-// network sizes: listed only when they changed (e.g. after regrowing a tree)
-const STRUCTURE = /(_nodes|_segments)$/;
+// network sizes / solver counts: listed only when they changed (e.g. after regrowing a tree)
+const STRUCTURE = /(_nodes|_segments|_iterations)$/;
 
 const fmt = (v) => (v == null || !Number.isFinite(v) ? "–"
   : Math.abs(v) < 1e-3 || Math.abs(v) > 1e4 ? v.toExponential(2) : v.toPrecision(4));

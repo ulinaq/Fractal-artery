@@ -358,6 +358,9 @@
         <label class="check" id="elastic-row"><input id="elasticity" type="checkbox" /> vessel-wall elasticity</label>
         <label id="compliance-row" style="display:none">compliance (Δr per unit pressure)
           <input id="compliance" type="number" value="0.01" step="0.005" min="0" /></label>
+        <label class="check" id="shear-row" title="Carreau law: blood thickens where flow is slow (red-cell aggregation) and thins at high shear"><input id="shear-thin" type="checkbox" /> shear-thinning blood (Carreau)</label>
+        <label id="lambda-row" style="display:none" title="thinning sets in where λ × wall shear rate ≈ 1; larger λ → closer to the high-shear (Newtonian) viscosity">Carreau time constant λ
+          <input id="carreau-lambda" type="number" value="3000" step="500" min="1" /></label>
         <label id="maxiter-row" style="display:none">max iterations (nonlinear fixed-point)
           <input id="max-iter" type="number" value="100" min="1" step="10" />
         </label>

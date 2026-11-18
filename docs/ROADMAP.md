@@ -376,6 +376,7 @@ a research project. Each notes where it lands in the tree.
 | ✅ Multi-compartment Darcy (arteriole/capillary/venule beds) | N stacked porous compartments coupled by inter-compartment exchange β (Michler/Hyde–Smith); a generalised terminal response plugs into the unchanged network solver, N=1 reduces to `run_hybrid` (`core/multicompartment.py`, `run_multicompartment`, web card + MCP `multicompartment_perfusion`) | `core/multicompartment` + `pipeline` | done |
 | ✅ Oxygen / solute transport + extraction | steady advection–reaction(–diffusion) of a blood-borne solute (`core/oxygen.py`): delivery at feeds, first-order tissue uptake at Damköhler rate k, venous washout → saturation / uptake maps + global OEF | `core/oxygen.py` | done |
 | ✅ Heterogeneous permeability | per-cell `K(x)` field + harmonic-mean transmissibilities (`Grid.permeability` scalar-or-field, `rasterize_permeability`, MCP `heterogeneous_perfusion_lesion`) + an interactive low-K-lesion painting UI in Tissue mode + **diagonal-tensor anisotropy** (`Kx ≠ Ky`, axis-split harmonic transmissibilities, `GridIn.permeability_y` + a web K-anisotropy input, MCP `anisotropic_perfusion_bed`); *todo:* full (off-diagonal) tensor K via MPFA | `core/darcy` + `core/geometry` + web | done |
+| ✅ Shear-thinning (Carreau) blood | per-segment viscosity from the Poiseuille wall shear rate, Picard fixed point around any network solve (`viscosity.solve_shear_thinning`, `Parameters.shear_thinning`), 2-D + 3-D, run option + MCP `shear_thinning_blood` | `core/viscosity` + `pipeline[3d]` | done |
 | ✅ Structural adaptation / autoregulation (Pries–Secomb) | wall-shear-driven radius remodelling drives the tree toward Murray's law (`|Q| ∝ r³`), early-stopping at the target exponent (`core/adaptation.py`, `run_adaptation`, `POST …/adapt`, web Adapt card, MCP `adapt_vessel_network`) | `core/adaptation` + `pipeline` | done |
 | Poroelasticity (Biot) | tissue deformation ↔ perfusion coupling | new module | XL |
 
@@ -680,8 +681,15 @@ Editing 3-D trees by hand is now done too (§11.4).
 
 ## 11.2 Modelling & numerics
 
-- **Non-Newtonian rheology options** (shear-thinning apparent viscosity beyond
-  Fåhræus–Lindqvist) — §4. *M.*
+- ✅ ~~**Non-Newtonian rheology options**~~ — shear-thinning **Carreau** blood
+  (`viscosity.carreau_factor` / `solve_shear_thinning`, `Parameters.shear_thinning` +
+  `carreau_lambda`/`carreau_n`/`carreau_mu0_ratio`): per-segment viscosity from the
+  wall shear rate, Picard fixed point around any network solve, composes with
+  Fåhræus–Lindqvist / elasticity / phase separation; 2-D and 3-D (`run_hybrid[_3d]`).
+  Run option (`RunRequest.shear_thinning`, `carreau_lambda`) in the 2-D run card and the
+  3-D viewer; the summary reports the viscosity-factor range; MCP `shear_thinning_blood`
+  (Newtonian vs Carreau inflow, apparent resistance and the flow–pressure exponent).
+  *Next:* Casson yield stress, hematocrit-dependent Carreau constants.
 - **MPFA-O** for full (off-diagonal) tensor permeability / skewed grids — §9.2, deferred. *L.*
 - **Staged / optimised CCO** (global re-optimisation of bifurcation positions) — §9.3. *L.*
 - ✅ ~~**Anastomoses (vessel loops)**~~ — `core.anastomosis.add_anastomoses`: side-to-side

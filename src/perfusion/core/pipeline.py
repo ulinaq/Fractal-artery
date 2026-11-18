@@ -15,7 +15,7 @@ from . import adaptation, darcy, geometry, multicompartment, network, timeofflig
 from .darcy import Grid
 from .geometry import Network
 from .parameters import Parameters
-from .viscosity import apparent_viscosity
+from .viscosity import apparent_viscosity, solve_shear_thinning
 
 
 def _segment_viscosity(net: Network, prm: Parameters):
@@ -40,6 +40,17 @@ class HybridResult:
     fx: np.ndarray | None = None  # staggered x-face fluxes
     fy: np.ndarray | None = None  # staggered y-face fluxes
     sources: list = field(default_factory=list)  # per-terminal (cells, weights)
+    # shear-thinning solve: {iterations, converged, factor_min, factor_max} (else None)
+    rheology: dict | None = None
+
+
+def shear_thinning_solve(solve, art: Network, ven: Network, viscosity, prm: Parameters,
+                         max_iter: int = 100):
+    """``viscosity.solve_shear_thinning`` with the Carreau constants from ``prm`` —
+    shared by the 2-D and 3-D pipelines."""
+    return solve_shear_thinning(solve, art, ven, viscosity, lam=prm.carreau_lambda,
+                                n=prm.carreau_n, mu0_ratio=prm.carreau_mu0_ratio,
+                                max_iter=max_iter)
 
 
 def _terminal_cells(grid: Grid, art: Network, ven: Network,
@@ -218,11 +229,21 @@ def run_hybrid(prm: Parameters, grid: Grid,
                                                                         eps)
 
     # Per-segment viscosity (radius-dependent when Fahraeus-Lindqvist is enabled).
-    def _solve(a, v, visc):
+    def _solve_newtonian(a, v, visc):
         if nonlinear:
             return network.solve_nonlinear(a, v, response, prm.p_in, prm.p_out, prm, visc,
                                            max_iter=max_iter, tol=tol)
         return network.solve_linear(a, v, response, prm.p_in, prm.p_out, visc)
+
+    rheology = None
+
+    def _solve(a, v, visc):            # + shear-thinning blood when enabled (Carreau)
+        nonlocal rheology
+        if not prm.shear_thinning:
+            return _solve_newtonian(a, v, visc)
+        sol, _, rheology = shear_thinning_solve(_solve_newtonian, a, v, visc, prm,
+                                                max_iter=max_iter)
+        return sol
 
     if elasticity and prm.compliance:
         # Vessel-wall elasticity (Eq. 4.9): radii swell with transmural pressure,
@@ -272,7 +293,8 @@ def run_hybrid(prm: Parameters, grid: Grid,
 
     return HybridResult(art=art, ven=ven, grid=grid, solution=sol,
                         pressure=pressure, flux=flux, tof=tof,
-                        domain_limit=domain_limit, fx=fx, fy=fy, sources=sources)
+                        domain_limit=domain_limit, fx=fx, fy=fy, sources=sources,
+                        rheology=rheology)
 
 
 @dataclass
