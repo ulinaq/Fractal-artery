@@ -60,6 +60,7 @@ body { background: var(--bg); color: var(--ink); font-size: 14px; }
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
   padding: 14px; box-shadow: var(--shadow);
 }
+.card h3 { margin: 14px 0 4px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
 .card h2 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-2); }
 
 /* Collapsible cards (native <details>) */
@@ -160,7 +161,7 @@ canvas { background: #fff; border: 1px solid var(--line); border-radius: 6px; ma
 #proj-id a:hover { text-decoration: underline; }
 button:disabled { opacity: .45; }
 
-input.mini { width: 3.6em; }
+input.mini { width: 4.8em; padding: 5px 6px; margin-top: 0; flex: none; }
 #uq-out .bar { height: 9px; background: var(--accent); border-radius: 2px; display: inline-block; vertical-align: middle; }
 #uq-out table { border-collapse: collapse; margin-top: 6px; }
 #uq-out td { padding: 1px 6px 1px 0; white-space: nowrap; }

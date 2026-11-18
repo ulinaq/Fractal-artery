@@ -39,9 +39,16 @@ def geometry_fixed(names, art=None, ven=None, trees=None) -> bool:
 def _sample_solver(names, grid, domain_limit, art, ven, trees):
     """``(prm, grid) -> HybridResult`` for a sweep. When the geometry is fixed across
     samples the trees and the Darcy factorisation are built once (lazily, from the
-    first sample) and reused — identical results, ~one LU instead of one per sample."""
+    first sample) and reused — identical results, ~one LU instead of one per sample.
+
+    A :class:`~perfusion.core.darcy3d.Grid3D` grid runs the 3-D hybrid
+    (:func:`~perfusion.core.pipeline3d.run_hybrid_3d`) on the given fixed 3-D trees,
+    reusing one :func:`~perfusion.core.pipeline3d.darcy_coupling_3d` unless the
+    permeability varies."""
     from .core.pipeline import darcy_response_for
 
+    if is_3d_grid(grid):
+        return _sample_solver_3d(names, grid, domain_limit, art, ven)
     if not geometry_fixed(names, art, ven, trees):
         def solve(prm, g):
             a, v = trees(prm) if trees else (art, ven)
@@ -57,6 +64,38 @@ def _sample_solver(names, grid, domain_limit, art, ven, trees):
         return run_hybrid(prm, g, domain_limit=domain_limit, art=cache["a"], ven=cache["v"],
                           darcy_response=cache["r"])
     return solve_reusing
+
+
+# The 3-D hybrid uses a scalar viscosity and fixed (given) trees, so only these vary it.
+PARAMS_3D = ("p_in", "p_out", "mu", "permeability")
+
+
+def is_3d_grid(grid) -> bool:
+    return getattr(grid, "nz", None) is not None
+
+
+def _sample_solver_3d(names, grid, domain_limit, art, ven):
+    """The 3-D sweep solver: fixed 3-D trees, one Darcy coupling reused across samples
+    unless the permeability changes (then each sample rebuilds it)."""
+    from .core.pipeline3d import darcy_coupling_3d, run_hybrid_3d
+
+    bad = [n for n in names if n not in PARAMS_3D]
+    if bad:
+        raise ValueError(f"{', '.join(bad)} cannot vary on a 3-D model (it uses fixed 3-D "
+                         f"trees and a scalar viscosity); vary {', '.join(PARAMS_3D)}")
+    if art is None or ven is None:
+        raise ValueError("a 3-D sweep needs the 3-D arterial and venous trees (art, ven)")
+    reuse = "permeability" not in names
+    cache = {}
+
+    def solve(prm, g):
+        darcy = None
+        if reuse:
+            if not cache:
+                cache["d"] = darcy_coupling_3d(g, art, ven, domain_limit)
+            darcy = cache["d"]
+        return run_hybrid_3d(prm, g, art, ven, domain_limit, darcy=darcy)
+    return solve
 
 
 def latin_hypercube(n: int, d: int, rng: np.random.Generator) -> np.ndarray:

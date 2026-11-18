@@ -4,6 +4,7 @@
 
 import { viridisCss } from "./palette.js";
 import { createViewport } from "./viewport.js";
+import { uqHtml } from "./uqview.js";
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("view3d");
@@ -42,9 +43,14 @@ async function loadProject() {
   $("model-row").style.display = "none";     // project mode: no demo picker
   $("gen-row").style.display = "none";
   const field = $("v3-field").value;
+  const mc = field.startsWith("mc_");
   $("v3-k-row").hidden = !OXYGEN.has(field);
-  $("status").textContent = OXYGEN.has(field) ? "solving oxygen…" : "loading project…";
-  const r = await fetch(`/projects/${PROJECT}/view3d?field=${field}&k=${$("v3-k").value || 1}`);
+  $("v3-mc-row").hidden = !mc;
+  $("status").textContent = OXYGEN.has(field) ? "solving oxygen…"
+    : mc ? "solving the compartments…" : "loading project…";
+  const q = new URLSearchParams({ field, k: $("v3-k").value || 1,
+                                  n: $("v3-mc-n").value || 3, beta: $("v3-mc-beta").value || 1 });
+  const r = await fetch(`/projects/${PROJECT}/view3d?${q}`);
   if (r.status === 409 && field !== "pressure") {   // tracer field before the flow exists
     $("status").textContent = "compute the 🌊 flow first for tracer fields";
     $("status").className = "status err";
@@ -52,7 +58,9 @@ async function loadProject() {
     return loadProject();
   }
   if (!r.ok) {
-    $("status").textContent = r.status === 404 ? "project not found" : "3-D view unavailable";
+    const j = await r.json().catch(() => ({}));
+    $("status").textContent = r.status === 404 ? "project not found"
+      : typeof j.detail === "string" ? j.detail : "3-D view unavailable";
     $("status").className = "status err"; return;
   }
   setData(await r.json());
@@ -81,6 +89,14 @@ function show3dProject() {
   if (data.oef != null) {
     $("v3-summary").innerHTML += `<div class="stat"><b>${f(data.oef)}</b><span>O₂ extraction (OEF)</span></div>`;
   }
+  if (data.mc && data.mc.perfusion != null) {
+    $("v3-summary").innerHTML += `<div class="stat"><b>${f(data.mc.perfusion)}</b>`
+      + `<span>capillary exchange (N=${data.mc.n})</span></div>`;
+  }
+  if (s && data.has_result && !$("v3-cal-target").value) {   // a sensible default target
+    $("v3-cal-target").value = Number((1.2 * s.arterial_inflow).toPrecision(3));
+  }
+  $("v3-an-card").hidden = false;
   $("v3-run").textContent = data.has_result ? "↻ Re-run 3-D simulation" : "▶ Run 3-D simulation";
   $("v3-flow-card").hidden = !data.has_result;    // flow needs a solved field
   $("v3-tree-card").hidden = false;
@@ -176,6 +192,68 @@ async function treeOp(kind) {
   } finally {
     ["v3-grow", "v3-prune", "v3-adapt"].forEach((id) => ($(id).disabled = false));
   }
+}
+// Monte-Carlo / Sobol uncertainty over the ticked input ranges (each sample a 3-D solve)
+async function uq3d() {
+  const params = {};
+  const range = (id) => [Number($(`${id}-lo`).value), Number($(`${id}-hi`).value)];
+  if ($("v3-uq-pin").checked) params.p_in = range("v3-uq-pin");
+  if ($("v3-uq-mu").checked) params.mu = range("v3-uq-mu");
+  if ($("v3-uq-k").checked) params.permeability = range("v3-uq-k");
+  const out = $("v3-uq-out");
+  if (!Object.keys(params).length) { out.textContent = "tick at least one uncertain input"; return; }
+  const sobol = $("v3-uq-sobol").checked;
+  const n = Math.round(Number($("v3-uq-n").value) || 16);
+  const ns = sobol ? Math.max(12, n) : n;
+  $("v3-uq").disabled = true;
+  out.textContent = `running ${ns} 3-D solves…`;
+  try {
+    const d = await postJSON("uq", { n_samples: ns, params, method: sobol ? "sobol" : "correlation" });
+    out.innerHTML = uqHtml(d);
+  } catch (e) { out.textContent = e.message; } finally { $("v3-uq").disabled = false; }
+}
+
+// Inverse problem: fit one input so a model quantity matches a measured value
+async function calibrate3d() {
+  const out = $("v3-cal-out");
+  const target = Number($("v3-cal-target").value);
+  if (!Number.isFinite(target) || $("v3-cal-target").value === "") {
+    out.textContent = "enter the measured target value"; return;
+  }
+  const param = $("v3-cal-param").value, qoi = $("v3-cal-qoi").value;
+  $("v3-cal").disabled = true;
+  out.textContent = "searching (one 3-D solve per step)…";
+  try {
+    const d = await postJSON("calibrate", { target, param, qoi,
+      bounds: [Number($("v3-cal-lo").value), Number($("v3-cal-hi").value)] });
+    const f = (v) => (Math.abs(v) < 1e-3 || Math.abs(v) > 1e4 ? v.toExponential(3) : v.toPrecision(4));
+    const err = Math.abs(d.achieved - d.target) / (Math.abs(d.target) || 1);
+    const [lo, hi] = [Number($("v3-cal-lo").value), Number($("v3-cal-hi").value)];
+    const atBound = Math.min(Math.abs(d.value - lo), Math.abs(d.value - hi)) <= 1e-3 * (hi - lo);
+    out.textContent = `${d.param} = ${f(d.value)} gives ${d.qoi} = ${f(d.achieved)} `
+      + `(target ${f(d.target)}, ${(100 * err).toFixed(2)}% off) · ${d.n_eval} solves`;
+    if (err > 0.01 && atBound) {
+      out.textContent += ` — stopped at the search bound: the target is out of reach by `
+        + `varying ${d.param} in [${lo}, ${hi}]. Widen the range or fit another input `
+        + `(flow through a tree-limited organ barely responds to K).`;
+    }
+  } catch (e) { out.textContent = e.message; } finally { $("v3-cal").disabled = false; }
+}
+// sensible search bounds per fitted input
+const CAL_BOUNDS = { permeability: [0.1, 10], p_in: [1, 50], mu: [0.2, 5] };
+$("v3-cal-param").addEventListener("change", (e) => {
+  const [lo, hi] = CAL_BOUNDS[e.target.value];
+  $("v3-cal-lo").value = lo; $("v3-cal-hi").value = hi;
+});
+$("v3-cal-qoi").addEventListener("change", (e) => {   // the default target is an inflow
+  const s = data && data.summary;
+  $("v3-cal-target").value = e.target.value === "arterial_inflow" && s
+    ? Number((1.2 * s.arterial_inflow).toPrecision(3)) : "";
+});
+$("v3-uq").addEventListener("click", () => uq3d());
+$("v3-cal").addEventListener("click", () => calibrate3d());
+for (const id of ["v3-mc-n", "v3-mc-beta"]) {
+  $(id).addEventListener("change", () => loadProject().catch(() => {}));
 }
 $("v3-flow").addEventListener("click", () => flow3d().catch((e) => { $("v3-kin").textContent = e.message; }));
 $("v3-grow").addEventListener("click", () => treeOp("grow"));

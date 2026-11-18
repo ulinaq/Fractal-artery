@@ -79,7 +79,7 @@ def test_server_registers_expected_tools():
             "adapt_vessel_network", "uncertainty_quantification",
             "sobol_sensitivity_indices", "calibrate_parameter_to_flow",
             "tissue_perfusion_analysis", "optimize_trees_in_tissue",
-            "describe_model"} <= tools
+            "tissue_uncertainty_calibration", "describe_model"} <= tools
 
 
 def test_calibrate_to_flow_recovers_value():
@@ -263,6 +263,38 @@ def test_tissue_analysis_runs_the_same_chain_in_2d_and_3d(dim):
     if dim == 3:
         a = r["adaptation"]
         assert abs(a["murray_final"] - 3) <= abs(a["murray_start"] - 3)
+
+
+@pytest.mark.parametrize("dim", [2, 3])
+def test_tissue_analysis_multicompartment_bed(dim):
+    r = mcp_server.tissue_analysis(dim=dim, shape="kidney", generations=3, n_terminals=15,
+                                   n_frames=8, compartments=3, beta=1.0)
+    mc = r["multicompartment"]
+    assert mc["n"] == 3
+    assert mc["capillary_perfusion"] > 0
+    p = mc["compartment_mean_pressure"]
+    assert p[0] > p[1] > p[2]                        # arteriole → venule cascade
+
+
+@pytest.mark.parametrize("dim", [2, 3])
+def test_tissue_sweep_uq_and_calibration_in_the_organ(dim):
+    r = mcp_server.tissue_sweep(dim=dim, shape="kidney", generations=3, n_terminals=15,
+                                n_samples=6, permeability_range=(0.5, 2.0))
+    assert r["dim"] == dim
+    sens = r["uq"]["inflow_sensitivity"]
+    assert sens["p_in"] > 0
+    assert sens["mu"] < 0
+    s = mcp_server.tissue_sweep(dim=dim, shape="kidney", generations=3, n_terminals=15,
+                                n_samples=8, mu_range=None, method="sobol",
+                                calibrate_target=None)
+    assert s["uq"]["fit_r2"] > 0.9
+    base = mcp_server.generate_trees(dim=dim, shape="kidney", generations=3, fill="cco",
+                                     n_terminals=15)["inflow"]
+    c = mcp_server.tissue_sweep(dim=dim, shape="kidney", generations=3, n_terminals=15,
+                                p_in_range=None, mu_range=None, calibrate_param="p_in",
+                                calibrate_target=2 * base, calibrate_bounds=(1, 40))
+    assert "uq" not in c
+    assert c["calibration"]["recovered_value"] == pytest.approx(20.0, rel=1e-3)
 
 
 @pytest.mark.parametrize("dim", [2, 3])

@@ -424,7 +424,8 @@ def generate_trees(dim: int = 2, shape: str = "ellipse", generations: int = 4,
 def tissue_analysis(dim: int = 3, shape: str = "kidney", generations: int = 4,
                     fill: str = "cco", n_terminals: int = 40, extent: float = 1.0,
                     k: float = 1.0, adapt: bool = False, n_frames: int = 30,
-                    model: str = "1CM", seed: int = 0) -> dict:
+                    model: str = "1CM", seed: int = 0, compartments: int = 0,
+                    beta: float = 1.0) -> dict:
     """Grow artery + vein trees into an organ (2-D or 3-D), solve the hybrid model and
     run the downstream analyses on that tissue — the same chain in both dimensions:
 
@@ -432,7 +433,9 @@ def tissue_analysis(dim: int = 3, shape: str = "kidney", generations: int = 4,
     - **transit-time** metrics (MTT, CTH) of the Darcy time-of-flight,
     - steady **oxygen** extraction (OEF) at Damköhler number ``k``,
     - a contrast-**tracer** bolus advected through the bed (``n_frames`` snapshots) and a
-      tracer-kinetic fit (``model``: MS / 1CM / 2CUM / 2CXM) of its tissue curve.
+      tracer-kinetic fit (``model``: MS / 1CM / 2CUM / 2CXM) of its tissue curve,
+    - with ``compartments`` ≥ 2, a **multi-compartment** bed (arteriole → … → venule,
+      exchange ``beta``): capillary perfusion + each compartment's mean pressure.
     """
     from . import treegen
     from .core import tkm, transport
@@ -483,6 +486,68 @@ def tissue_analysis(dim: int = 3, shape: str = "kidney", generations: int = 4,
                      "PS": num(fit.PS), "ve": num(fit.ve),
                      "peak_time": float(tt[int(np.argmax(conc))]),
                      "peak_concentration": float(conc.max())}
+    if compartments >= 2:
+        from .core.pipeline import run_multicompartment
+
+        n = int(np.clip(compartments, 2, 5))
+        mc = run_multicompartment(Parameters(p_in=10.0, p_out=0.0), res.grid,
+                                  permeabilities=(1.0,) * n, betas=(float(beta),) * (n - 1),
+                                  domain_limit=domain, art=res.art, ven=res.ven)
+        out["multicompartment"] = {
+            "n": n, "beta": float(beta),
+            "capillary_perfusion": float(np.nansum(mc.perfusion[0])),
+            "compartment_mean_pressure": [float(np.nanmean(np.where(mask, p, np.nan)))
+                                          for p in mc.compartments]}
+    return out
+
+
+def tissue_sweep(dim: int = 3, shape: str = "kidney", generations: int = 4,
+                 fill: str = "cco", n_terminals: int = 40, extent: float = 1.0,
+                 p_in_range=(5.0, 20.0), mu_range=(0.8, 1.5), permeability_range=None,
+                 n_samples: int = 16, method: str = "correlation",
+                 calibrate_target: float | None = None, calibrate_param: str = "permeability",
+                 calibrate_bounds=(0.1, 10.0), seed: int = 0) -> dict:
+    """Uncertainty quantification and calibration **on an organ's model** (2-D or 3-D).
+
+    Grows the organ's trees (as :func:`generate_trees`), then re-solves that fixed
+    model ``n_samples`` times over the given input ranges (``p_in`` / ``mu`` /
+    ``permeability``; ``None`` skips one): ``method='correlation'`` → QoI mean/std +
+    Pearson sensitivities, ``'sobol'`` → S1/ST indices. With ``calibrate_target`` it
+    also recovers ``calibrate_param`` so the arterial inflow matches it."""
+    from . import inverse, treegen, uq
+
+    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
+                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
+                           _return_model=True)
+    spec, art, ven, mask, domain = grown["_model"]
+    grid = treegen.grid_for(spec, mask, domain)
+    ranges = {k: tuple(v) for k, v in (("p_in", p_in_range), ("mu", mu_range),
+                                       ("permeability", permeability_range)) if v is not None}
+    base = {"p_in": 10.0, "p_out": 0.0}
+    out = {"dim": spec.dim, "shape": shape, "active_cells": int(mask.sum()),
+           "inputs": {k: list(v) for k, v in ranges.items()}}
+    n = int(np.clip(n_samples, 6 if method == "sobol" else 2, 128))
+    if ranges:
+        if method == "sobol":
+            s = uq.sobol_indices(ranges, grid, n_samples=n, base=base, seed=seed,
+                                 domain_limit=domain, art=art, ven=ven)
+            out["uq"] = {"method": "sobol", "n_samples": n,
+                         "fit_r2": s.fit_r2["arterial_inflow"],
+                         "first_order": s.first_order["arterial_inflow"],
+                         "total_effect": s.total_effect["arterial_inflow"]}
+        else:
+            r = uq.monte_carlo(ranges, grid, n_samples=n, base=base, seed=seed,
+                               domain_limit=domain, art=art, ven=ven)
+            out["uq"] = {"method": "correlation", "n_samples": n, "mean": r.mean,
+                         "std": r.std, "p05": r.p05, "p95": r.p95,
+                         "inflow_sensitivity": r.sensitivity["arterial_inflow"]}
+    if calibrate_target is not None:
+        c = inverse.calibrate(float(calibrate_target), calibrate_param, grid,
+                              tuple(calibrate_bounds), base=base, domain_limit=domain,
+                              art=art, ven=ven)
+        out["calibration"] = {"param": c.param, "recovered_value": c.value,
+                              "target": c.target, "achieved": c.achieved,
+                              "n_eval": c.n_eval}
     return out
 
 
@@ -837,15 +902,46 @@ def build_server():
                                   fill: str = "cco", n_terminals: int = 40,
                                   extent: float = 1.0, k: float = 1.0, adapt: bool = False,
                                   n_frames: int = 30, model: str = "1CM",
-                                  seed: int = 0) -> dict:
+                                  seed: int = 0, compartments: int = 0,
+                                  beta: float = 1.0) -> dict:
         """Grow artery + vein trees into an organ (2-D or 3-D, see
         grow_trees_in_tissue for shapes), solve, then analyse that tissue: optional
         Murray adaptation of radii (`adapt`), transit-time MTT/CTH, oxygen extraction
-        (OEF at Damköhler `k`), and a contrast-tracer bolus with a tracer-kinetic fit
-        (`model` MS/1CM/2CUM/2CXM → Fp, vp, PS, ve). Works identically in 3-D."""
+        (OEF at Damköhler `k`), a contrast-tracer bolus with a tracer-kinetic fit
+        (`model` MS/1CM/2CUM/2CXM → Fp, vp, PS, ve), and with `compartments` ≥ 2 a
+        multi-compartment arteriole→venule bed (exchange `beta`). Works identically
+        in 3-D."""
         return tissue_analysis(dim=dim, shape=shape, generations=generations, fill=fill,
                                n_terminals=n_terminals, extent=extent, k=k, adapt=adapt,
-                               n_frames=n_frames, model=model, seed=seed)
+                               n_frames=n_frames, model=model, seed=seed,
+                               compartments=compartments, beta=beta)
+
+    @server.tool()
+    def tissue_uncertainty_calibration(dim: int = 3, shape: str = "kidney",
+                                       generations: int = 4, fill: str = "cco",
+                                       n_terminals: int = 40, extent: float = 1.0,
+                                       p_in_low: float = 5.0, p_in_high: float = 20.0,
+                                       mu_low: float = 0.8, mu_high: float = 1.5,
+                                       vary_permeability: bool = False, k_low: float = 0.5,
+                                       k_high: float = 2.0, n_samples: int = 16,
+                                       method: str = "correlation",
+                                       calibrate_target: float | None = None,
+                                       calibrate_param: str = "permeability",
+                                       calibrate_low: float = 0.1,
+                                       calibrate_high: float = 10.0, seed: int = 0) -> dict:
+        """Uncertainty quantification + calibration on an organ's own model (2-D or
+        3-D): grow its trees, then re-solve over p_in / mu (/ permeability) ranges —
+        `method` "correlation" (mean/std + Pearson sensitivity of inflow) or "sobol"
+        (S1/ST). With `calibrate_target`, also recover `calibrate_param` (permeability
+        / p_in / mu) so the arterial inflow matches the measured value."""
+        return tissue_sweep(dim=dim, shape=shape, generations=generations, fill=fill,
+                            n_terminals=n_terminals, extent=extent,
+                            p_in_range=(p_in_low, p_in_high), mu_range=(mu_low, mu_high),
+                            permeability_range=(k_low, k_high) if vary_permeability else None,
+                            n_samples=n_samples, method=method,
+                            calibrate_target=calibrate_target,
+                            calibrate_param=calibrate_param,
+                            calibrate_bounds=(calibrate_low, calibrate_high), seed=seed)
 
     @server.tool()
     def data_constrained_tree_growth(hotspot_weight: float = 8.0, radius_frac: float = 0.22,

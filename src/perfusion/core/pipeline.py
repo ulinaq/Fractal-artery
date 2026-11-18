@@ -370,15 +370,15 @@ class MultiCompartmentResult:
     solution: network.HybridSolution
     permeabilities: tuple
     betas: tuple
-    compartments: np.ndarray      # (N, nx, ny) per-compartment pressure fields
-    perfusion: np.ndarray         # (N-1, nx, ny) inter-compartment exchange (capillary perfusion)
+    compartments: np.ndarray      # (N, nx, ny[, nz]) per-compartment pressure fields
+    perfusion: np.ndarray         # (N-1, nx, ny[, nz]) inter-compartment exchange (perfusion)
     domain_limit: tuple[float, float, float, float] = (-70, 70, 0, 160)
 
 
 def run_multicompartment(prm: Parameters, grid: Grid,
                          permeabilities=(1.0, 1.0), betas=(1.0,),
                          domain_limit: tuple[float, float, float, float] = (-70, 70, 0, 160),
-                         eps: float = 4.0, art: Network | None = None,
+                         eps: float | None = None, art: Network | None = None,
                          ven: Network | None = None, art_inlets=None,
                          ven_outlets=None) -> MultiCompartmentResult:
     """Couple the network to an ``N``-compartment Darcy bed (arteriole→…→venule).
@@ -388,7 +388,18 @@ def run_multicompartment(prm: Parameters, grid: Grid,
     terminals feed compartment 0; venous terminals drain compartment ``N−1``; the flow
     percolates down the stack through the exchange, whose per-cell field is the
     capillary perfusion. ``N = 1`` reduces exactly to :func:`run_hybrid`.
+
+    A 3-D :class:`~perfusion.core.darcy3d.Grid3D` (with 3-D ``art``/``ven`` and a
+    6-value ``domain_limit``) stacks 3-D compartments the same way, using the scalar
+    viscosity like :func:`~perfusion.core.pipeline3d.run_hybrid_3d`; fields are then
+    ``(N, nx, ny, nz)``. ``eps`` defaults to 4 cells in 2-D and 2 in 3-D (as the
+    single-bed solvers).
     """
+    three_d = getattr(grid, "nz", None) is not None
+    if eps is None:
+        eps = 2.0 if three_d else 4.0
+    if three_d and (art is None or ven is None):
+        raise ValueError("a 3-D multi-compartment solve needs the 3-D trees (art, ven)")
     if len(betas) != len(permeabilities) - 1:
         raise ValueError("betas must have length len(permeabilities) - 1")
     if art is None:
@@ -400,15 +411,21 @@ def run_multicompartment(prm: Parameters, grid: Grid,
     if ven_outlets is not None:
         ven = replace(ven, inlet_nodes=np.asarray(ven_outlets, dtype=int))
 
-    terminal_cells = _terminal_cells(grid, art, ven, domain_limit)
+    if three_d:
+        from .pipeline3d import _terminal_cells_3d
+
+        terminal_cells = _terminal_cells_3d(grid, art, ven, domain_limit)
+        visc = prm.mu
+    else:
+        terminal_cells = _terminal_cells(grid, art, ven, domain_limit)
+        visc = (_segment_viscosity(art, prm), _segment_viscosity(ven, prm))
     n_a = len(art.terminal_nodes)
     mcr = multicompartment.terminal_response_multi(
         grid, terminal_cells[:n_a], terminal_cells[n_a:], permeabilities, betas, eps)
-    visc = (_segment_viscosity(art, prm), _segment_viscosity(ven, prm))
     sol = network.solve_linear(art, ven, mcr.response, prm.p_in, prm.p_out, visc)
 
     comp_flat = multicompartment.compartment_fields(mcr, sol.terminal_flux, balance=True)
-    compartments = np.stack([comp_flat[c].reshape(grid.nx, grid.ny, order="F")
+    compartments = np.stack([comp_flat[c].reshape(grid.mask.shape, order="F")
                              for c in range(mcr.n_compartments)])
     perfusion = multicompartment.exchange_field(grid, comp_flat, betas)
     return MultiCompartmentResult(

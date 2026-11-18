@@ -65,11 +65,20 @@
               <option value="CBV">CBV — deconvolution</option>
               <option value="MTT">MTT — deconvolution</option>
             </optgroup>
+            <optgroup label="multi-compartment bed">
+              <option value="mc_perfusion">capillary exchange (perfusion)</option>
+              <option value="mc_arteriole">arteriole pressure</option>
+              <option value="mc_venule">venule pressure</option>
+            </optgroup>
           </select>
         </label>
         <label id="v3-k-row" hidden>O₂ extraction k (Damköhler)
           <input id="v3-k" type="number" min="0.05" max="20" step="0.25" value="1" />
         </label>
+        <div class="row" id="v3-mc-row" hidden>
+          <label>compartments N <input id="v3-mc-n" type="number" min="2" max="5" step="1" value="3" /></label>
+          <label>exchange β <input id="v3-mc-beta" type="number" min="0.01" step="0.25" value="1" /></label>
+        </div>
         <button id="v3-run" class="primary">▶ Run 3-D simulation</button>
         <p class="muted" id="v3-run-info"></p>
         <div class="summary v3sum" id="v3-summary"></div>
@@ -102,6 +111,47 @@
         </div>
         <p class="muted" id="v3-tree-info"></p>
       </section>
+      <details class="card" id="v3-an-card" hidden>
+        <summary>Uncertainty &amp; calibration</summary>
+        <p class="muted">Re-solve the 3-D model many times. The trees stay fixed and one
+          Darcy factorisation is reused unless K varies.</p>
+        <h3>Uncertainty</h3>
+        <label class="check"><input type="checkbox" id="v3-uq-pin" checked /> inlet p_in
+          <input id="v3-uq-pin-lo" type="number" value="5" step="1" class="mini" /> –
+          <input id="v3-uq-pin-hi" type="number" value="20" step="1" class="mini" /></label>
+        <label class="check"><input type="checkbox" id="v3-uq-mu" checked /> viscosity μ
+          <input id="v3-uq-mu-lo" type="number" value="0.8" step="0.1" class="mini" /> –
+          <input id="v3-uq-mu-hi" type="number" value="1.5" step="0.1" class="mini" /></label>
+        <label class="check"><input type="checkbox" id="v3-uq-k" /> permeability K
+          <input id="v3-uq-k-lo" type="number" value="0.5" step="0.1" class="mini" /> –
+          <input id="v3-uq-k-hi" type="number" value="2" step="0.1" class="mini" /></label>
+        <label>samples N <input id="v3-uq-n" type="number" value="16" step="4" min="2" max="128" /></label>
+        <label class="check"><input type="checkbox" id="v3-uq-sobol" /> variance-based Sobol (S₁ / Sₜ)</label>
+        <button id="v3-uq">🎲 Run uncertainty</button>
+        <div id="v3-uq-out" class="muted"></div>
+        <h3>Calibrate to a measurement</h3>
+        <label>measured
+          <select id="v3-cal-qoi">
+            <option value="arterial_inflow">arterial inflow</option>
+            <option value="tof_mean">mean time-of-flight</option>
+            <option value="flux_mean">mean Darcy flux</option>
+          </select>
+        </label>
+        <label>target value <input id="v3-cal-target" type="number" step="any" /></label>
+        <label>fit
+          <select id="v3-cal-param">
+            <option value="p_in">inlet pressure p_in</option>
+            <option value="permeability">permeability K</option>
+            <option value="mu">viscosity μ</option>
+          </select>
+        </label>
+        <div class="row">
+          <label>from <input id="v3-cal-lo" type="number" value="1" step="any" class="mini" /></label>
+          <label>to <input id="v3-cal-hi" type="number" value="50" step="any" class="mini" /></label>
+        </div>
+        <button id="v3-cal">🎯 Calibrate</button>
+        <p class="muted" id="v3-cal-out"></p>
+      </details>
       <section class="card">
         <h2>Legend</h2>
         <div class="legend" style="border:none;padding:0">
