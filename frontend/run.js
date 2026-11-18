@@ -148,6 +148,21 @@ export async function loadResultView() {
   if (state.resultModel === "direct") await loadDirect();
   else await loadField(state.field);
   await loadTransit();                        // h(τ) chart (hybrid) or a note (direct)
+  if (state.onResultView) await state.onResultView();   // e.g. refresh the compare panel
+}
+
+// A signed difference map (current − a kept baseline), drawn with a diverging ramp
+// symmetric about zero change.
+export async function loadDeltaField(name, sid) {
+  const f = await api("GET", `/projects/${state.project}/compare/field/${name}?snapshot=${sid}`);
+  let m = 0;
+  for (const row of f.data) for (const v of row) if (v !== null && Math.abs(v) > m) m = Math.abs(v);
+  m = m || 1;
+  stopFlow();
+  document.querySelectorAll(".field").forEach((x) => x.classList.remove("active"));
+  state.fieldData = { ...f, vmin: -m, vmax: m, delta: true };
+  state.field = `Δ ${name}`;
+  redraw();
 }
 
 async function loadDirect() {

@@ -63,6 +63,10 @@ no separate dev server.
   CSV, or ParaView `.vti` (format picker next to Export), or grab a **PNG** of the
   current view (📷). Actions lock while a job runs; the project id is a shareable
   `?project=` link.
+- **Compare runs (A/B)** (`compare.js`, Result tab and 3-D viewer) — 📌 Keep the
+  current result as a named baseline, change something and re-run, then Compare: a
+  table of what changed (inflow, MTT, …, field means) and Δ pressure / flux / TOF maps
+  on a diverging ramp (blue = lower than the baseline, red = higher).
 - **Flow video** — play/scrub an animation of a contrast bolus washing through
   the tissue (`POST/GET /projects/{id}/tracer`), and download it as an animated
   GIF (`tracer.gif`, needs the `image` extra) or MP4 (`tracer.mp4`, needs the
@@ -134,6 +138,7 @@ are vectorised into the network and points snap onto the nearest end nodes.
 | `viewer3d.html` / `viewer3d.js` | standalone rotatable 3-D result viewer |
 | `edit3d.js` | hand-editing the 3-D trees in the viewer (pick, drag, branch, undo) |
 | `regions3d.js` | lesion / hotspot spheres on a 3-D project (card + drag in the viewer) |
+| `compare.js` | run comparison (A/B) panel shared by the workspace and the 3-D viewer |
 | `uqview.js` | UQ result tables (Pearson / Sobol bars), shared by workspace + viewer |
 | `explorer.html` / `explorer.js` | tree explorer: roots, tissue shape, 2-D/3-D growth |
 

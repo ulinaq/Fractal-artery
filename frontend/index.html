@@ -197,6 +197,29 @@
         <p class="muted" id="adapt-info"></p>
       </details>
 
+      <details class="card" data-mode="result" open id="cmp-card">
+        <summary>Compare runs (A/B)</summary>
+        <p class="muted">Keep this result as a baseline, change something (a lesion, the
+          vessels, p_in…), re-run, then compare: what changed, and Δ maps (blue = lower
+          than the baseline, red = higher).</p>
+        <div class="row">
+          <input id="cmp-name" placeholder="baseline name (optional)" />
+          <button id="cmp-keep" class="ghost">📌 Keep</button>
+        </div>
+        <div class="row">
+          <select id="cmp-snap" disabled><option value="">no baseline yet</option></select>
+          <button id="cmp-run" disabled>Compare</button>
+          <button id="cmp-del" class="ghost" disabled title="delete this baseline">✕</button>
+        </div>
+        <div class="row" id="cmp-maps" hidden>
+          <button class="ghost" data-delta="pressure">Δ pressure</button>
+          <button class="ghost" data-delta="flux">Δ flux</button>
+          <button class="ghost" data-delta="tof">Δ TOF</button>
+        </div>
+        <div id="cmp-out"></div>
+        <p class="muted" id="cmp-info"></p>
+      </details>
+
       <details class="card" data-mode="result" open>
         <summary>Transit-time distribution</summary>
         <p class="muted">h(τ): how long blood takes to cross the tissue. Wider

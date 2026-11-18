@@ -82,7 +82,8 @@ def test_server_registers_expected_tools():
             "sobol_sensitivity_indices", "calibrate_parameter_to_flow",
             "tissue_perfusion_analysis", "optimize_trees_in_tissue",
             "tissue_uncertainty_calibration", "direct_model_in_tissue",
-            "export_tissue_fields", "lesion_in_tissue", "describe_model"} <= tools
+            "export_tissue_fields", "lesion_in_tissue", "compare_scenarios",
+            "describe_model"} <= tools
 
 
 def test_calibrate_to_flow_recovers_value():
@@ -359,3 +360,21 @@ def test_lesion_in_tissue_cuts_local_perfusion(dim):
     assert strong["inflow_lesion"] <= strong["inflow_healthy"] * (1 + 1e-9)
     with pytest.raises(ValueError, match="center needs"):
         mcp_server.tissue_lesion(dim=dim, center=[1.0] * (5 - dim))
+
+
+@pytest.mark.parametrize("dim", [2, 3])
+def test_compare_scenarios_in_an_organ(dim):
+    """A/B on the same trees: raising p_in scales the (linear) flow; no change is a
+    zero delta; a lesion lowers the local flux; bad keys are rejected."""
+    up = mcp_server.tissue_compare(dim=dim, shape="kidney", generations=3, n_terminals=12,
+                                   baseline={"p_in": 10.0}, change={"p_in": 12.0})
+    rows = {r["key"]: r for r in up["summary"]}
+    assert rows["arterial_inflow"]["rel"] == pytest.approx(0.2, rel=1e-6)   # linear model
+    assert up["same_grid"] is True
+    same = mcp_server.tissue_compare(dim=dim, shape="kidney", generations=3, n_terminals=12)
+    assert same["fields"]["flux"]["mean_abs_diff"] == 0.0
+    les = mcp_server.tissue_compare(dim=dim, shape="kidney", generations=3, n_terminals=12,
+                                    change={"lesion": {"permeability": 0.02}})
+    assert {r["key"]: r for r in les["summary"]}["arterial_inflow"]["diff"] <= 1e-12
+    with pytest.raises(ValueError, match="unknown scenario keys"):
+        mcp_server.tissue_compare(dim=dim, change={"pressure": 3})

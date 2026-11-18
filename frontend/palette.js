@@ -18,3 +18,23 @@ export function viridisCss(t) {
   const [r, g, b] = viridis(t);
   return `rgb(${r | 0},${g | 0},${b | 0})`;
 }
+
+// Diverging ramp for signed differences (Δ = current − baseline): blue (decrease) →
+// near-white (no change) → orange-red (increase); colour-blind safe (no red/green).
+export const DIVERGING = [
+  [33, 102, 172], [103, 169, 207], [209, 229, 240], [247, 247, 247],
+  [253, 219, 199], [239, 138, 98], [178, 24, 43],
+];
+
+// interpolated [r, g, b] for t in [0, 1] (0.5 = no change)
+export function diverging(t) {
+  t = Math.max(0, Math.min(1, t)) * (DIVERGING.length - 1);
+  const i = Math.floor(t), f = t - i;
+  const a = DIVERGING[i], b = DIVERGING[Math.min(i + 1, DIVERGING.length - 1)];
+  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+}
+
+export function divergingCss(t) {
+  const [r, g, b] = diverging(t);
+  return `rgb(${r | 0},${g | 0},${b | 0})`;
+}

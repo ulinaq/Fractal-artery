@@ -22,8 +22,9 @@ import {
 import {
   adapt, computeFlow, fitKinetics, grow, loadField, loadKineticMap, loadMorphometry,
   loadMulticompartment, loadNetwork, loadOxygen, loadResultView, pauseFlow, prune, run,
-  runTransient, runUQ, stopFlow, stopTimer, syncFlowUI, toggleFlowPlay,
+  runTransient, runUQ, stopFlow, stopTimer, syncFlowUI, toggleFlowPlay, loadDeltaField,
 } from "./run.js";
+import { createCompare } from "./compare.js";
 
 // ── undo / redo (workspace geometry history) ───────────────────────────────────
 // Snapshots the editable geometry after each action — vessel networks (incl.
@@ -129,6 +130,9 @@ function resetGeometry() {
   state.editable = { artery: null, vein: null }; state.editSel = null;
   state.network = null; state.fieldData = null; state.direct = null;
   $("summary").innerHTML = ""; $("run-info").textContent = "";   // previous project's result
+  $("cmp-out").innerHTML = ""; $("cmp-info").textContent = ""; $("cmp-maps").hidden = true;
+  $("cmp-snap").innerHTML = '<option value="">no baseline yet</option>';
+  ["cmp-snap", "cmp-run", "cmp-del"].forEach((id) => ($(id).disabled = true));
   clearEditDirty(); clearTissueDirty();
 }
 
@@ -557,7 +561,10 @@ async function openProject(id) {
   if (state.hasResult) {
     await loadResultView();                  // field or direct-connection view
     setMode("result");
-  } else { setMode("vessels"); }
+  } else {
+    setMode("vessels");
+    compare.refresh().catch(() => {});        // baselines kept from earlier sessions
+  }
   refreshUI();
   resetHistory();
   status(`opened ${info.id}`, "ok");
@@ -573,3 +580,13 @@ async function openProject(id) {
   if (shared) { try { await openProject(shared); return; } catch (e) { status(e.message, "err"); } }
   redraw();
 })();
+
+// ── run comparison (A/B against a kept baseline) ──────────────────────────────
+const compare = createCompare({
+  projectId: () => state.project,
+  ids: { name: "cmp-name", keep: "cmp-keep", select: "cmp-snap", run: "cmp-run",
+         del: "cmp-del", out: "cmp-out", maps: "cmp-maps" },
+  onMap: (name, sid) => loadDeltaField(name, sid).catch((e) => status(e.message, "err")),
+  onInfo: (msg, err) => { $("cmp-info").textContent = msg; $("cmp-info").style.color = err ? "#b91c1c" : ""; },
+});
+state.onResultView = () => compare.refresh().catch(() => {});

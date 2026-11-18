@@ -284,6 +284,43 @@ def test_3d_viewer_lesions_and_hotspots(page, server):
     assert not errors
 
 
+def _3d_project(server, name):
+    import httpx
+
+    return httpx.post(server + "/explore/project", timeout=60, json={
+        "dim": 3, "shape": "heart", "fill": "cco", "n_terminals": 12, "generations": 3,
+        "nx": 16, "name": name}).json()["id"]
+
+
+def test_3d_viewer_compares_runs(page, server):
+    """In the 3-D viewer: keep a baseline, add a lesion, re-run, compare and show the
+    signed Δ-flux field."""
+    pid = _3d_project(server, "ui-3d-compare")
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(f"{server}/viewer3d.html?project={pid}")
+    page.wait_for_selector("#v3-cmp-card:not([hidden])")
+    page.click("#v3-run")
+    page.wait_for_selector("#v3-flow-card:not([hidden])", timeout=120000)
+    page.click("#v3-cmp-keep")
+    page.wait_for_function("document.querySelector('#v3-cmp-info').textContent.includes('kept')")
+    page.click("#v3-add-lesion")
+    page.wait_for_function("document.querySelector('#v3-reg-info').textContent"
+                           ".includes('lesions saved')")
+    page.click("#v3-run")
+    page.wait_for_function("document.querySelector('#v3-run').textContent.includes('Re-run')"
+                           " && !document.querySelector('#v3-run').disabled", timeout=120000)
+    page.click("#v3-cmp-run")
+    page.wait_for_selector("#v3-cmp-out table.cmp")
+    assert "run 1" in page.inner_text("#v3-cmp-out")
+    page.click('#v3-cmp-maps [data-delta="flux"]')
+    page.wait_for_function("window.viewer3d && document.querySelector('#v3-field').value"
+                           " === 'd_flux' && document.querySelector('#status').textContent"
+                           ".includes('solved')", timeout=60000)
+    assert page.evaluate("window.viewer3d.data().delta") is True
+    assert not errors
+
+
 def test_3d_viewer_hand_edits_the_trees(page, server):
     """Edit a 3-D project's trees in the viewer: select + resize a vessel, drag a
     node, branch with Shift+click, toggle an outlet, delete, undo — then solve."""

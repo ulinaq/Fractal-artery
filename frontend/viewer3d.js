@@ -2,7 +2,8 @@
 // Renders the coupled 3-D hybrid result (vessel trees + pressure voxel field)
 // from GET /demo3d. No WebGL / vtk.js, so it works offline and is easy to verify.
 
-import { viridisCss } from "./palette.js";
+import { divergingCss, viridisCss } from "./palette.js";
+import { createCompare } from "./compare.js";
 import { createViewport } from "./viewport.js";
 import { uqHtml } from "./uqview.js";
 import { createEditor3d } from "./edit3d.js";
@@ -52,9 +53,13 @@ async function loadProject() {
     : mc ? "solving the compartments…" : "loading project…";
   const q = new URLSearchParams({ field, k: $("v3-k").value || 1,
                                   n: $("v3-mc-n").value || 3, beta: $("v3-mc-beta").value || 1 });
+  if (field.startsWith("d_") && compare) q.set("snapshot", compare.selected());
   const r = await fetch(`/projects/${PROJECT}/view3d?${q}`);
-  if (r.status === 409 && field !== "pressure") {   // tracer field before the flow exists
-    $("status").textContent = "compute the 🌊 flow first for tracer fields";
+  if ((r.status === 409 || r.status === 422) && field !== "pressure") {   // not available yet
+    const j = await r.clone().json().catch(() => ({}));
+    $("status").textContent = field.startsWith("d_")
+      ? (typeof j.detail === "string" ? j.detail : "keep a baseline in Compare runs first")
+      : "compute the 🌊 flow first for tracer fields";
     $("status").className = "status err";
     $("v3-field").value = "pressure";
     return loadProject();
@@ -104,6 +109,7 @@ function show3dProject() {
     $("v3-cal-target").value = Number((1.2 * s.arterial_inflow).toPrecision(3));
   }
   $("v3-an-card").hidden = direct;                 // UQ / calibration re-solve the hybrid
+  if ($("v3-cmp-card").hidden) { $("v3-cmp-card").hidden = false; compare.refresh().catch(() => {}); }
   syncExport();
   syncVideo();
   $("v3-flow-desc").textContent = direct
@@ -378,6 +384,18 @@ const editor = PROJECT ? createEditor3d({
     await loadProject();
   },
 }) : null;
+// Run comparison (A/B) against a kept baseline (see compare.js)
+const compare = PROJECT ? createCompare({
+  projectId: () => PROJECT,
+  ids: { name: "v3-cmp-name", keep: "v3-cmp-keep", select: "v3-cmp-snap", run: "v3-cmp-run",
+         del: "v3-cmp-del", out: "v3-cmp-out", maps: "v3-cmp-maps" },
+  onMap: (name) => { $("v3-field").value = `d_${name}`; loadProject().catch(() => {}); },
+  onInfo: (msg, err) => {
+    $("v3-cmp-info").textContent = msg;
+    $("v3-cmp-info").style.color = err ? "#b91c1c" : "";
+  },
+}) : null;
+
 // Lesions & hotspots (spheres) on a 3-D project (see regions3d.js)
 const regions = PROJECT ? createRegions3d({
   projectId: PROJECT, project, unproject, scene: () => data,
@@ -392,7 +410,7 @@ if (regions) {
   $("v3-add-hotspot").addEventListener("click", () => regions.add("hotspot"));
 }
 if (editor) {
-  window.viewer3d = { editor, regions, project };                   // hook for browser tests / tooling
+  window.viewer3d = { editor, regions, project, data: () => data };                   // hook for browser tests / tooling
   $("v3-edit").addEventListener("change", async (e) => {
     if (e.target.checked) { view.spin = false; $("spin").checked = false; }
     try { await editor.setActive(e.target.checked); }
@@ -428,13 +446,15 @@ function render() {
     const { min, max, voxels } = data.pressure;
     const span = (max - min) || 1;
     const alpha = Number($("opacity").value) / 100;
+    const delta = !!data.delta;                    // signed Δ: diverging, unchanged fades
     const pts = voxels.map((v) => {
       const [sx, sy, depth] = project(v[0], v[1], v[2]);
       return { sx, sy, depth, t: Math.max(0, Math.min(1, (v[3] - min) / span)) };
     }).sort((a, b) => a.depth - b.depth);          // painter's: far first
     ctx.globalAlpha = alpha;
     for (const p of pts) {
-      ctx.fillStyle = viridisCss(p.t);
+      if (delta) ctx.globalAlpha = alpha * Math.min(1, 0.1 + 2 * Math.abs(p.t - 0.5));
+      ctx.fillStyle = (delta ? divergingCss : viridisCss)(p.t);
       const r = Math.max(1.2, 2.6 * zs);
       ctx.fillRect(p.sx - r, p.sy - r, 2 * r, 2 * r);
     }

@@ -74,6 +74,11 @@
               <option value="CBV">CBV — deconvolution</option>
               <option value="MTT">MTT — deconvolution</option>
             </optgroup>
+            <optgroup label="vs baseline (Compare card)">
+              <option value="d_pressure">Δ pressure</option>
+              <option value="d_flux">Δ Darcy flux</option>
+              <option value="d_tof">Δ time-of-flight</option>
+            </optgroup>
             <optgroup label="multi-compartment bed">
               <option value="mc_perfusion">capillary exchange (perfusion)</option>
               <option value="mc_arteriole">arteriole pressure</option>
@@ -150,6 +155,27 @@
             <button id="v3-undo" class="ghost" disabled>↶ Undo</button>
           </div>
         </div>
+      </section>
+      <section class="card" id="v3-cmp-card" hidden>
+        <h2>Compare runs (A/B)</h2>
+        <p class="muted">Keep this result as a baseline, change something (a lesion, the
+          trees…), re-run, then compare. Δ maps: blue = lower than the baseline, red = higher.</p>
+        <div class="row">
+          <input id="v3-cmp-name" placeholder="baseline name (optional)" />
+          <button id="v3-cmp-keep" class="ghost">📌 Keep</button>
+        </div>
+        <div class="row">
+          <select id="v3-cmp-snap" disabled><option value="">no baseline yet</option></select>
+          <button id="v3-cmp-run" disabled>Compare</button>
+          <button id="v3-cmp-del" class="ghost" disabled title="delete this baseline">✕</button>
+        </div>
+        <div class="row" id="v3-cmp-maps" hidden>
+          <button class="ghost" data-delta="pressure">Δ pressure</button>
+          <button class="ghost" data-delta="flux">Δ flux</button>
+          <button class="ghost" data-delta="tof">Δ TOF</button>
+        </div>
+        <div id="v3-cmp-out"></div>
+        <p class="muted" id="v3-cmp-info"></p>
       </section>
       <section class="card" id="v3-reg-card" hidden>
         <h2>Lesions &amp; hotspots</h2>

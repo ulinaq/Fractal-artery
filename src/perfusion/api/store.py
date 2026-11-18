@@ -130,6 +130,12 @@ class ProjectStore:
                        kind TEXT NOT NULL, state TEXT NOT NULL, error TEXT,
                        created_at TEXT NOT NULL, updated_at TEXT NOT NULL )"""
             )
+            con.execute(
+                """CREATE TABLE IF NOT EXISTS snapshots (
+                       id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
+                       name TEXT NOT NULL, created_at TEXT NOT NULL,
+                       summary TEXT )"""
+            )
             # migrate DBs created before these columns existed
             cols = {r["name"] for r in con.execute("PRAGMA table_info(projects)")}
             for col in ("regions", "lesions", "hotspots", "inlets", "outlets"):
@@ -332,6 +338,64 @@ class ProjectStore:
 
     def load_network_tracer(self, pid: str) -> dict:
         with np.load(self._nettracer_path(pid)) as d:
+            return {k: d[k] for k in d.files}
+
+    # -- result snapshots (run comparison / A-B) ------------------------------ #
+    def snapshot_path(self, pid: str, sid: str) -> Path:
+        return self.blobs / f"{pid}.snap.{sid}.npz"
+
+    def save_snapshot(self, project: Project, name: str | None = None) -> dict:
+        """Keep a copy of the current *field* result (and its summary) under a name, as
+        a baseline to compare later runs against. Raises ``FileNotFoundError`` if the
+        project holds no field result."""
+        import shutil
+
+        src = self.result_path(project.id)
+        if not src.exists():
+            raise FileNotFoundError("no field result to snapshot")
+        sid = uuid.uuid4().hex[:10]
+        shutil.copyfile(src, self.snapshot_path(project.id, sid))
+        with self._txn() as con:
+            n = con.execute("SELECT COUNT(*) FROM snapshots WHERE project_id=?",
+                            (project.id,)).fetchone()[0]
+            row = {"id": sid, "project_id": project.id,
+                   "name": (name or "").strip() or f"run {n + 1}", "created_at": _now(),
+                   "summary": json.dumps(project.summary)}
+            con.execute("INSERT INTO snapshots VALUES (:id, :project_id, :name, "
+                        ":created_at, :summary)", row)
+        return self._snapshot_info(row)
+
+    @staticmethod
+    def _snapshot_info(row) -> dict:
+        summary = row["summary"]
+        return {"id": row["id"], "name": row["name"], "created_at": row["created_at"],
+                "summary": json.loads(summary) if summary else None}
+
+    def list_snapshots(self, pid: str) -> list[dict]:
+        with self._txn() as con:
+            rows = con.execute("SELECT * FROM snapshots WHERE project_id=? "
+                               "ORDER BY created_at, rowid", (pid,)).fetchall()
+        return [self._snapshot_info(r) for r in rows]
+
+    def get_snapshot(self, pid: str, sid: str) -> dict | None:
+        with self._txn() as con:
+            row = con.execute("SELECT * FROM snapshots WHERE project_id=? AND id=?",
+                              (pid, sid)).fetchone()
+        return self._snapshot_info(row) if row else None
+
+    def load_snapshot(self, pid: str, sid: str) -> dict:
+        with np.load(self.snapshot_path(pid, sid)) as d:
+            return {k: d[k] for k in d.files}
+
+    def delete_snapshot(self, pid: str, sid: str) -> bool:
+        with self._txn() as con:
+            n = con.execute("DELETE FROM snapshots WHERE project_id=? AND id=?",
+                            (pid, sid)).rowcount
+        self.snapshot_path(pid, sid).unlink(missing_ok=True)
+        return n > 0
+
+    def load_result(self, pid: str) -> dict:
+        with np.load(self.result_path(pid)) as d:
             return {k: d[k] for k in d.files}
 
     def result_field(self, pid: str, name: str) -> np.ndarray:
