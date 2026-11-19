@@ -40,11 +40,18 @@ class Grid3D:
     hz: float = field(init=False)
 
     def __post_init__(self) -> None:
+        if min(int(self.nx), int(self.ny), int(self.nz)) < 1:
+            raise ValueError(f"grid needs nx, ny, nz >= 1 (got {self.nx}x{self.ny}x{self.nz})")
         self.hx = self.lx / self.nx
         self.hy = self.ly / self.ny
         self.hz = self.lz / self.nz
         if self.mask is None:
             self.mask = np.ones((self.nx, self.ny, self.nz), dtype=bool)
+        else:
+            self.mask = np.asarray(self.mask, dtype=bool)
+            if self.mask.shape != (self.nx, self.ny, self.nz):
+                raise ValueError(f"mask {self.mask.shape} must be (nx, ny, nz) = "
+                                 f"{(self.nx, self.ny, self.nz)}")
         if np.ndim(self.permeability) and np.shape(self.permeability) != (
                 self.nx, self.ny, self.nz):
             raise ValueError(f"permeability field {np.shape(self.permeability)} must be "

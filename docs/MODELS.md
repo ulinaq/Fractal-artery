@@ -57,6 +57,10 @@ corr  = (d/(d−1.1))²                                            (Eq. 4.5, wal
 μ_rel = (1 + (μ₀.₄₅ − 1)·((1−H_D)^C − 1)/((1−0.45)^C − 1)·corr)·corr
 ```
 
+`corr` is singular at d = 1.1 µm, so d is clamped to `FL_MIN_DIAMETER_UM` = 3 µm (the
+narrowest capillaries); a warning flags a tree whose vessels are mostly below it — usually
+a missing `radius_to_um` scale.
+
 **Shear-thinning blood — Carreau law** (`viscosity.carreau_factor`,
 `viscosity.solve_shear_thinning`; `Parameters.shear_thinning`). Red cells aggregate at low
 shear, so blood thickens where flow is slow. Each segment's viscosity is its Newtonian
@@ -306,6 +310,9 @@ response ⊛ `c_a`:
 MS:               Fp = maxₜ dC/dt / max(c_a)
 AIF  (Eq. 11):    c_a(t) = C₀ (t−t₀)^A e^(−(t−t₀)/B)   (gamma-variate)
 ```
+
+`t` in the impulse responses is the lag `t − t[0]`, so a clock that does not start at 0
+gives the same fit.
 
 **Voxel-wise maps** (`kinetic_maps`): `Fp = maxₜ dC/dt / max(c_a)` (max-slope),
 `vp = ∫C/∫c_a` (AUC blood volume).

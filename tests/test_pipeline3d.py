@@ -313,3 +313,36 @@ def test_3d_casson_yield_stress_blood():
     assert cas.rheology["converged"]
     assert np.isclose(tf[:n_art].sum(), -tf[n_art:].sum(), rtol=1e-8)
     assert 0 < tf[:n_art].sum() < newt.solution.terminal_flux[:n_art].sum()
+
+
+def test_3d_honours_the_rheology_and_flow_options():
+    # run_hybrid_3d used to solve linearly with the scalar mu whatever was asked.
+    import warnings
+
+    art, ven, grid, dom = _system()
+    base = run_hybrid_3d(Parameters(p_in=10.0, p_out=0.0, mu=1.0), grid, art, ven, dom, eps=2.0)
+    q0 = float(base.solution.q_a[0])
+    variants = {
+        "fl": (Parameters(p_in=10.0, p_out=0.0, mu=1.0, fahraeus_lindqvist=True,
+                          radius_to_um=10.0), {}),
+        "elastic": (Parameters(p_in=10.0, p_out=0.0, mu=1.0, compliance=0.05),
+                    {"elasticity": True}),
+    }
+    for name, (prm, kw) in variants.items():
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            res = run_hybrid_3d(prm, grid, art, ven, dom, eps=2.0, **kw)
+        sol = res.solution
+        assert not np.isclose(float(sol.q_a[0]), q0, rtol=1e-6), name
+        assert np.isclose(sol.terminal_flux.sum(), 0.0, atol=1e-8), name
+
+    # the nonlinear option really runs the junction-loss fixed point
+    from perfusion.core import network
+    from perfusion.core.pipeline3d import darcy_coupling_3d
+
+    prm = Parameters(p_in=10.0, p_out=0.0, mu=1.0, rho=1e4)
+    coupling = darcy_coupling_3d(grid, art, ven, dom, eps=2.0)
+    res = run_hybrid_3d(prm, grid, art, ven, dom, eps=2.0, darcy=coupling, nonlinear=True)
+    ref = network.solve_nonlinear(art, ven, coupling[1], 10.0, 0.0, prm, 1.0)
+    assert np.allclose(res.solution.q_a, ref.q_a, rtol=1e-10)
+    assert not np.array_equal(res.solution.q_a, base.solution.q_a)

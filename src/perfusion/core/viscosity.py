@@ -8,7 +8,14 @@ disproportionately to total resistance.
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
+
+# Below this diameter the in-vivo law leaves its range: (D/(D−1.1))² is singular at
+# D = 1.1 µm and the curve turns back down beneath it. No real capillary is narrower
+# than ~3 µm, so the diameter is clamped there.
+FL_MIN_DIAMETER_UM = 3.0
 
 
 def apparent_viscosity(diameter_um: np.ndarray | float, hematocrit: float = 0.45,
@@ -28,10 +35,18 @@ def apparent_viscosity(diameter_um: np.ndarray | float, hematocrit: float = 0.45
 
     Notes
     -----
-    Thesis Eqs. (4.5)-(4.7). Valid roughly for 10 um < D < 300 um; outside that
-    range it saturates smoothly.
+    Thesis Eqs. (4.5)-(4.7) (Pries & Secomb in-vivo law). Diameters below
+    :data:`FL_MIN_DIAMETER_UM` are clamped to it, with a warning when most vessels
+    are that small (usually a wrong ``radius_to_um``): the formula is singular at
+    D = 1.1 µm.
     """
     d = np.asarray(diameter_um, dtype=float)
+    small = d < FL_MIN_DIAMETER_UM
+    if small.size and small.mean() > 0.5:
+        warnings.warn(f"Fåhræus–Lindqvist: {small.mean():.0%} of vessels are narrower than "
+                      f"{FL_MIN_DIAMETER_UM:g} µm and were clamped to it — check "
+                      "radius_to_um (model radius → µm)", RuntimeWarning, stacklevel=2)
+    d = np.maximum(d, FL_MIN_DIAMETER_UM)
     # In-vitro reference viscosity at H_D = 0.45 (Eq. 4.6)
     mu045 = 6.0 * np.exp(-0.085 * d) + 3.2 - 2.44 * np.exp(-0.06 * d**0.645)
     # Shape parameter C (Eq. 4.7)

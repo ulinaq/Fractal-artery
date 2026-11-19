@@ -172,3 +172,71 @@ def test_coupling_choice_is_validated_and_auto_switches():
     assert not use_monolithic("schur", 10**9, 10**4)
     with pytest.raises(ValueError, match="coupling must be"):
         use_monolithic("nope", 1, 1)
+
+
+def _reverse_segment(net, s):
+    """The same tree with segment ``s`` drawn the other way round."""
+    import dataclasses
+
+    ss, se = net.seg_start.copy(), net.seg_end.copy()
+    ss[s], se[s] = net.seg_end[s], net.seg_start[s]
+    return dataclasses.replace(net, seg_start=ss, seg_end=se)
+
+
+def test_reversed_leaf_segment_gives_the_same_flow(art, ven, grid):
+    # A hand-drawn vessel may point either way; the terminal flux must follow the
+    # topology, not the drawing direction (it used incoming_segment and a fixed sign).
+    response, _, _ = _response(grid, art, ven)
+    ref = network.solve_linear(art, ven, response, p_in=10.0, p_out=0.0)
+    sa = int(art.leaf_segments(art.terminal_nodes[:1])[0][0])
+    sv = int(ven.leaf_segments(ven.terminal_nodes[:1])[0][0])
+    art_r, ven_r = _reverse_segment(art, sa), _reverse_segment(ven, sv)
+    sol = network.solve_linear(art_r, ven_r, response, p_in=10.0, p_out=0.0)
+    assert np.allclose(sol.terminal_flux, ref.terminal_flux, rtol=1e-9, atol=1e-14)
+    assert np.allclose(sol.p_a, ref.p_a)
+    assert np.allclose(sol.p_v, ref.p_v)
+    assert sol.q_a[sa] == pytest.approx(-ref.q_a[sa])      # only the sign convention flips
+    assert sol.q_v[sv] == pytest.approx(-ref.q_v[sv])
+
+
+def test_root_leaf_becomes_a_proper_terminal(art, ven, grid):
+    # Moving the inlet to another leaf turns the BFS root into a Darcy terminal; it
+    # has no incoming segment, and its flux used to read a *pressure* unknown.
+    import dataclasses
+
+    leaf = int(art.terminal_nodes[0])
+    art2 = dataclasses.replace(art, inlet_nodes=np.array([leaf]))
+    assert art.root_node in art2.terminal_nodes
+    response, _, _ = _response(grid, art2, ven)
+    sol = network.solve_linear(art2, ven, response, p_in=10.0, p_out=0.0)
+    n_art = art2.terminal_nodes.size
+    inflow = sol.terminal_flux[:n_art].sum()
+    assert inflow > 0
+    assert inflow == pytest.approx(-sol.terminal_flux[n_art:].sum(), rel=1e-8)
+    seg, orient = art2.leaf_segments([leaf])
+    assert orient[0] * sol.q_a[seg[0]] == pytest.approx(-inflow, rel=1e-8)  # all leaves the inlet
+
+
+def test_leaf_segments_rejects_isolated_nodes(art):
+    import dataclasses
+
+    lone = dataclasses.replace(art, node_x=np.append(art.node_x, 0.0),
+                               node_y=np.append(art.node_y, 0.0),
+                               node_role=np.append(art.node_role, 0))
+    with pytest.raises(ValueError, match="no incident segment"):
+        lone.leaf_segments([lone.n_nodes - 1])
+
+
+def test_3d_junction_loss_uses_the_turning_angle():
+    from perfusion.core.geometry import grow_tree_3d
+    from perfusion.core.network import _junction_geometry
+
+    net = grow_tree_3d((0, 0, 0), (0, 0, 1), root_radius=2.0, min_radius=0.9,
+                       length_to_radius=5, ratio=0.8, max_generations=4)
+    jl = _junction_geometry(net)
+    xyz = net.positions()
+    d = xyz[net.seg_end] - xyz[net.seg_start]
+    d /= np.linalg.norm(d, axis=1, keepdims=True)
+    child = np.flatnonzero(jl["has_parent"])
+    turn = np.arccos(np.clip((d[child] * d[jl["parent"][child]]).sum(1), -1, 1))
+    assert np.allclose(jl["cos_phi"][child], np.cos(0.75 * turn))

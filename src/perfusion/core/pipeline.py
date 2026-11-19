@@ -66,8 +66,10 @@ def _terminal_cells(grid: Grid, art: Network, ven: Network,
     """
     xmin, _, ymin, _ = domain_limit
     ta, tv = art.terminal_nodes, ven.terminal_nodes
-    ix_a = np.ceil((art.node_x[ta] - xmin) / grid.hx).astype(int)
-    iy_a = np.ceil((art.node_y[ta] - ymin) / grid.hy).astype(int)
+    # cell i spans [xmin + i·hx, xmin + (i+1)·hx): floor, for both trees (the MATLAB
+    # original used ceil on its 1-based indices; carried over 0-based it was one off)
+    ix_a = np.floor((art.node_x[ta] - xmin) / grid.hx).astype(int)
+    iy_a = np.floor((art.node_y[ta] - ymin) / grid.hy).astype(int)
     ix_v = np.floor((ven.node_x[tv] - xmin) / grid.hx).astype(int)
     iy_v = np.floor((ven.node_y[tv] - ymin) / grid.hy).astype(int)
     if strict:
@@ -175,6 +177,91 @@ def darcy_response_for(prm: Parameters, grid: Grid,
     return art, ven, darcy.terminal_response(grid, cells, eps)
 
 
+def solve_flow(prm: Parameters, art: Network, ven: Network, response, *,
+               nonlinear: bool = False, max_iter: int = 100, tol: float = 1e-10,
+               phase_separation: bool = False, elasticity: bool = False):
+    """The network-flow stage of the hybrid model, shared by 2-D and 3-D.
+
+    ``response`` is the Darcy coupling (dense Schur response or a
+    :class:`~perfusion.core.network.MonolithicDarcy`). Applies, as ``prm`` and the
+    flags ask: Fåhræus–Lindqvist viscosity, the nonlinear junction losses, Carreau /
+    Casson blood, vessel-wall elasticity and RBC phase separation (the last two
+    jointly). The solver is coordinate-free, so the same code serves both
+    dimensions. Returns ``(solution, art, ven, rheology)`` — the trees as deformed
+    by elasticity.
+    """
+    # Per-segment viscosity (radius-dependent when Fahraeus-Lindqvist is enabled).
+    def _solve_newtonian(a, v, visc):
+        if nonlinear:
+            return network.solve_nonlinear(a, v, response, prm.p_in, prm.p_out, prm, visc,
+                                           max_iter=max_iter, tol=tol)
+        return network.solve_linear(a, v, response, prm.p_in, prm.p_out, visc)
+
+    rheology = None
+
+    def _solve(a, v, visc):            # + shear-thinning blood when enabled (Carreau)
+        nonlocal rheology
+        if not prm.shear_thinning:
+            return _solve_newtonian(a, v, visc)
+        sol, _, rheology = shear_thinning_solve(_solve_newtonian, a, v, visc, prm,
+                                                max_iter=max_iter)
+        return sol
+
+    couple_hct = phase_separation and prm.fahraeus_lindqvist
+    if couple_hct:
+        from .hematocrit import segment_hematocrit
+    hd = np.full(art.n_segments, prm.hematocrit)
+
+    def _art_viscosity(a):
+        """Arterial per-segment viscosity — with the skimmed hematocrit ``hd`` when
+        phase separation is coupled, else the uniform-hematocrit F-L / scalar mu."""
+        if couple_hct:
+            return apparent_viscosity(2.0 * a.seg_radius * prm.radius_to_um, hd, prm.mu)
+        return _segment_viscosity(a, prm)
+
+    def _update_hct(a, sol):
+        """New arterial hematocrit (Pries skimming) and how far it moved."""
+        if not couple_hct:
+            return hd, 0.0
+        new = segment_hematocrit(a, np.abs(sol.q_a), prm.hematocrit, prm.radius_to_um)
+        return new, float(np.max(np.abs(new - hd)))
+
+    if elasticity and prm.compliance:
+        # Vessel-wall elasticity (Eq. 4.9): radii swell with transmural pressure,
+        # r = r0 (1 + C (p - p_out)); resistance ∝ 1/r^4, so iterate to a fixed point
+        # (jointly with the hematocrit when phase separation is on).
+        r0a, r0v = np.asarray(art.seg_radius, float), np.asarray(ven.seg_radius, float)
+        art_e, ven_e = art, ven
+        for _ in range(max(1, max_iter)):
+            visc_e = (_art_viscosity(art_e), _segment_viscosity(ven_e, prm))
+            sol = _solve(art_e, ven_e, visc_e)
+            spa = 0.5 * (sol.p_a[art.seg_start] + sol.p_a[art.seg_end])
+            spv = 0.5 * (sol.p_v[ven.seg_start] + sol.p_v[ven.seg_end])
+            ra = np.clip(r0a * (1.0 + prm.compliance * (spa - prm.p_out)), 0.3 * r0a, 3.0 * r0a)
+            rv = np.clip(r0v * (1.0 + prm.compliance * (spv - prm.p_out)), 0.3 * r0v, 3.0 * r0v)
+            hd, dh = _update_hct(art_e, sol)
+            done = (np.max(np.abs(ra - art_e.seg_radius)) <= 1e-4 * float(r0a.max())
+                    and np.max(np.abs(rv - ven_e.seg_radius)) <= 1e-4 * float(r0v.max())
+                    and dh <= 1e-4)
+            art_e, ven_e = replace(art_e, seg_radius=ra), replace(ven_e, seg_radius=rv)
+            if done:
+                break
+        art, ven = art_e, ven_e          # report the deformed geometry
+    elif couple_hct:
+        # Couple RBC phase separation to viscosity: iterate arterial hematocrit
+        # (Pries skimming) <-> Fahraeus-Lindqvist viscosity until it converges.
+        mu_ven = _segment_viscosity(ven, prm)
+        for _ in range(max(1, max_iter)):
+            sol = _solve(art, ven, (_art_viscosity(art), mu_ven))
+            hd, dh = _update_hct(art, sol)
+            if dh <= 1e-4:
+                break
+    else:
+        sol = _solve(art, ven, (_segment_viscosity(art, prm), _segment_viscosity(ven, prm)))
+
+    return sol, art, ven, rheology
+
+
 def run_hybrid(prm: Parameters, grid: Grid,
                domain_limit: tuple[float, float, float, float] = (-70, 70, 0, 160),
                eps: float = 4.0, nonlinear: bool = False,
@@ -230,58 +317,10 @@ def run_hybrid(prm: Parameters, grid: Grid,
             response, field_response, sources = darcy.terminal_response(grid, terminal_cells,
                                                                         eps)
 
-    # Per-segment viscosity (radius-dependent when Fahraeus-Lindqvist is enabled).
-    def _solve_newtonian(a, v, visc):
-        if nonlinear:
-            return network.solve_nonlinear(a, v, response, prm.p_in, prm.p_out, prm, visc,
-                                           max_iter=max_iter, tol=tol)
-        return network.solve_linear(a, v, response, prm.p_in, prm.p_out, visc)
-
-    rheology = None
-
-    def _solve(a, v, visc):            # + shear-thinning blood when enabled (Carreau)
-        nonlocal rheology
-        if not prm.shear_thinning:
-            return _solve_newtonian(a, v, visc)
-        sol, _, rheology = shear_thinning_solve(_solve_newtonian, a, v, visc, prm,
-                                                max_iter=max_iter)
-        return sol
-
-    if elasticity and prm.compliance:
-        # Vessel-wall elasticity (Eq. 4.9): radii swell with transmural pressure,
-        # r = r0 (1 + C (p - p_out)); resistance ∝ 1/r^4, so iterate to a fixed point.
-        r0a, r0v = np.asarray(art.seg_radius, float), np.asarray(ven.seg_radius, float)
-        art_e, ven_e = art, ven
-        for _ in range(max(1, max_iter)):
-            visc_e = (_segment_viscosity(art_e, prm), _segment_viscosity(ven_e, prm))
-            sol = _solve(art_e, ven_e, visc_e)
-            spa = 0.5 * (sol.p_a[art.seg_start] + sol.p_a[art.seg_end])
-            spv = 0.5 * (sol.p_v[ven.seg_start] + sol.p_v[ven.seg_end])
-            ra = np.clip(r0a * (1.0 + prm.compliance * (spa - prm.p_out)), 0.3 * r0a, 3.0 * r0a)
-            rv = np.clip(r0v * (1.0 + prm.compliance * (spv - prm.p_out)), 0.3 * r0v, 3.0 * r0v)
-            done = (np.max(np.abs(ra - art_e.seg_radius)) <= 1e-4 * float(r0a.max())
-                    and np.max(np.abs(rv - ven_e.seg_radius)) <= 1e-4 * float(r0v.max()))
-            art_e, ven_e = replace(art_e, seg_radius=ra), replace(ven_e, seg_radius=rv)
-            if done:
-                break
-        art, ven = art_e, ven_e          # report the deformed geometry
-    elif phase_separation and prm.fahraeus_lindqvist:
-        # Couple RBC phase separation to viscosity: iterate arterial hematocrit
-        # (Pries skimming) <-> Fahraeus-Lindqvist viscosity until it converges.
-        from .hematocrit import segment_hematocrit
-
-        d_art = 2.0 * art.seg_radius * prm.radius_to_um
-        mu_ven = _segment_viscosity(ven, prm)
-        hd = np.full(art.n_segments, prm.hematocrit)
-        for _ in range(max(1, max_iter)):
-            sol = _solve(art, ven, (apparent_viscosity(d_art, hd, prm.mu), mu_ven))
-            hd_new = segment_hematocrit(art, np.abs(sol.q_a), prm.hematocrit, prm.radius_to_um)
-            if np.max(np.abs(hd_new - hd)) <= 1e-4:
-                hd = hd_new
-                break
-            hd = hd_new
-    else:
-        sol = _solve(art, ven, (_segment_viscosity(art, prm), _segment_viscosity(ven, prm)))
+    sol, art, ven, rheology = solve_flow(prm, art, ven, response, nonlinear=nonlinear,
+                                         max_iter=max_iter, tol=tol,
+                                         phase_separation=phase_separation,
+                                         elasticity=elasticity)
 
     if field_response is None:                 # monolithic: the bed is part of the solve
         pressure = np.asarray(sol.darcy_pressure)

@@ -38,10 +38,17 @@ class Grid:
     hy: float = field(init=False)
 
     def __post_init__(self) -> None:
+        if int(self.nx) < 1 or int(self.ny) < 1:
+            raise ValueError(f"grid needs nx, ny >= 1 (got {self.nx} x {self.ny})")
         self.hx = self.lx / self.nx
         self.hy = self.ly / self.ny
         if self.mask is None:
             self.mask = np.ones((self.nx, self.ny), dtype=bool)
+        else:   # an int/0-1 mask would turn ``~mask`` into -1/-2 and corrupt the operator
+            self.mask = np.asarray(self.mask, dtype=bool)
+            if self.mask.shape != (self.nx, self.ny):
+                raise ValueError(f"mask {self.mask.shape} must be (nx, ny) = "
+                                 f"{(self.nx, self.ny)}")
         for attr in ("permeability", "permeability_y"):
             val = getattr(self, attr)
             if val is not None and np.ndim(val) != 0:
@@ -101,6 +108,35 @@ def _harmonic(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Harmonic mean ``2ab/(a+b)`` of adjacent-cell permeabilities (0 if both 0)."""
     denom = a + b
     return np.divide(2.0 * a * b, denom, out=np.zeros_like(denom), where=denom > 0.0)
+
+
+def with_permeability(grid, k: float):
+    """``grid`` with its (healthy) permeability set to ``k``, keeping any structure.
+
+    A scalar grid simply takes ``K = k``. A per-cell field (lesions, heterogeneous
+    tissue) is *rescaled*, so its pattern survives: every cell is multiplied by
+    ``k / K_ref`` with ``K_ref`` the median active-cell permeability — the healthy
+    value when lesions cover less than half the tissue. A 2-D ``permeability_y``
+    scales by the same factor, so anisotropy is kept. Works on 2-D and 3-D grids.
+    Use this, not ``replace(grid, permeability=k)``, wherever K is varied (UQ,
+    calibration, fits, compartments) — the latter silently erases lesions.
+    """
+    from dataclasses import replace as _replace
+
+    k = float(k)
+    kx = grid.permeability
+    if np.ndim(kx) == 0:
+        ref = float(kx)
+    else:
+        active = np.asarray(grid.mask, bool)
+        ref = float(np.median(np.asarray(kx)[active])) if active.any() else 1.0
+    factor = k / ref if ref > 0 else 1.0
+    changes = {"permeability": k if np.ndim(kx) == 0 else np.asarray(kx) * factor}
+    ky = getattr(grid, "permeability_y", None)
+    if ky is not None:
+        changes["permeability_y"] = (float(ky) * factor if np.ndim(ky) == 0
+                                     else np.asarray(ky) * factor)
+    return _replace(grid, **changes)
 
 
 def transmissibilities(grid: Grid) -> tuple[np.ndarray, np.ndarray]:

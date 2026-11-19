@@ -558,12 +558,12 @@ def _view3d_volume(project, store, field: str, k: float = 1.0, n: int = 3,
         raise HTTPException(422, f"field must be one of {list(V3_FIELDS)}")
     grid, dom = runner.build_grid3d(project)
     art, ven = runner.build_networks(project, use_vessels=True, defaults=True)
-    segments = [[*map(lambda v: round(v, 2), sg[:6]), round(sg[6], 3), k]
-                for net, k in ((art, 0), (ven, 1)) for sg in helpers.segment_lines_3d(net)]
+    segments = [[*map(lambda v: round(v, 2), sg[:6]), round(sg[6], 3), kind]
+                for net, kind in ((art, 0), (ven, 1)) for sg in helpers.segment_lines_3d(net)]
     lo, hi = np.asarray(dom[0::2]), np.asarray(dom[1::2])
     h = (hi - lo) / np.array([grid.nx, grid.ny, grid.nz])
-    k = max(1, round((grid.mask.sum() / 3500) ** (1 / 3)))
-    idx = np.argwhere(grid.mask[::k, ::k, ::k]) * k
+    stride = max(1, round((grid.mask.sum() / 3500) ** (1 / 3)))   # voxel subsampling
+    idx = np.argwhere(grid.mask[::stride, ::stride, ::stride]) * stride
     xyz = np.round(lo + (idx + 0.5) * h, 1)
     out = {"shape": [grid.nx, grid.ny, grid.nz], "domain": [float(v) for v in dom],
            "segments": segments, "has_result": project.has_result, "dim": 3,

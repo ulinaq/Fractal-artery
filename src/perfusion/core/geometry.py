@@ -99,6 +99,27 @@ class Network:
         leaf[self.inlet_nodes] = False
         return np.flatnonzero(leaf)
 
+    def leaf_segments(self, nodes) -> tuple[np.ndarray, np.ndarray]:
+        """The single segment at each leaf in ``nodes`` and its orientation there.
+
+        Returns ``(segment, orient)`` with ``orient = +1`` where the leaf is the
+        segment's ``seg_end`` and ``-1`` where it is its ``seg_start``. A segment's
+        flow is signed start → end, so the flow *into* the leaf is ``orient · q``.
+        Uses the edge list, not :attr:`incoming_segment` — a hand-drawn vessel may
+        point either way and the BFS root, when it is a leaf, has no incoming
+        segment at all.
+        """
+        nodes = np.asarray(nodes, dtype=int)
+        seg = np.full(self.n_nodes, -1, dtype=int)
+        orient = np.zeros(self.n_nodes)
+        seg[self.seg_start] = np.arange(self.n_segments)
+        orient[self.seg_start] = -1.0
+        seg[self.seg_end] = np.arange(self.n_segments)   # leaves have degree 1: no clash
+        orient[self.seg_end] = 1.0
+        if nodes.size and (seg[nodes] < 0).any():
+            raise ValueError("leaf_segments: a node has no incident segment")
+        return seg[nodes], orient[nodes]
+
     @property
     def bifurcation_nodes(self) -> np.ndarray:
         """Interior nodes (degree >= 2) that need mass conservation, minus inlets."""

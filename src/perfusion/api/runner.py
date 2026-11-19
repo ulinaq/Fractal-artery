@@ -317,7 +317,9 @@ def solve(project, *, use_vessels, nonlinear=False, max_iter=100, tol=1e-10,
     if is_3d(project):                      # the 3-D hybrid: pressure, flux, time-of-flight
         from ..core.pipeline3d import run_hybrid_3d
 
-        return run_hybrid_3d(prm, grid, art, ven, tuple(domain_limit))
+        return run_hybrid_3d(prm, grid, art, ven, tuple(domain_limit), nonlinear=nonlinear,
+                             max_iter=max_iter, tol=tol,
+                             phase_separation=phase_separation, elasticity=elasticity)
     return run_hybrid(prm, grid, domain_limit=domain_limit, nonlinear=nonlinear,
                       art=art, ven=ven,
                       art_inlets=snap_io(art, project.inlets),
@@ -355,9 +357,6 @@ def fit_dce_project(store, project, req) -> dict:
     if not (len(req.times) == len(req.tissue) == len(req.aif)):
         raise InputError("times, tissue and aif need the same number of samples")
     grid, dom = build_grid(project)
-    if "permeability" in req.params and np.ndim(grid.permeability):
-        raise InputError("fitting K replaces the lesion permeability field — remove the "
-                         "lesions first, or fit p_in / porosity / mu")
     if is_3d(project):
         art, ven = build_networks(project, use_vessels=True, defaults=True)
     else:

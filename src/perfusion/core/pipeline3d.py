@@ -128,18 +128,22 @@ def darcy_coupling_3d(grid: Grid3D, art: Network, ven: Network, domain_limit,
 def run_hybrid_3d(prm: Parameters, grid: Grid3D, art: Network, ven: Network,
                   domain_limit, eps: float = 2.0,
                   art_inlets=None, ven_outlets=None, coupling: str = "auto",
-                  darcy=None) -> HybridResult3D:
+                  darcy=None, nonlinear: bool = False, max_iter: int = 100,
+                  tol: float = 1e-10, phase_separation: bool = False,
+                  elasticity: bool = False) -> HybridResult3D:
     """Couple 3-D arterial/venous trees to the 3-D Darcy bed and solve.
 
     ``art``/``ven`` are 3-D networks (``node_z`` set, e.g. from
     :func:`perfusion.core.geometry.grow_tree_3d`); ``domain_limit`` is the 3-D
     window ``(xmin, xmax, ymin, ymax, zmin, zmax)`` the grid maps to. ``prm``
-    supplies ``p_in``/``p_out``, the (scalar) viscosity ``mu`` and, with
-    ``prm.shear_thinning``, the Carreau law (per-segment viscosity from the shear
-    rate). ``coupling`` is as in :func:`perfusion.core.pipeline.run_hybrid` — the
-    sparse ``"monolithic"`` solve is what makes fine 3-D grids with many terminals fit
-    in memory. ``darcy`` reuses a :func:`darcy_coupling_3d` computed for the same
-    grid / terminals / ``eps``.
+    supplies ``p_in``/``p_out`` and the rheology. The network stage is
+    :func:`perfusion.core.pipeline.solve_flow`, exactly as in 2-D: Fåhræus–Lindqvist,
+    Carreau / Casson blood, ``nonlinear`` junction losses (3-D turning angles),
+    ``elasticity`` and ``phase_separation`` all apply. ``coupling`` is as in
+    :func:`perfusion.core.pipeline.run_hybrid` — the sparse ``"monolithic"`` solve
+    is what makes fine 3-D grids with many terminals fit in memory. ``darcy``
+    reuses a :func:`darcy_coupling_3d` computed for the same grid / terminals /
+    ``eps``.
     """
     if art_inlets is not None:
         art = replace(art, inlet_nodes=np.asarray(art_inlets, dtype=int))
@@ -149,16 +153,12 @@ def run_hybrid_3d(prm: Parameters, grid: Grid3D, art: Network, ven: Network,
     if darcy is None:
         darcy = darcy_coupling_3d(grid, art, ven, domain_limit, eps, coupling)
     kind, operator, field_response, sources = darcy
-    def _solve(a, v, visc):
-        return network.solve_linear(a, v, operator, prm.p_in, prm.p_out, visc)
+    from .pipeline import solve_flow
 
-    rheology = None
-    if prm.shear_thinning:               # Carreau blood: viscosity follows wall shear
-        from .pipeline import shear_thinning_solve
-
-        sol, _, rheology = shear_thinning_solve(_solve, art, ven, prm.mu, prm)
-    else:
-        sol = _solve(art, ven, prm.mu)
+    sol, art, ven, rheology = solve_flow(prm, art, ven, operator, nonlinear=nonlinear,
+                                         max_iter=max_iter, tol=tol,
+                                         phase_separation=phase_separation,
+                                         elasticity=elasticity)
     if kind == "monolithic":
         pressure = np.asarray(sol.darcy_pressure)
     else:

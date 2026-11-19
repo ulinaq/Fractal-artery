@@ -238,3 +238,40 @@ def test_anisotropic_throughflow_scales_with_aligned_axis():
 
     # a pure x-pressure ramp: throughflow is proportional to Kx
     assert x_throughflow(10.0) == pytest.approx(10.0 * x_throughflow(1.0), rel=1e-6)
+
+
+def test_with_permeability_rescales_and_keeps_structure():
+    from perfusion.core.darcy import Grid, with_permeability
+    from perfusion.core.darcy3d import Grid3D
+
+    k = np.full((10, 12), 2.0)
+    k[2:4, 3:5] = 0.2                               # a lesion at a tenth of healthy K
+    g = Grid(nx=10, ny=12, permeability=k, permeability_y=k * 3)
+    out = with_permeability(g, 5.0)
+    assert out.permeability[0, 0] == pytest.approx(5.0)       # healthy cells -> 5
+    assert out.permeability[2, 3] == pytest.approx(0.5)       # lesion contrast kept
+    assert np.allclose(out.permeability_y, 3 * out.permeability)  # anisotropy kept
+    assert with_permeability(Grid(nx=4, ny=4), 0.3).permeability == pytest.approx(0.3)
+    k3 = np.ones((4, 4, 4))
+    k3[0] = 0.1
+    g3 = with_permeability(Grid3D(nx=4, ny=4, nz=4, permeability=k3), 2.0)
+    assert g3.permeability[1, 1, 1] == pytest.approx(2.0)
+    assert g3.permeability[0, 1, 1] == pytest.approx(0.2)
+
+
+def test_grid_coerces_and_checks_the_mask():
+    from perfusion.core.darcy import Grid
+    from perfusion.core.darcy3d import Grid3D
+
+    m = np.zeros((6, 5), dtype=int)
+    m[1:5, 1:4] = 1
+    g = Grid(nx=6, ny=5, mask=m)
+    assert g.mask.dtype == bool
+    a = darcy.tpfa_operator(g)[0]
+    assert np.all(a.diagonal()[~g.mask.ravel(order="F")] == 1.0)  # identity rows, not -1/-2
+    with pytest.raises(ValueError, match="mask"):
+        Grid(nx=6, ny=5, mask=np.ones((5, 6), bool))
+    with pytest.raises(ValueError, match="nx, ny >= 1"):
+        Grid(nx=0, ny=5)
+    with pytest.raises(ValueError, match="mask"):
+        Grid3D(nx=3, ny=3, nz=3, mask=np.ones((3, 3), bool))

@@ -12,11 +12,11 @@ or web dependencies.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 import numpy as np
 
-from .core.darcy import Grid
+from .core.darcy import Grid, with_permeability
 from .core.geometry import Network
 from .core.parameters import Parameters
 from .core.pipeline import run_hybrid
@@ -196,7 +196,7 @@ def sobol_indices(param_ranges: dict, grid: Grid, n_samples: int = 48,
             else:
                 raise ValueError(f"unknown uncertain parameter {name!r}")
         prm = Parameters(**kw)
-        g = grid if perm is None else replace(grid, permeability=perm)
+        g = grid if perm is None else with_permeability(grid, perm)
         rows.append(_qois(solver(prm, g)))
 
     qoi_names = list(rows[0])
@@ -280,7 +280,7 @@ def monte_carlo(param_ranges: dict, grid: Grid, n_samples: int = 32,
             else:
                 raise ValueError(f"unknown uncertain parameter {name!r}")
         prm = Parameters(**kw)
-        g = grid if perm is None else replace(grid, permeability=perm)
+        g = grid if perm is None else with_permeability(grid, perm)
         rows.append(_qois(solver(prm, g)))
 
     qoi_names = list(rows[0])

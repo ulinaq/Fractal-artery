@@ -85,13 +85,6 @@ def _check_points(net: Network, pts, name):
     return pts
 
 
-def _parent_nodes(base: Network) -> np.ndarray:
-    """Parent-node index per node in ``base`` (-1 at the root)."""
-    parent = np.full(base.n_nodes, -1, dtype=int)
-    parent[base.seg_end] = base.seg_start
-    return parent
-
-
 def _murray_radii(parent, children, root, n_nodes, *, exponent, leaf_radius):
     """Radius of the segment feeding each node, by Murray's law (post-order)."""
     radius = np.zeros(n_nodes)
@@ -468,7 +461,10 @@ def cco_grow(base: Network, candidates, *, n_terminals=200, d_min=None,
     dim = cand.shape[1]
 
     base_pos = _positions(base)
-    base_par = _parent_nodes(base)
+    # a spanning tree from the root (any segment orientation; loops in the base set
+    # aside and re-added below) — not ``parent[seg_end] = seg_start``, which breaks
+    # on a reversed hand-drawn segment and drops anastomoses
+    base_par, extra = _spanning_parents(base)
     n = len(base_pos)
     # Preallocated arrays (each added terminal adds at most two nodes), maintained
     # incrementally — no per-step list -> array rebuilds.
@@ -522,7 +518,7 @@ def cco_grow(base: Network, candidates, *, n_terminals=200, d_min=None,
         added += 1
 
     return _assemble(base, P[:n].tolist(), par[:n].tolist(), exponent=exponent,
-                     leaf_radius=leaf_radius)
+                     leaf_radius=leaf_radius, extra=extra)
 
 
 def cco_grow_in_mask(base: Network, mask, domain_limit, *, n_terminals=200,

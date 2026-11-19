@@ -98,6 +98,14 @@ network with resistive links instead of a porous bed.
   prescribed-pressure boundary nodes — so any leaf can be an inlet/outlet and the
   BFS root, if *not* marked, correctly becomes a Darcy terminal. Don't reintroduce
   role-based (`role==TERMINAL`) classification — it strands the root.
+- **Terminal flux follows topology, not drawing direction.** A terminal's segment and
+  sign come from `Network.leaf_segments` (`orient = +1` at a `seg_end` leaf, `−1` at a
+  `seg_start` leaf) — never `incoming_segment[terminal]` with a fixed sign: a hand-drawn
+  vessel may point either way and a leaf root has no incoming segment. Both the hybrid
+  (`_Layout.terminal_flux_columns`) and direct solvers use it; the direct model pins
+  every `inlet_nodes` entry, like the hybrid (tested with reversed segments + leaf inlets).
+- **Terminals map to the cell containing them** (`floor`, both trees, 2-D and 3-D) —
+  the MATLAB `ceil` on 1-based indices was one cell off once carried over.
 - **Incidence-matrix assembly**: Poiseuille and mass conservation are built from
   the signed segment-node incidence `Network.incidence()` (`S`), not per-node
   loops. `(S @ p)[s] = p_start − p_end`; `(S.T @ q)[node]` is net outflow. Both
@@ -172,7 +180,16 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
 - **Fåhræus–Lindqvist viscosity** is wired in via `Parameters.fahraeus_lindqvist`
   (+`radius_to_um`); `run_hybrid` then passes a per-tree `(mu_art, mu_ven)` pair
   of per-segment viscosities to the solvers. `_resistances` accepts a scalar or a
-  per-tree pair.
+  per-tree pair. Diameters are clamped to `FL_MIN_DIAMETER_UM` (3 µm; the law is
+  singular at 1.1 µm) with a warning when most vessels are clamped (wrong `radius_to_um`).
+- **One flow stage for 2-D and 3-D**: `pipeline.solve_flow` applies F-L, Carreau/Casson,
+  nonlinear junction losses (3-D uses the true turning angle), elasticity and phase
+  separation (jointly, not either/or). `run_hybrid` and `run_hybrid_3d` both call it —
+  add new flow physics there, not in one pipeline.
+- **Varying K keeps lesions**: use `darcy.with_permeability(grid, k)` (rescales a per-cell
+  field by `k / median active K`, keeps anisotropy) — never `replace(grid, permeability=k)`,
+  which erases lesion fields. UQ, calibration, DCE fits and multi-compartment use it.
+  `Grid`/`Grid3D` coerce the mask to bool and check its shape and `n ≥ 1`.
 - **Shear-thinning (Carreau) blood**: `Parameters.shear_thinning` (+`carreau_lambda`,
   `carreau_n`, `carreau_mu0_ratio`) wraps any network solve in
   `viscosity.solve_shear_thinning` (Picard on the per-segment factor from the wall shear
@@ -376,7 +393,7 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   Error bars use only the free parameters (`active_mask`; the solver zeroes a bound
   parameter's Jacobian column). `POST /projects/{id}/fit-dce` is a job (kind `dce_fit`,
   `runner.fit_dce_project`), `GET` returns the stored fit (`{pid}.dcefit.json`); fitting
-  K on a project with lesions is rejected. UI `frontend/dcefit.js` (2-D Result card + 3-D
+  K on a project with lesions scales the healthy K and keeps the lesion contrast. UI `frontend/dcefit.js` (2-D Result card + 3-D
   analyses card); MCP `fit_dce_curve`.
 - **Anastomoses (loops)**: `core.anastomosis.add_anastomoses(net, n_links)` splits two
   nearby segments on different branches at their midpoints and joins them (detour ≥
