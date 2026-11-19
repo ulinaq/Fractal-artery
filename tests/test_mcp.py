@@ -496,3 +496,83 @@ def test_grow_trees_with_a_lesion(dim):
     opt = mcp_server.optimize_tissue_trees(dim=dim, shape=shape, maxiter=2, free=["a_gamma"],
                                            lesions=[{"center": c, "radius": 10}])
     assert opt["best"] <= opt["start"]
+
+
+# --------------------------------------------------------------------------- #
+# Input validation (code review): clear ValueErrors, never silent / cryptic
+# --------------------------------------------------------------------------- #
+def test_simulate_rejects_unknown_model_and_no_pressure_drop():
+    with pytest.raises(ValueError, match="model must be one of"):
+        mcp_server.simulate(model="Direct")              # used to run the hybrid silently
+    with pytest.raises(ValueError, match="no pressure drop"):
+        mcp_server.simulate(p_in=5.0, p_out=5.0, nx=40, ny=40)
+
+
+def test_run_simulation_tool_exposes_the_model_options():
+    pytest.importorskip("mcp")
+    import inspect
+
+    server = mcp_server.build_server()
+    tools = server._tool_manager._tools if hasattr(server, "_tool_manager") else {}
+    fn = tools["run_simulation"].fn if tools else None
+    if fn is None:
+        pytest.skip("cannot introspect this mcp version")
+    assert {"model", "rho_c", "max_iter"} <= set(inspect.signature(fn).parameters)
+
+
+def test_explicit_trunk_angles_and_root_dimensions_are_honoured():
+    # an explicit 90° equalled the old default sentinel and was replaced anatomically
+    up = mcp_server.generate_trees(dim=2, shape="kidney", generations=2, fill="none",
+                                   solve=False, artery_angle=90.0, _return_model=True)
+    spec = up["_model"][0]
+    assert spec.artery.angle == pytest.approx(90.0)
+    anat = mcp_server.generate_trees(dim=2, shape="kidney", generations=2, fill="none",
+                                     solve=False, _return_model=True)["_model"][0]
+    assert anat.artery.angle != pytest.approx(90.0)        # kidney: from the hilum
+    with pytest.raises(ValueError, match="artery_root needs 3 coordinates"):
+        mcp_server.generate_trees(dim=3, shape="kidney", generations=2, fill="none",
+                                  solve=False, artery_root=[30.0, 30.0])
+    with pytest.raises(ValueError, match="vein_root needs 2 coordinates"):
+        mcp_server.generate_trees(dim=2, shape="kidney", generations=2, fill="none",
+                                  solve=False, vein_root=[1.0, 2.0, 3.0])
+
+
+def test_lesion_and_experiment_inputs_are_checked():
+    with pytest.raises(ValueError, match="permeability must be a positive"):
+        mcp_server.tissue_lesion(dim=2, shape="kidney", generations=2, fill="none",
+                                 permeability=0.0)
+    with pytest.raises(ValueError, match="equals the fixed p_out"):
+        mcp_server.tissue_experiment(param="p_in", values=[0.0, 10.0], dim=2,
+                                     shape="kidney", generations=2, fill="none")
+    with pytest.raises(ValueError, match="lesion permeability"):
+        mcp_server.tissue_compare(dim=2, shape="kidney", generations=2, fill="none",
+                                  change={"lesion": {"permeability": -1}})
+    with pytest.raises(ValueError, match="no pressure drop"):
+        mcp_server.tissue_direct(dim=2, shape="kidney", generations=2, fill="none",
+                                 p_in=3.0, p_out=3.0)
+    with pytest.raises(ValueError, match="kind must be one of"):
+        mcp_server.tree_morphometry(kind="nerve")
+
+
+def test_synthetic_dce_fit_uses_the_whole_truth():
+    # truth={"mu": 3} used to be ignored (curve simulated at mu = 1) and the fit started
+    # from p_in = 10 while the data used 14 -> mu ≈ 3.15, R² 0.26
+    r = mcp_server.tissue_dce_fit(params={"mu": (0.3, 10.0)}, truth={"mu": 3.0}, dim=2,
+                                  shape="kidney", generations=3, fill="none")
+    assert r["params"]["mu"] == pytest.approx(3.0, rel=1e-3)
+    assert r["r2"] > 0.999
+    with pytest.raises(ValueError, match="truth takes"):
+        mcp_server.tissue_dce_fit(truth={"K": 2.0}, dim=2, shape="kidney", generations=2,
+                                  fill="none")
+
+
+def test_video_rendering_does_not_need_the_web_api():
+    # export_tissue_fields(video=True) imported perfusion.api.helpers -> fastapi
+    import subprocess
+    import sys
+
+    code = ("import sys, perfusion.video, perfusion.mcp_server; "
+            "print('fastapi' in sys.modules)")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         check=True)
+    assert out.stdout.strip() == "False"

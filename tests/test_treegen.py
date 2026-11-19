@@ -103,3 +103,11 @@ def test_3d_lesion_density_steers_growth():
         art, ven, *_ = treegen.build(spec)
         counts.append(_inside(spec, art) + _inside(spec, ven))
     assert counts[0] < counts[1]
+
+
+def test_optimize_rejects_unknown_parameters():
+    from perfusion import treegen
+
+    spec = treegen.GenSpec(dim=2, shape="kidney", generations=2, fill="none")
+    with pytest.raises(ValueError, match="cannot optimise"):
+        treegen.optimize(spec, free=["a_gamma", "bogus"], maxiter=1)

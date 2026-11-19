@@ -27,6 +27,47 @@ _DOMAIN = (-70.0, 70.0, 0.0, 160.0)
 _LX, _LY = _DOMAIN[1] - _DOMAIN[0], _DOMAIN[3] - _DOMAIN[2]
 
 
+# ── shared input checks + organ model (every tool raises a clear ValueError) ──────
+def _check_drop(p_in: float, p_out: float) -> None:
+    """A pressure-driven model needs a drop: ``p_in == p_out`` solves to zero flow and
+    nonsense transit times."""
+    if float(p_in) == float(p_out):
+        raise ValueError("p_in equals p_out — no pressure drop, so no flow; set p_in > p_out")
+
+
+def _check_positive(**values) -> None:
+    for name, v in values.items():
+        if v is None or not np.isfinite(float(v)) or float(v) <= 0:
+            raise ValueError(f"{name} must be a positive number (got {v!r})")
+
+
+def _check_choice(name: str, value, choices) -> None:
+    if value not in choices:
+        raise ValueError(f"{name} must be one of {list(choices)} (got {value!r})")
+
+
+def _grow_organ(dim, shape, generations, fill, n_terminals, seed, extent, **extra):
+    """Grow artery + vein into an organ (no solve) → ``(spec, art, ven, mask, domain)``
+    — the common first step of every organ tool."""
+    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
+                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
+                           _return_model=True, **extra)
+    return grown["_model"]
+
+
+def _inflow(res) -> float:
+    """Total perfusion: the flow leaving the arterial terminals."""
+    q = res.solution.terminal_flux
+    return float(q[q > 0].sum())
+
+
+def _tissue_centroid(mask, domain) -> list:
+    """The centre of mass of the active tissue, in domain coordinates (2-D or 3-D)."""
+    lim = np.asarray(domain, dtype=float)
+    h = (lim[1::2] - lim[0::2]) / np.array(mask.shape)
+    return (lim[0::2] + (np.argwhere(mask).mean(axis=0) + 0.5) * h).tolist()
+
+
 def simulate(p_in: float = 10.0, p_out: float = 0.0, nx: int = 120, ny: int = 140,
              r_min_frac: float = 0.15, nonlinear: bool = False,
              max_iter: int = 100, model: str = "hybrid", rho_c: float = 0.0,
@@ -39,9 +80,11 @@ def simulate(p_in: float = 10.0, p_out: float = 0.0, nx: int = 120, ny: int = 14
     ``nx``/``ny`` set the Darcy grid resolution; ``r_min_frac`` controls branch depth
     (larger -> shallower); ``max_iter`` caps the nonlinear fixed-point iteration.
     """
+    _check_choice("model", model, ("hybrid", "direct"))
+    _check_drop(p_in, p_out)
     nx, ny = int(np.clip(nx, 20, 250)), int(np.clip(ny, 20, 250))
     prm = Parameters(p_in=p_in, p_out=p_out, r_min_frac=r_min_frac)
-    if model == "direct":
+    if model == "direct":           # no grid / nonlinear stage: nx, ny, nonlinear unused
         from .core.direct import connect_terminals, solve_direct
         from .core.geometry import arterial_tree, venous_tree
 
@@ -247,23 +290,35 @@ def tissue_dce_fit(times=None, tissue=None, aif=None, params: dict | None = None
 
     from . import treegen
     from .core import tkm
+    from .core.darcy import with_permeability
     from .inverse import fit_dce, simulate_tissue_curve
     from .uq import _sample_solver
 
     params = {k: tuple(v) for k, v in (params or {"p_in": (1, 50),
                                                   "porosity": (0.02, 1)}).items()}
-    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
-                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
-                           _return_model=True)
-    spec, art, ven, mask, domain = grown["_model"]
+    spec, art, ven, mask, domain = _grow_organ(dim, shape, generations, fill,
+                                                  n_terminals, seed, extent)
     grid = treegen.grid_for(spec, mask, domain)
     base = {"p_in": 10.0, "p_out": 0.0}
     out = {"dim": spec.dim, "shape": shape}
     if times is None:
         truth = {"p_in": 14.0, "porosity": 0.3, **(truth or {})}
-        solve = _sample_solver(["p_in"], grid, domain, art, ven, None)
-        true_res = solve(Parameters(**{**base, "p_in": truth["p_in"]}),
-                         replace(grid, porosity=truth["porosity"]))
+        bad = set(truth) - {"p_in", "mu", "permeability", "porosity"}
+        if bad:
+            raise ValueError(f"truth takes p_in / mu / permeability / porosity, not {sorted(bad)}")
+        _check_positive(**truth)
+        # the synthetic tissue is simulated from *every* truth value …
+        true_grid = replace(with_permeability(grid, truth.get("permeability", 1.0)),
+                            porosity=truth["porosity"])
+        solve = _sample_solver(["permeability"], grid, domain, art, ven, None)
+        true_res = solve(Parameters(**{**base, **{k: truth[k] for k in ("p_in", "mu")
+                                                   if k in truth}}), true_grid)
+        # … and the inputs *not* being fitted are known: the fit starts from them
+        base.update({k: truth[k] for k in ("p_in", "mu") if k in truth and k not in params})
+        if "permeability" not in params:
+            grid = with_permeability(grid, truth.get("permeability", 1.0))
+        if "porosity" not in params:
+            grid = replace(grid, porosity=truth["porosity"])
         tof = true_res.tof[np.isfinite(true_res.tof)]
         t_end = 1.2 * float(np.percentile(tof, 80)) * truth["porosity"]
         times = np.linspace(0.0, t_end, int(n_samples))
@@ -295,10 +350,8 @@ def tissue_anastomosis(dim: int = 2, shape: str = "kidney", generations: int = 5
     from . import treegen
     from .core import anastomosis as an
 
-    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
-                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
-                           _return_model=True)
-    spec, art, ven, mask, domain = grown["_model"]
+    spec, art, ven, mask, domain = _grow_organ(dim, shape, generations, fill,
+                                                  n_terminals, seed, extent)
     looped, links = an.add_anastomoses(art, n_links, radius_frac=radius_frac)
     if not links:
         raise ValueError("no anastomosis qualifies on this tree — grow it deeper")
@@ -396,6 +449,15 @@ def tissue_experiment(param: str = "p_in", values=(5.0, 10.0, 20.0), dim: int = 
         raise ValueError("param2 must differ from param")
     if {param, param2} == {"p_in", "p_out"} and set(vals) & set(vals2):
         raise ValueError("a combination makes p_in equal p_out — no pressure drop")
+    for name, vs in ((param, vals), (param2, vals2 or [])):
+        if name == "permeability" and min(vs) <= 0:
+            raise ValueError("permeability values must be > 0")
+        other = {"p_in": "p_out", "p_out": "p_in"}.get(name)
+        if other and other not in (param, param2):
+            fixed = float((baseline or {}).get(other, 10.0 if other == "p_in" else 0.0))
+            if fixed in vs:
+                raise ValueError(f"{name} = {fixed:g} equals the fixed {other} — no pressure "
+                                 "drop for that run; drop that value")
     if vals2 and len(vals) * len(vals2) > 48:
         raise ValueError(f"a grid is at most 48 solves ({len(vals)} × {len(vals2)} asked)")
     spec, run = _organ_scenarios(dim, shape, generations, fill, n_terminals, seed, extent)
@@ -426,21 +488,23 @@ def _organ_scenarios(dim, shape, generations, fill, n_terminals, seed, extent):
     from . import treegen
     from .core.geometry import rasterize_regions
 
-    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
-                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
-                           _return_model=True)
-    spec, art, ven, mask, domain = grown["_model"]
+    spec, art, ven, mask, domain = _grow_organ(dim, shape, generations, fill,
+                                                  n_terminals, seed, extent)
     lim = np.asarray(domain, dtype=float)
 
     def k_field(scen):
         k = float(scen.get("permeability", 1.0))
+        _check_positive(permeability=k)
         les = scen.get("lesion")
         if not les:
             return None if k == 1.0 else np.full(mask.shape, k)
+        _check_positive(**{"lesion permeability": les.get("permeability", 0.05),
+                           "lesion radius_frac": les.get("radius_frac", 0.2)})
         center = les.get("center")
         if center is None:
-            h = (lim[1::2] - lim[0::2]) / np.array(mask.shape)
-            center = (lim[0::2] + (np.argwhere(mask).mean(axis=0) + 0.5) * h).tolist()
+            center = _tissue_centroid(mask, domain)
+        if len(center) != mask.ndim:
+            raise ValueError(f"lesion center needs {mask.ndim} values on a {mask.ndim}-D organ")
         radius = float(les.get("radius_frac", 0.2)) * float((lim[1::2] - lim[0::2]).min())
         return rasterize_regions(mask.shape, domain, [{
             "center": center, "radius": radius,
@@ -450,6 +514,7 @@ def _organ_scenarios(dim, shape, generations, fill, n_terminals, seed, extent):
         bad = set(scen) - set(_SCENARIO_KEYS)
         if bad:
             raise ValueError(f"unknown scenario keys {sorted(bad)}; use {list(_SCENARIO_KEYS)}")
+        _check_drop(scen.get("p_in", 10.0), scen.get("p_out", 0.0))
         res = treegen.solve(spec, art, ven, mask, domain, p_in=float(scen.get("p_in", 10.0)),
                             p_out=float(scen.get("p_out", 0.0)), permeability=k_field(scen))
         fields = {"pressure": res.pressure, "flux": res.flux, "tof": res.tof, "mask": mask}
@@ -475,10 +540,8 @@ def tissue_rheology(dim: int = 3, shape: str = "kidney", generations: int = 4,
         raise ValueError("pressures must be positive inlet pressures (p_out = 0)")
     if carreau_lambda <= 0:
         raise ValueError("carreau_lambda must be positive")
-    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
-                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
-                           _return_model=True)
-    spec, art, ven, mask, domain = grown["_model"]
+    spec, art, ven, mask, domain = _grow_organ(dim, shape, generations, fill,
+                                                  n_terminals, seed, extent)
     rows = []
     for p in ps:
         newt = perfio.results_summary(treegen.solve(spec, art, ven, mask, domain, p_in=p))
@@ -525,10 +588,8 @@ def tissue_yield_stress(dim: int = 3, shape: str = "kidney", generations: int = 
         raise ValueError("pressures must be positive inlet pressures (p_out = 0)")
     if casson_yield < 0:
         raise ValueError("casson_yield must be >= 0")
-    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
-                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
-                           _return_model=True)
-    spec, art, ven, mask, domain = grown["_model"]
+    spec, art, ven, mask, domain = _grow_organ(dim, shape, generations, fill,
+                                                  n_terminals, seed, extent)
     n_vessels = art.n_segments + ven.n_segments
     rows = []
     for p in ps:
@@ -573,15 +634,12 @@ def tissue_lesion(dim: int = 3, shape: str = "kidney", generations: int = 4,
     from . import treegen
     from .core.geometry import rasterize_regions
 
-    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
-                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
-                           _return_model=True)
-    spec, art, ven, mask, domain = grown["_model"]
+    spec, art, ven, mask, domain = _grow_organ(dim, shape, generations, fill,
+                                                  n_terminals, seed, extent)
+    _check_positive(permeability=permeability, radius_frac=radius_frac)
     lim = np.asarray(domain, dtype=float)
     if center is None:
-        idx = np.argwhere(mask)
-        h = (lim[1::2] - lim[0::2]) / np.array(mask.shape)
-        center = (lim[0::2] + (idx.mean(axis=0) + 0.5) * h).tolist()
+        center = _tissue_centroid(mask, domain)
     if len(center) != mask.ndim:
         raise ValueError(f"center needs {mask.ndim} values on a {mask.ndim}-D organ")
     radius = float(radius_frac) * float((lim[1::2] - lim[0::2]).min())
@@ -593,11 +651,7 @@ def tissue_lesion(dim: int = 3, shape: str = "kidney", generations: int = 4,
     healthy = treegen.solve(spec, art, ven, mask, domain)
     kfield = np.where(inside, float(permeability), 1.0)
     lesioned = treegen.solve(spec, art, ven, mask, domain, permeability=kfield)
-
-    def inflow(res):
-        q = res.solution.terminal_flux
-        return float(q[q > 0].sum())
-
+    inflow = _inflow
     before = float(np.nanmean(healthy.flux[inside]))
     after = float(np.nanmean(lesioned.flux[inside]))
     return {"dim": spec.dim, "shape": shape, "center": [float(c) for c in center],
@@ -606,6 +660,17 @@ def tissue_lesion(dim: int = 3, shape: str = "kidney", generations: int = 4,
             "flux_inside_healthy": before, "flux_inside_lesion": after,
             "remaining_fraction": after / before if before > 0 else None,
             "inflow_healthy": inflow(healthy), "inflow_lesion": inflow(lesioned)}
+
+
+def _write_video(path, render, tracer, scene, files) -> str | None:
+    """Write one tracer video; a missing extra (GIF: ``image``, MP4: ``video``) is a
+    note, not a failure of the whole export."""
+    try:
+        path.write_bytes(render(tracer, scene=scene))
+    except ImportError as exc:
+        return f"{path.name} skipped: {exc}"
+    files[path.name] = path
+    return None
 
 
 def tissue_export(out_dir: str, dim: int = 3, shape: str = "kidney",
@@ -626,10 +691,8 @@ def tissue_export(out_dir: str, dim: int = 3, shape: str = "kidney",
 
     out = Path(out_dir).expanduser()
     out.mkdir(parents=True, exist_ok=True)
-    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
-                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
-                           _return_model=True)
-    spec, art, ven, mask, domain = grown["_model"]
+    spec, art, ven, mask, domain = _grow_organ(dim, shape, generations, fill,
+                                                  n_terminals, seed, extent)
     res = treegen.solve(spec, art, ven, mask, domain)
     files = {"fields.csv": perfio.save_results_csv(res, out / "fields.csv"),
              "fields.vti": perfio.save_results_vtk(res, out / "fields.vti"),
@@ -638,9 +701,7 @@ def tissue_export(out_dir: str, dim: int = 3, shape: str = "kidney",
                                                  flow=res.solution.q_a),
              "vein.vtp": perfio.network_to_vtp(ven, out / "vein.vtp", flow=res.solution.q_v)}
     if video:
-        import contextlib
-
-        from .api import helpers
+        from . import video as vid
 
         fr, _, _ = _organ_tracer(res, n_frames)
         fin = fr[:, mask]
@@ -649,17 +710,18 @@ def tissue_export(out_dir: str, dim: int = 3, shape: str = "kidney",
         scene = None
         if spec.dim == 3:
             segs = [[*sg, k] for net, k in ((art, 0), (ven, 1))
-                    for sg in helpers.segment_lines_3d(net)]
+                    for sg in vid.segment_lines_3d(net)]
             scene = {"domain": [float(v) for v in domain], "segments": segs}
-        (out / "tracer.gif").write_bytes(helpers.render_gif(tracer, scene=scene))
-        files["tracer.gif"] = out / "tracer.gif"
-        with contextlib.suppress(ImportError):           # MP4 needs the video extra
-            (out / "tracer.mp4").write_bytes(helpers.render_mp4(tracer, scene=scene))
-            files["tracer.mp4"] = out / "tracer.mp4"
-    q = res.solution.terminal_flux
-    return {"dim": spec.dim, "shape": shape, "grid": list(mask.shape),
-            "active_cells": int(mask.sum()), "inflow": float(q[q > 0].sum()),
-            "files": {k: str(v) for k, v in files.items()}}
+        notes = [n for n in (_write_video(out / "tracer.gif", vid.render_gif, tracer, scene,
+                                          files),
+                             _write_video(out / "tracer.mp4", vid.render_mp4, tracer, scene,
+                                          files)) if n]
+    result = {"dim": spec.dim, "shape": shape, "grid": list(mask.shape),
+              "active_cells": int(mask.sum()), "inflow": _inflow(res),
+              "files": {k: str(v) for k, v in files.items()}}
+    if video and notes:
+        result["notes"] = notes
+    return result
 
 
 def tissue_direct(dim: int = 3, shape: str = "kidney", generations: int = 4,
@@ -673,12 +735,13 @@ def tissue_direct(dim: int = 3, shape: str = "kidney", generations: int = 4,
     flows, and bolus transit times timed along the network."""
     from .core.direct import connect_terminals, solve_direct
 
-    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
-                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
-                           _return_model=True)
-    spec, art, ven, _, _ = grown["_model"]
+    spec, art, ven, _, _ = _grow_organ(dim, shape, generations, fill,
+                                                  n_terminals, seed, extent)
+    _check_drop(p_in, p_out)
     prm = Parameters(p_in=p_in, p_out=p_out)
     conns = connect_terminals(art, ven, rho_c=float(rho_c), viscosity=prm.mu)
+    if not conns:
+        raise ValueError("no arterial terminal to connect — grow more generations / a fill")
     sol = solve_direct(art, ven, conns, prm.p_in, prm.p_out, viscosity=prm.mu)
     lengths = np.array([c.length for c in conns])
     q_in = float(np.abs(sol.q_c).sum())
@@ -809,6 +872,7 @@ def tree_morphometry(kind: str = "artery", r_min_frac: float = 0.15, seed: int =
     from .core.morphometry import strahler_summary
 
     prm = Parameters(r_min_frac=r_min_frac, seed=seed)
+    _check_choice("kind", kind, ("artery", "vein"))
     net = venous_tree(prm) if kind == "vein" else arterial_tree(prm)
     s = strahler_summary(net)
     return {"kind": kind, "max_order": s["max_order"], "counts": s["counts"],
@@ -826,6 +890,7 @@ def prune_tree(kind: str = "artery", steps: int = 1, r_min_frac: float = 0.15,
     from .core.morphometry import strahler_summary
 
     prm = Parameters(r_min_frac=r_min_frac, seed=seed)
+    _check_choice("kind", kind, ("artery", "vein"))
     net = venous_tree(prm) if kind == "vein" else arterial_tree(prm)
     pruned = prune_terminal_branches(net, int(np.clip(steps, 0, 50)))
 
@@ -840,7 +905,8 @@ def prune_tree(kind: str = "artery", steps: int = 1, r_min_frac: float = 0.15,
 def generate_trees(dim: int = 2, shape: str = "ellipse", generations: int = 4,
                    fill: str = "colonization", fill_steps: int = 40, n_terminals: int = 60,
                    artery_root=None, vein_root=None, artery_direction=None,
-                   vein_direction=None, artery_angle: float = 90.0, vein_angle: float = -90.0,
+                   vein_direction=None, artery_angle: float | None = None,
+                   vein_angle: float | None = None,
                    solve: bool = True, seed: int = 0, extent: float = 1.0,
                    close_loops: bool = False, lesions=None,
                    _return_model: bool = False) -> dict:
@@ -868,21 +934,32 @@ def generate_trees(dim: int = 2, shape: str = "ellipse", generations: int = 4,
     # unspecified roots/aims attach where the organ's vessels do anatomically
     anat = organs.roots(shape, dim_, treegen.domain_for(dim_, e))
 
-    def aim(kind, given_dir, given_angle, default_angle):
+    def aim(kind, given_dir, given_angle):
+        # None = "not given" → the anatomical aim (a real 90° / −90° is honoured)
         a = anat[kind]
         if d3:
+            if given_dir is not None and len(given_dir) != 3:
+                raise ValueError(f"{kind}_direction needs [dx, dy, dz] on a 3-D organ")
             return tuple(given_dir or a["direction"]), 90.0
-        return (0, 0, 1), (given_angle if given_angle != default_angle else a["angle"])
+        return (0, 0, 1), (float(given_angle) if given_angle is not None else a["angle"])
 
-    a_dir, a_ang = aim("artery", artery_direction, artery_angle, 90.0)
-    v_dir, v_ang = aim("vein", vein_direction, vein_angle, -90.0)
+    def root(kind, given):
+        if given is None:
+            return tuple(anat[kind]["root"])
+        if len(given) != dim_:
+            raise ValueError(f"{kind}_root needs {dim_} coordinates on a {dim_}-D organ "
+                             f"(got {len(given)})")
+        return tuple(float(v) for v in given)
+
+    a_dir, a_ang = aim("artery", artery_direction, artery_angle)
+    v_dir, v_ang = aim("vein", vein_direction, vein_angle)
     spec = treegen.GenSpec(
         dim=dim_, shape=shape, generations=int(np.clip(generations, 1, 10)),
         fill=fill, fill_steps=int(np.clip(fill_steps, 0, 400)),
         n_terminals=int(np.clip(n_terminals, 1, 600)), seed=seed, nx=20 if d3 else 60,
         extent=e, close_loops=bool(close_loops), lesions=_lesion_dicts(lesions),
-        artery=treegen.TreeSpec(tuple(artery_root or anat["artery"]["root"]), a_ang, a_dir),
-        vein=treegen.TreeSpec(tuple(vein_root or anat["vein"]["root"]), v_ang, v_dir,
+        artery=treegen.TreeSpec(root("artery", artery_root), a_ang, a_dir),
+        vein=treegen.TreeSpec(root("vein", vein_root), v_ang, v_dir,
                               radius=2.4, gamma=1.2))
     art, ven, mask, domain, _ = treegen.build(spec)
     out = {"dim": spec.dim, "shape": shape, "fill": fill, "active_cells": int(mask.sum()),
@@ -892,7 +969,7 @@ def generate_trees(dim: int = 2, shape: str = "ellipse", generations: int = 4,
     if solve:       # the same calculations in 2-D and 3-D: flow, flux, time-of-flight
         res = treegen.solve(spec, art, ven, mask, domain)
         q = res.solution.terminal_flux
-        out["inflow"] = float(q[q > 0].sum())
+        out["inflow"] = _inflow(res)
         out["outflow"] = float(-q[q < 0].sum())
         out["homogeneity"] = treegen.homogeneity(
             res, exclude=treegen.lesion_mask(spec, mask, domain))
@@ -908,6 +985,10 @@ def _lesion_dicts(lesions) -> list:
     for le in lesions or []:
         if "center" not in le or "radius" not in le:
             raise ValueError("each lesion needs a center and a radius")
+        _check_positive(**{"lesion radius": le["radius"],
+                           "lesion permeability": le.get("permeability", 0.1)})
+        if not 0 <= float(le.get("density", 1.0)) <= 20:
+            raise ValueError("lesion density must be in [0, 20] (0 avascular, 1 healthy)")
         out.append({"center": [float(c) for c in le["center"]], "radius": float(le["radius"]),
                     "permeability": float(le.get("permeability", 0.1)),
                     "density": float(le.get("density", 1.0))})
@@ -956,10 +1037,8 @@ def tissue_analysis(dim: int = 3, shape: str = "kidney", generations: int = 4,
     from .core.perfusion_metrics import transit_metrics
     from .core.pipeline import run_adaptation
 
-    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
-                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
-                           _return_model=True)
-    spec, art, ven, mask, domain = grown["_model"]
+    spec, art, ven, mask, domain = _grow_organ(dim, shape, generations, fill,
+                                                  n_terminals, seed, extent)
     res = treegen.solve(spec, art, ven, mask, domain)
     out = {"dim": spec.dim, "shape": shape, "active_cells": int(mask.sum()),
            "n_terminals": {"artery": int(art.terminal_nodes.size),
@@ -1018,10 +1097,8 @@ def tissue_sweep(dim: int = 3, shape: str = "kidney", generations: int = 4,
     also recovers ``calibrate_param`` so the arterial inflow matches it."""
     from . import inverse, treegen, uq
 
-    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
-                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
-                           _return_model=True)
-    spec, art, ven, mask, domain = grown["_model"]
+    spec, art, ven, mask, domain = _grow_organ(dim, shape, generations, fill,
+                                                  n_terminals, seed, extent)
     grid = treegen.grid_for(spec, mask, domain)
     ranges = {k: tuple(v) for k, v in (("p_in", p_in_range), ("mu", mu_range),
                                        ("permeability", permeability_range)) if v is not None}
@@ -1213,12 +1290,16 @@ def build_server():
     @server.tool()
     def run_simulation(p_in: float = 10.0, p_out: float = 0.0, nx: int = 120,
                        ny: int = 140, r_min_frac: float = 0.15,
-                       nonlinear: bool = False) -> dict:
-        """Run a hybrid blood-flow + Darcy perfusion simulation on fractal
-        arterial/venous trees and return a scalar summary (arterial inflow,
-        venous outflow, pressure/flux/time-of-flight statistics)."""
-        return simulate(p_in=p_in, p_out=p_out, nx=nx, ny=ny,
-                        r_min_frac=r_min_frac, nonlinear=nonlinear)
+                       nonlinear: bool = False, max_iter: int = 100,
+                       model: str = "hybrid", rho_c: float = 0.0) -> dict:
+        """Run a blood-flow + perfusion simulation on fractal arterial/venous trees and
+        return a scalar summary (arterial inflow, venous outflow, pressure/flux/
+        time-of-flight statistics). ``model="hybrid"`` couples the trees to a Darcy
+        capillary bed (grid ``nx``×``ny``; ``nonlinear`` adds junction losses, capped
+        at ``max_iter`` iterations); ``model="direct"`` closes them with resistive
+        terminal links within ``rho_c`` (0 = the nearest vein) instead."""
+        return simulate(p_in=p_in, p_out=p_out, nx=nx, ny=ny, r_min_frac=r_min_frac,
+                        nonlinear=nonlinear, max_iter=max_iter, model=model, rho_c=rho_c)
 
     @server.tool()
     def run_sweep(param: str, values: list[float], p_in: float = 10.0,
@@ -1510,7 +1591,8 @@ def build_server():
                              vein_root: list[float] | None = None,
                              artery_direction: list[float] | None = None,
                              vein_direction: list[float] | None = None,
-                             artery_angle: float = 90.0, vein_angle: float = -90.0,
+                             artery_angle: float | None = None,
+                             vein_angle: float | None = None,
                              solve: bool = True, seed: int = 0, extent: float = 1.0,
                              close_loops: bool = False,
                              lesions: list[dict] | None = None) -> dict:

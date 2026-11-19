@@ -774,7 +774,7 @@ Editing 3-D trees by hand is now done too (§11.4).
 - ✅ ~~**3-D flow video**~~ — tracer transport on the voxel bed, played back in the
   3-D viewer (`view3d?field=tracer`), and exported as **GIF / MP4**: a server-rendered
   maximum-intensity projection of the bolus with the trees, turning round the organ
-  (`helpers.tracer_images_3d`; ↓ GIF / ↓ MP4 in the viewer's flow card, in the bundle,
+  (`video.tracer_images_3d`; ↓ GIF / ↓ MP4 in the viewer's flow card, in the bundle,
   and MCP `export_tissue_fields(video=True)`).
 - ✅ ~~**Workspace result analyses for 3-D**~~ — tracer, kinetics, oxygen, grow, adapt,
   UQ / Sobol / calibration, the multi-compartment bed and now the **direct-connection
@@ -832,5 +832,10 @@ are being fixed in four PRs.
   DCE fit and video links reset per project; 3-D undo keeps its step while saving;
   explorer animation can't double-run and opens projects inside the click (popup
   blockers).
-- ☐ **MCP** — shared input validation and an organ-model helper (mcp_server.py ~1,000
-  lines of repeated organ bodies).
+- ✅ **MCP & service layers** — shared validators (`_check_drop`, `_check_positive`,
+  `_check_choice`) and one `_grow_organ` for the organ tools; unknown `model`, equal
+  pressures, K ≤ 0, wrong-length roots, bad `kind`s are clear errors; `run_simulation`
+  exposes `model` / `rho_c` / `max_iter`; an explicit 90° trunk angle is honoured; the
+  synthetic DCE check simulates from the whole `truth`; flow videos moved to
+  `perfusion.video` (MCP no longer imports FastAPI); `optimize_tree` keeps `r_min_frac`;
+  `io` save functions return the file actually written; obstacles carve 3-D masks.

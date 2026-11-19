@@ -68,6 +68,9 @@ def params_from_alpha(alpha: Sequence[float], r_min_frac: float = 0.15) -> Param
     return prm
 
 
+OBJECTIVES = ("flux_range", "flux_std", "flux_l2", "flux_mean", "tof_std", "tof_max")
+
+
 def objective(alpha: Sequence[float], kind: str = "tof_std",
               grid: Grid | None = None,
               domain_limit=(-70, 70, 0, 160), strict: bool = False,
@@ -79,6 +82,8 @@ def objective(alpha: Sequence[float], kind: str = "tof_std",
     the grid returns ``inf`` (so an optimiser hard-rejects it); by default the
     terminals are clipped to the grid, keeping the objective smooth.
     """
+    if kind not in OBJECTIVES:          # before the (expensive) solve, not after it
+        raise ValueError(f"unknown objective {kind!r}; use one of {list(OBJECTIVES)}")
     if grid is None:
         grid = Grid(nx=140, ny=160, lx=140, ly=160)
     try:
@@ -102,9 +107,7 @@ def objective(alpha: Sequence[float], kind: str = "tof_std",
         return float("inf")
     if kind == "tof_std":
         return float(tof.std())
-    if kind == "tof_max":
-        return float(tof.max())
-    raise ValueError(f"unknown objective {kind!r}")
+    return float(tof.max())             # kind == "tof_max"
 
 
 # ── optimisation driver (Paper D) ──────────────────────────────────────────────
@@ -150,6 +153,10 @@ def optimize_tree(kind: str = "tof_std", *, grid: Grid | None = None,
     """
     from scipy.optimize import differential_evolution, minimize
 
+    if kind not in OBJECTIVES:
+        raise ValueError(f"unknown objective {kind!r}; use one of {list(OBJECTIVES)}")
+    if method not in ("local", "global"):
+        raise ValueError(f"unknown method {method!r}; use 'local' or 'global'")
     grid = grid or Grid(nx=70, ny=80, lx=140, ly=160)
     free = list(_DEFAULT_FREE if free is None else free)
     base = np.array(default_alpha() if alpha0 is None else alpha0, dtype=float)
@@ -178,5 +185,7 @@ def optimize_tree(kind: str = "tof_std", *, grid: Grid | None = None,
 
     best = base.copy()
     best[free] = x_best
-    return OptimizeResult(alpha=best.tolist(), params=params_from_alpha(best),
+    # rebuilt with the same r_min_frac the search used, or the trees would differ
+    return OptimizeResult(alpha=best.tolist(),
+                          params=params_from_alpha(best, r_min_frac=r_min_frac),
                           objective=f_best, kind=kind, free=free, n_eval=n_eval, success=ok)
