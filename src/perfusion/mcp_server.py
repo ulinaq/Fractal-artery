@@ -506,6 +506,58 @@ def tissue_rheology(dim: int = 3, shape: str = "kidney", generations: int = 4,
             "flow_exponent_carreau": exponent("inflow_carreau")}
 
 
+def tissue_yield_stress(dim: int = 3, shape: str = "kidney", generations: int = 4,
+                        fill: str = "cco", n_terminals: int = 40,
+                        pressures=(1.0, 2.0, 5.0, 10.0, 20.0), casson_yield: float = 0.001,
+                        seed: int = 0, extent: float = 1.0) -> dict:
+    """Newtonian vs **Casson** (yield-stress) blood in an organ: grow trees into
+    ``shape``, solve both at each inlet pressure and report inflow, the Casson /
+    Newtonian flow ratio, how many vessels are plugged below yield and the
+    viscosity-factor range. Casson flow follows ``√Q ≈ a (√Δp − √Δp_y)`` once the
+    trunks have yielded, so a fit of ``√Q`` on ``√Δp`` over the higher-pressure half
+    of the rows gives
+    the **yield pressure** ``Δp_y`` below which the organ is barely perfused."""
+    from . import io as perfio
+    from . import treegen
+
+    ps = sorted({float(p) for p in pressures})
+    if len(ps) < 1 or min(ps) <= 0:
+        raise ValueError("pressures must be positive inlet pressures (p_out = 0)")
+    if casson_yield < 0:
+        raise ValueError("casson_yield must be >= 0")
+    grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
+                           n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
+                           _return_model=True)
+    spec, art, ven, mask, domain = grown["_model"]
+    n_vessels = art.n_segments + ven.n_segments
+    rows = []
+    for p in ps:
+        newt = perfio.results_summary(treegen.solve(spec, art, ven, mask, domain, p_in=p))
+        cas = perfio.results_summary(treegen.solve(
+            spec, art, ven, mask, domain, p_in=p, shear_thinning=True,
+            blood_law="casson", casson_yield=casson_yield))
+        qn, qc = newt["arterial_inflow"], cas["arterial_inflow"]
+        rows.append({"p_in": p, "inflow_newtonian": qn, "inflow_casson": qc,
+                     "flow_ratio": qc / qn if qn else None,
+                     "plugged_vessels": cas["plugged_vessels"],
+                     "plugged_fraction": cas["plugged_vessels"] / n_vessels,
+                     "viscosity_factor_min": cas["viscosity_factor_min"],
+                     "viscosity_factor_max": cas["viscosity_factor_max"],
+                     "mtt_newtonian": newt["mtt"], "mtt_casson": cas["mtt"],
+                     "iterations": cas["rheology_iterations"]})
+    # the higher-pressure half of the rows, where the trunks have yielded (a few
+    # low-stress side branches can stay plugged at any pressure)
+    flowing = [r for r in rows[len(rows) // 2:] if r["inflow_casson"] > 0]
+    yield_pressure = None
+    if len(flowing) >= 2:
+        slope, icpt = np.polyfit(np.sqrt([r["p_in"] for r in flowing]),
+                                 np.sqrt([r["inflow_casson"] for r in flowing]), 1)
+        if slope > 0:
+            yield_pressure = float(max(-icpt / slope, 0.0) ** 2)
+    return {"dim": spec.dim, "shape": shape, "casson_yield": float(casson_yield),
+            "n_vessels": n_vessels, "rows": rows, "yield_pressure": yield_pressure}
+
+
 def tissue_lesion(dim: int = 3, shape: str = "kidney", generations: int = 4,
                   fill: str = "cco", n_terminals: int = 40, center=None,
                   radius_frac: float = 0.2, permeability: float = 0.05, seed: int = 0,
@@ -1286,6 +1338,23 @@ def build_server():
                                n_terminals=n_terminals,
                                pressures=pressures or (5.0, 10.0, 20.0),
                                carreau_lambda=carreau_lambda, seed=seed, extent=extent)
+
+    @server.tool()
+    def yield_stress_blood(dim: int = 3, shape: str = "kidney", generations: int = 4,
+                           fill: str = "cco", n_terminals: int = 40,
+                           pressures: list[float] | None = None,
+                           casson_yield: float = 0.001, seed: int = 0,
+                           extent: float = 1.0) -> dict:
+        """Newtonian vs Casson (yield-stress) blood in an organ, 2-D or 3-D: solve both
+        at each inlet pressure (default 1, 2, 5, 10, 20) and return inflow, the
+        Casson/Newtonian flow ratio, the number/fraction of vessels plugged below yield,
+        the viscosity-factor range and the estimated organ **yield pressure** (fit of
+        √Q on √Δp — below it flow nearly stops). `casson_yield` is the yield stress
+        τ_y in model pressure units (wall stresses are Δp·r/2L)."""
+        return tissue_yield_stress(dim=dim, shape=shape, generations=generations,
+                                   fill=fill, n_terminals=n_terminals,
+                                   pressures=pressures or (1.0, 2.0, 5.0, 10.0, 20.0),
+                                   casson_yield=casson_yield, seed=seed, extent=extent)
 
     @server.tool()
     def lesion_in_tissue(dim: int = 3, shape: str = "kidney", generations: int = 4,

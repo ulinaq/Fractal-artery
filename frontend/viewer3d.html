@@ -56,9 +56,18 @@
         <label id="v3-rhoc-row" hidden>connection radius ρc (0 = nearest vein)
           <input id="v3-rhoc" type="number" value="0" min="0" step="1" />
         </label>
-        <label class="check" id="v3-shear-row" title="Carreau law: blood thickens where flow is slow and thins at high shear"><input id="v3-shear" type="checkbox" /> shear-thinning blood (Carreau)</label>
+        <label class="check" id="v3-shear-row" title="non-Newtonian blood: it thickens where flow is slow"><input id="v3-shear" type="checkbox" /> non-Newtonian blood</label>
+        <label id="v3-law-row" hidden>blood law
+          <select id="v3-law">
+            <option value="carreau">Carreau — shear-thinning</option>
+            <option value="casson">Casson — yield stress</option>
+          </select>
+        </label>
         <label id="v3-lambda-row" hidden title="thinning sets in where λ × wall shear rate ≈ 1">Carreau time constant λ
           <input id="v3-lambda" type="number" value="3000" min="1" step="500" />
+        </label>
+        <label id="v3-yield-row" hidden title="a vessel whose wall stress Δp·r/2L stays below τ_y does not flow">Casson yield stress τ_y
+          <input id="v3-yield" type="number" value="0.001" min="0" step="0.0005" />
         </label>
         <label id="v3-field-row">field
           <select id="v3-field">

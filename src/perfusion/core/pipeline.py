@@ -46,11 +46,13 @@ class HybridResult:
 
 def shear_thinning_solve(solve, art: Network, ven: Network, viscosity, prm: Parameters,
                          max_iter: int = 100):
-    """``viscosity.solve_shear_thinning`` with the Carreau constants from ``prm`` —
-    shared by the 2-D and 3-D pipelines."""
+    """``viscosity.solve_shear_thinning`` with the blood law (``prm.blood_law``:
+    Carreau or Casson) and its constants from ``prm`` — shared by the 2-D and 3-D
+    pipelines."""
     return solve_shear_thinning(solve, art, ven, viscosity, lam=prm.carreau_lambda,
                                 n=prm.carreau_n, mu0_ratio=prm.carreau_mu0_ratio,
-                                max_iter=max_iter)
+                                max_iter=max_iter, law=prm.blood_law,
+                                yield_stress=prm.casson_yield)
 
 
 def _terminal_cells(grid: Grid, art: Network, ven: Network,

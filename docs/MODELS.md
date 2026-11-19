@@ -77,6 +77,31 @@ nonlinear junction losses, elasticity, phase separation) in 2-D and 3-D
 Consequence: flow grows *faster* than linearly with the pressure drop (`Q ∝ Δp^k`,
 k ≈ 1.2 in the organ demos) and slow vessels slow further (MTT rises more than inflow falls).
 
+**Yield-stress blood — Casson law** (`viscosity.casson_factor`, `casson_flow_ratio`;
+`Parameters.blood_law = "casson"`, `casson_yield` = τ_y). Blood needs a small stress
+before it flows: `√τ = √τ_y + √(μ_c γ̇)` above yield, an unyielded core (plug) below it.
+In a tube with wall stress `τ_w = Δp r / (2L)` the exact flow is the Newtonian one times
+
+```
+Q / Q_N = 1 − (16/7)√ξ + (4/3) ξ − ξ⁴/21,    ξ = τ_y / τ_w       (0 for τ_w ≤ τ_y: plug)
+```
+
+Each segment's factor is the *secant* viscosity of that law at the flow it carries: with
+`t = τ_w/τ_y` and the Poiseuille wall rate `γ̇_w = 4|Q|/(πr³)`,
+`γ̇_w μ_c/τ_y = t·(Q/Q_N)(1/t) =: h(t)` is inverted for t by Newton (h is increasing and
+convex on t ≥ 1) and `f = t / h(t)`; a vessel whose flow vanishes is a plug, capped at
+`f = 10⁴` (`CASSON_MAX_FACTOR`) — it re-opens if its pressure drop rises. The base
+viscosity is the Casson high-shear μ_c (`τ_y/μ_c` per segment, so Fåhræus–Lindqvist
+composes). The flow-based Picard step is a majorise–minimise step on the network's convex
+dissipation, so it converges; it is **Anderson-accelerated** (depth 5, history reset when
+the residual grows, dropped for plain Picard if it stalls) because it crawls where many
+vessels sit near yield (≈ 10–60 solves). A converged solution carries, in every segment,
+exactly the Casson tube flow for its own pressure drop (tested); `τ_y = 0` is the Newtonian
+solve. Consequence: above yield `√Q ≈ a(√Δp − √Δp_y)` — the organ has a **yield pressure**
+`Δp_y` below which almost every vessel plugs and perfusion stops; the summary reports
+`plugged_vessels`. Wall stresses are ≈ 0.01–0.2 in the default model at `p_in = 10`
+(default τ_y = 0.001 → inflow ≈ 0.6 × Newtonian, Δp_y ≈ 0.5).
+
 **Pries–Secomb phase separation** (RBC skimming at a bifurcation,
 `hematocrit.phase_separation_fraction`, Pries–Secomb–Gaehtgens 1990). The fraction of
 RBCs entering daughter α given its blood-flow fraction `FQ_B` (`d` in µm):
