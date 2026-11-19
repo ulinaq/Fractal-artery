@@ -481,3 +481,18 @@ def test_generate_trees_can_close_loops():
     assert plain["artery"]["loops"] == 0
     assert looped["artery"]["loops"] > 0
     assert looped["inflow"] == pytest.approx(looped["outflow"], rel=1e-6)
+
+
+@pytest.mark.parametrize("dim", [2, 3])
+def test_grow_trees_with_a_lesion(dim):
+    c = [30.0, 30.0, 30.0] if dim == 3 else [0.0, 80.0]
+    shape = "ellipsoid" if dim == 3 else "kidney"
+    out = [mcp_server.generate_trees(dim=dim, shape=shape, lesions=[
+        {"center": c, "radius": 12 if dim == 3 else 25, "density": d}]) for d in (0.0, 5.0)]
+    assert out[0]["lesion"]["terminals_inside"] < out[1]["lesion"]["terminals_inside"]
+    assert out[0]["lesion"]["flux_ratio"] < 1.0                     # default K = 0.1
+    with pytest.raises(ValueError, match="center and a radius"):
+        mcp_server.generate_trees(dim=dim, shape=shape, lesions=[{"radius": 3}])
+    opt = mcp_server.optimize_tissue_trees(dim=dim, shape=shape, maxiter=2, free=["a_gamma"],
+                                           lesions=[{"center": c, "radius": 10}])
+    assert opt["best"] <= opt["start"]

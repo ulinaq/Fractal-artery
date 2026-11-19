@@ -107,7 +107,9 @@ pressure / flux / time-of-flight field — computed in 3-D for 3-D trees — plu
 Strahler orders, inflow and a homogeneity objective, or *Animate growth*.
 **Optimise trees** searches the branching parameters (γ, length : radius, Murray
 exponent, vein calibre, 3-D twist) for the most homogeneous perfusion **in the chosen
-organ** — its roots, fill and generations, 2-D or 3-D — re-scored at your resolution;
+organ** — its roots, fill and generations, 2-D or 3-D — re-scored at your resolution.
+**Lesions** add discs / spheres of tissue with their own bed permeability and vessel
+density (avascular core, angiogenic rim) that both growth and the solve respect;
 **📤 Use optimised trees in simulation** then opens them in the simulation page.
 **📤 Open as project** turns the setup into a project: 2-D opens in the workspace
 (outline + trees editable), 3-D opens in the 3-D viewer to run and inspect.

@@ -284,6 +284,23 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   of Willis, …); `/explore/grow` and the MCP tool use them whenever a root isn't
   sent, and the explorer follows them until the user moves a root. A new organ
   needs an outline/mask *and* a roots entry whose trunks lead into the tissue.
+  **Growth is independent of the solve grid**: attraction points / CCO terminals are
+  sampled from the tissue at a fixed raster (`treegen.growth_mask`, `GROW_RES_2D/3D`),
+  never the Darcy grid — the optimiser's coarse search must grow the very same trees
+  (`test_trees_do_not_depend_on_the_solve_grid`). `/explore/optimize` searches 2-D at the
+  user's own grid by default (the homogeneity objectives are grid-sensitive), 3-D on
+  ≤ 32³ with a full-resolution polish if the coarse optimum doesn't carry over, and
+  422s a setup that never solves. When no skeleton tip reaches the tissue (an
+  overshooting skeleton — the 3-D kidney did this), colonisation sprouts from the
+  trunk nodes within reach (`treegen._colonisation_seeds`).
+  **Explorer lesions** (`GenSpec.lesions`, `ExploreGrowRequest.lesions`): discs /
+  spheres with their own bed permeability K and vessel **density** (0 avascular, > 1
+  angiogenic) relative to healthy = 1. Density weights growth sampling
+  (`lesion_field(…, "density")`), K the Darcy bed (`treegen.solve`); the homogeneity
+  objective/optimiser score the healthy tissue only (`homogeneity(exclude=)`), and
+  `lesion_stats` reports flux inside vs healthy + terminals inside. `/explore/project`
+  carries them over (K → project lesions, density → hotspots). MCP
+  `grow_trees_in_tissue` / `optimize_trees_in_tissue(lesions=)`.
 
 - **Coupling choice** (`run_hybrid`/`run_hybrid_3d(coupling=)`): `"schur"` (dense
   terminal response, reusable via `darcy_response=`) or `"monolithic"` (bed pressures

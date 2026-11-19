@@ -87,6 +87,17 @@ class GenSpec:
     seed: int = 0
     nx: int = 60                          # Darcy grid (2-D); 3-D uses nx for each axis
     ny: int = 70
+    # lesions: discs (2-D) / spheres (3-D) of tissue with its own parameters —
+    # {"center": [x, y(, z)], "radius": r, "permeability": K relative to healthy 1,
+    #  "density": vessel density relative to healthy 1 (0 = avascular, > 1 = angiogenic)}
+    lesions: list = field(default_factory=list)
+
+
+# Growth samples its attraction points from the tissue rasterised at this fixed
+# resolution — never the Darcy grid — so the trees do not depend on the solve grid
+# (the optimiser searches on a coarser grid and must grow the very same trees).
+GROW_RES_2D = (140, 160)
+GROW_RES_3D = 40
 
 
 # ── tissue shapes ─────────────────────────────────────────────────────────────
@@ -102,6 +113,14 @@ def shape_mask_3d(shape: str, nx: int, ny: int, nz: int, size: float = 0.85,
     return organs.mask_3d(shape, nx, ny, nz, domain, size, seed=seed)
 
 
+def _outline(spec: GenSpec, domain) -> list:
+    poly = (spec.polygon if spec.shape == "custom"
+            else shape_polygon(spec.shape, spec.size, domain, seed=spec.seed))
+    if not poly or len(poly) < 3:
+        raise ValueError("a custom tissue shape needs a polygon with at least 3 points")
+    return poly
+
+
 def tissue(spec: GenSpec):
     """``(mask, domain, outline)``: the tissue mask on the Darcy grid, the domain
     window, and the 2-D outline polygon (``None`` in 3-D)."""
@@ -112,14 +131,62 @@ def tissue(spec: GenSpec):
         if not mask.any():
             raise ValueError("the tissue shape covers no grid cells — raise the resolution")
         return mask, domain, None
-    poly = (spec.polygon if spec.shape == "custom"
-            else shape_polygon(spec.shape, spec.size, domain, seed=spec.seed))
-    if not poly or len(poly) < 3:
-        raise ValueError("a custom tissue shape needs a polygon with at least 3 points")
+    poly = _outline(spec, domain)
     mask = rasterize_mask(spec.nx, spec.ny, domain, [poly])
     if not mask.any():
         raise ValueError("the tissue shape covers no grid cells")
     return mask, domain, [list(map(float, p)) for p in poly]
+
+
+def growth_mask(spec: GenSpec):
+    """``(mask, domain)``: the tissue at the fixed growth resolution
+    (:data:`GROW_RES_2D` / :data:`GROW_RES_3D`) that attraction points are drawn from."""
+    domain = domain_for(spec.dim, spec.extent)
+    if spec.dim == 3:
+        n = GROW_RES_3D
+        mask = shape_mask_3d(spec.shape, n, n, n, spec.size, domain, seed=spec.seed)
+    else:
+        mask = rasterize_mask(*GROW_RES_2D, domain, [_outline(spec, domain)])
+    if not mask.any():
+        raise ValueError("the tissue shape is too small to grow into")
+    return mask, domain
+
+
+def lesion_field(spec: GenSpec, shape, domain, key: str):
+    """The per-cell ``key`` (``"permeability"`` / ``"density"``) of ``spec.lesions``
+    on a grid of ``shape`` over ``domain`` — 1 in healthy tissue (later lesions win
+    on overlap) — or ``None`` when no lesion changes it."""
+    from .core.geometry import rasterize_regions
+
+    if not spec.lesions or all(float(le.get(key, 1.0)) == 1.0 for le in spec.lesions):
+        return None
+    regions = [{"center": le["center"], "radius": le["radius"],
+                "value": float(le.get(key, 1.0))} for le in spec.lesions]
+    return rasterize_regions(shape, domain, regions, base=1.0)
+
+
+def lesion_mask(spec: GenSpec, mask, domain) -> np.ndarray | None:
+    """Tissue cells inside any lesion (``None`` without lesions)."""
+    from .core.geometry import rasterize_regions
+
+    if not spec.lesions:
+        return None
+    regions = [{"center": le["center"], "radius": le["radius"], "value": 1.0}
+               for le in spec.lesions]
+    mask = np.asarray(mask, bool)
+    return (rasterize_regions(mask.shape, domain, regions, base=0.0) > 0) & mask
+
+
+def _check_lesions(spec: GenSpec) -> None:
+    for le in spec.lesions:
+        if len(le.get("center", ())) != spec.dim:
+            raise ValueError(f"a lesion center needs {spec.dim} values in {spec.dim}-D")
+        if not float(le.get("radius", 0)) > 0:
+            raise ValueError("a lesion needs a positive radius")
+        if not float(le.get("permeability", 1.0)) > 0:
+            raise ValueError("a lesion's permeability must be positive")
+        if float(le.get("density", 1.0)) < 0:
+            raise ValueError("a lesion's vessel density must be >= 0")
 
 
 # ── trees ─────────────────────────────────────────────────────────────────────
@@ -144,35 +211,64 @@ def fractal_tree(t: TreeSpec, spec: GenSpec, *, venous: bool) -> Network:
                      mirror_children=not venous, max_generations=g)
 
 
-def fill_tree(net: Network, mask, domain, spec: GenSpec, seed: int) -> Network:
-    """Grow ``net``'s tips on into the tissue (colonisation / CCO), or pass through."""
+def fill_tree(net: Network, mask, domain, spec: GenSpec, seed: int,
+              density=None) -> Network:
+    """Grow ``net``'s tips on into the tissue (colonisation / CCO), or pass through.
+    ``mask`` is the sampling raster (:func:`growth_mask`); ``density`` (same shape)
+    weights where attraction points / CCO terminals land (lesion vessel density)."""
     if spec.fill == "none":
         return net
     leaf = spec.leaf_radius if spec.leaf_radius else float(net.seg_radius.min())
     if spec.fill == "cco":
-        pool = growth.sample_points_in_mask(mask, domain, 6 * spec.n_terminals, seed=seed)
+        pool = growth.sample_points_in_mask(mask, domain, 6 * spec.n_terminals, seed=seed,
+                                            density=density)
         return growth.cco_grow(net, pool, n_terminals=spec.n_terminals, seed=seed,
                                exponent=spec.exponent, leaf_radius=leaf)
     if spec.fill == "colonization":
-        pts = growth.sample_points_in_mask(mask, domain, spec.n_points, seed=seed)
+        pts = growth.sample_points_in_mask(mask, domain, spec.n_points, seed=seed,
+                                           density=density)
         return growth.grow_network(net, pts, step=spec.step, influence_radius=spec.influence,
                                    max_iter=int(spec.fill_steps), exponent=spec.exponent,
                                    leaf_radius=leaf, close_loops=spec.close_loops,
-                                   fuse_radius=spec.fuse_radius)
+                                   fuse_radius=spec.fuse_radius,
+                                   seed_nodes=_colonisation_seeds(net, pts, spec.influence))
     raise ValueError(f"unknown fill {spec.fill!r}; choose from {FILLS}")
+
+
+def _colonisation_seeds(net: Network, pts, influence=None):
+    """Which nodes may sprout: the skeleton's tips (``None`` = colonisation's default)
+    — unless no tip reaches the tissue (a skeleton that overshoots the organ, e.g. a
+    small organ in a long-branched tree), then every non-inlet node within reach of an
+    attraction point, so the tree still grows into the tissue from its trunk."""
+    from scipy.spatial import cKDTree
+
+    pos = net.positions()
+    if influence is None:                    # colonisation's own default reach
+        influence = 0.25 * max(float(np.ptp(np.vstack([pos, pts]), axis=0).max()), 1.0)
+    d, _ = cKDTree(pts).query(pos)
+    if np.any(d[net.terminal_nodes] <= influence):
+        return None
+    near = np.setdiff1d(np.flatnonzero(d <= influence), net.inlet_nodes)
+    return near.tolist() if near.size else None
 
 
 def build(spec: GenSpec):
     """Build both trees in the tissue. Returns ``(art, ven, mask, domain, outline)``."""
     if spec.dim not in (2, 3):
         raise ValueError("dim must be 2 or 3")
+    _check_lesions(spec)
     mask, domain, outline = tissue(spec)
     art = fractal_tree(spec.artery, spec, venous=False)
     ven = fractal_tree(spec.vein, spec, venous=True)
-    if spec.fill_target in ("both", "artery"):
-        art = fill_tree(art, mask, domain, spec, spec.seed)
-    if spec.fill_target in ("both", "vein"):
-        ven = fill_tree(ven, mask, domain, spec, spec.seed + 1)
+    if spec.fill != "none":
+        gmask, _ = growth_mask(spec)
+        density = lesion_field(spec, gmask.shape, domain, "density")
+        if density is not None and not np.any(density[gmask] > 0):
+            raise ValueError("the lesions leave no vascularised tissue to grow into")
+        if spec.fill_target in ("both", "artery"):
+            art = fill_tree(art, gmask, domain, spec, spec.seed, density)
+        if spec.fill_target in ("both", "vein"):
+            ven = fill_tree(ven, gmask, domain, spec, spec.seed + 1, density)
     return art, ven, mask, domain, outline
 
 
@@ -203,13 +299,16 @@ def solve(spec: GenSpec, art: Network, ven: Network, mask, domain,
           shear_thinning: bool = False, carreau_lambda: float = 3000.0,
           blood_law: str = "carreau", casson_yield: float = 0.001):
     """Solve the hybrid perfusion model on the tissue (2-D or 3-D); ``permeability``
-    (a per-cell field shaped like ``mask``) makes the bed heterogeneous;
-    ``shear_thinning`` uses non-Newtonian blood — ``blood_law`` "carreau" (time
-    constant ``carreau_lambda``) or "casson" (yield stress ``casson_yield``)."""
+    (a per-cell field shaped like ``mask``) makes the bed heterogeneous — by default
+    the lesions' permeability (``spec.lesions``); ``shear_thinning`` uses
+    non-Newtonian blood — ``blood_law`` "carreau" (time constant ``carreau_lambda``) or
+    "casson" (yield stress ``casson_yield``)."""
     prm = Parameters(p_in=p_in, p_out=p_out, shear_thinning=shear_thinning,
                      carreau_lambda=carreau_lambda, blood_law=blood_law,
                      casson_yield=casson_yield)
     grid = grid_for(spec, mask, domain)
+    if permeability is None:
+        permeability = lesion_field(spec, np.asarray(mask).shape, domain, "permeability")
     if permeability is not None:
         grid.permeability = np.asarray(permeability, dtype=float)
     if spec.dim == 3:
@@ -221,10 +320,13 @@ def solve(spec: GenSpec, art: Network, ven: Network, mask, domain,
     return run_hybrid(prm, grid, domain, art=art, ven=ven)
 
 
-def homogeneity(res) -> dict:
+def homogeneity(res, exclude=None) -> dict:
     """Perfusion-homogeneity measures of a solved 2-D or 3-D result (Paper D):
-    flux range/std/L2/mean and time-of-flight std/max over the active tissue."""
+    flux range/std/L2/mean and time-of-flight std/max over the active tissue — minus
+    the ``exclude`` cells (lesions: they are *meant* to perfuse differently)."""
     mask = np.asarray(res.grid.mask, bool)
+    if exclude is not None and np.any(mask & ~np.asarray(exclude, bool)):
+        mask = mask & ~np.asarray(exclude, bool)
     v = res.flux[mask]
     v = v[np.isfinite(v)]
     tof = res.tof[mask]
@@ -235,6 +337,35 @@ def homogeneity(res) -> dict:
            "tof_std": float(tof.std()) if tof.size else float("inf"),
            "tof_max": float(tof.max()) if tof.size else float("inf")}
     return out
+
+
+def lesion_stats(spec: GenSpec, res) -> dict | None:
+    """Perfusion inside vs outside the lesions of a solved explorer setup: mean Darcy
+    flux and time-of-flight in each, their ratio, and the vessel terminals inside."""
+    mask = np.asarray(res.grid.mask, bool)
+    inside = lesion_mask(spec, mask, res.domain_limit)
+    if inside is None:
+        return None
+    healthy = mask & ~inside
+
+    def mean(a, sel):
+        v = np.asarray(a)[sel]
+        v = v[np.isfinite(v)]
+        return float(v.mean()) if v.size else None
+
+    fl, fh = mean(res.flux, inside), mean(res.flux, healthy)
+    lim = np.asarray(res.domain_limit, float)
+    h = (lim[1::2] - lim[0::2]) / np.array(mask.shape)
+    terminals = 0
+    for net in (res.art, res.ven):
+        pos = net.positions(net.terminal_nodes)
+        idx = np.clip(((pos - lim[0::2]) / h).astype(int), 0, np.array(mask.shape) - 1)
+        terminals += int(inside[tuple(idx.T)].sum())
+    return {"cells": int(inside.sum()), "healthy_cells": int(healthy.sum()),
+            "flux_lesion": fl, "flux_healthy": fh,
+            "flux_ratio": fl / fh if fl is not None and fh else None,
+            "tof_lesion": mean(res.tof, inside), "tof_healthy": mean(res.tof, healthy),
+            "terminals_inside": terminals}
 
 
 # ── optimisation of the explorer setup (Paper D, organ-aware) ──────────────────
@@ -282,7 +413,8 @@ def objective(spec: GenSpec, kind: str = "tof_std") -> float:
     ``spec``; ``inf`` for a setup that does not build or solve."""
     try:
         art, ven, mask, domain, _ = build(spec)
-        value = homogeneity(solve(spec, art, ven, mask, domain))[kind]
+        value = homogeneity(solve(spec, art, ven, mask, domain),
+                            exclude=lesion_mask(spec, mask, domain))[kind]
     except (ValueError, np.linalg.LinAlgError, RuntimeError):
         return float("inf")
     return float(value) if np.isfinite(value) else float("inf")

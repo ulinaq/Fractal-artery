@@ -507,6 +507,57 @@ def test_explore_optimize_rejects_bad_input(client):
     assert client.post("/explore/optimize", json={"kind": "nope"}).status_code == 422
     assert client.post("/explore/optimize",
                        json={"free": ["not_a_param"]}).status_code == 422
+    big = client.post("/explore/optimize", json={"maxiter": 500})
+    assert big.status_code == 422
+    assert big.json()["detail"][0]["loc"] == ["body", "maxiter"]
+    # a setup that builds but never solves: a clear message, not a silent "kept yours"
+    tiny = client.post("/explore/optimize", json={
+        "shape": "custom", "polygon": [[0, 150], [1, 150], [0, 151]], "nx": 30, "ny": 34,
+        "fill": "none", "maxiter": 2})
+    assert tiny.status_code == 422
+
+
+def test_explore_optimize_searches_at_the_users_2d_grid(client):
+    o = client.post("/explore/optimize", json={
+        "dim": 2, "shape": "kidney", "fill": "cco", "n_terminals": 20, "generations": 3,
+        "nx": 44, "ny": 50, "maxiter": 3}).json()
+    assert (o["search"]["nx"], o["search"]["ny"]) == (44, 50)
+    assert o["search"]["best"] == pytest.approx(o["best"])
+
+
+@pytest.mark.parametrize("dim", [2, 3])
+def test_explore_lesions_grow_solve_optimise_and_reach_the_project(client, dim):
+    """Explorer lesions: their vessel density steers growth, their K the bed; the
+    response reports the lesion's perfusion, optimise scores the healthy tissue, and
+    a project made from the setup keeps them (K → lesions, density → hotspots)."""
+    c = [30.0, 30.0, 30.0] if dim == 3 else [0.0, 80.0]
+    setup = {"dim": dim, "shape": "ellipsoid" if dim == 3 else "kidney",
+             "fill": "colonization", "nx": 16 if dim == 3 else 44, "ny": 50}
+
+    def grow(density, permeability=0.1):
+        le = {"center": c, "radius": 12.0 if dim == 3 else 25.0,
+              "permeability": permeability, "density": density}
+        return client.post("/explore/grow", json={**setup, "lesions": [le]}).json()
+
+    avascular, angiogenic = grow(0.0), grow(5.0)
+    assert avascular["lesion"]["terminals_inside"] < angiogenic["lesion"]["terminals_inside"]
+    assert avascular["lesion"]["flux_ratio"] < 1.0
+    assert "lesion" not in client.post("/explore/grow", json=setup).json()
+    le = {"center": c, "radius": 12.0 if dim == 3 else 25.0, "permeability": 0.2,
+          "density": 0.0}
+    o = client.post("/explore/optimize", json={**setup, "lesions": [le], "maxiter": 2,
+                                               "free": ["a_gamma"]})
+    assert o.status_code == 200
+    made = client.post("/explore/project", json={**setup, "lesions": [le],
+                                                 "name": "lesioned"}).json()
+    lesions = client.get(f"/projects/{made['id']}/lesions").json()["lesions"]
+    hotspots = client.get(f"/projects/{made['id']}/hotspots").json()["hotspots"]
+    assert lesions[0]["permeability"] == pytest.approx(0.2)
+    assert lesions[0]["center"] == c
+    assert hotspots[0]["weight"] == pytest.approx(1e-3)            # avascular
+    bad = client.post("/explore/grow", json={**setup, "lesions": [
+        {"center": [1.0] * (5 - dim), "radius": 5.0}]})              # wrong dimension
+    assert bad.status_code == 422
 
 
 def test_explorer_page_served(client):
@@ -691,7 +742,7 @@ def test_anastomose_adds_loops_to_the_stored_tree(client):
 
 
 def test_3d_project_anastomoses(client):
-    pid = _explorer_project(client, 3)["id"]
+    pid = _explorer_project(client, 3, n_terminals=30)["id"]
     r = client.post(f"/projects/{pid}/anastomose", json={"target": "artery", "n_links": 3})
     assert r.status_code == 200, r.text
     assert r.json()["n_loops"] == r.json()["n_added"] > 0

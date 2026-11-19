@@ -31,6 +31,7 @@ const S = {
   data: null,             // last /explore/grow response
   sel: null,              // selected outline vertex index
   autoRoots: true,        // roots follow the organ's anatomy until the user moves one
+  lesions: [],            // {center, radius, permeability, density} — discs / spheres
   view: { yaw: 0.7, pitch: 0.35, zoom: 1 },
 };
 
@@ -64,7 +65,7 @@ function request(over = {}) {
     fill: $("fill").value, fill_target: $("fill-target").value,
     fill_steps: num("fill-steps"), n_points: num("n-points"),
     step: optNum("step-len"), influence: optNum("influence"),
-    close_loops: $("close-loops").checked,
+    close_loops: $("close-loops").checked, lesions: S.lesions,
     n_terminals: num("n-terminals"), seed: num("seed"),
     solve: $("solve").checked, field: $("field").value, kind: $("kind").value,
     ...gridSize(), ...over,
@@ -76,7 +77,13 @@ async function post(path, body) {
                                 body: JSON.stringify(body) });
   if (!r.ok) {
     let msg = (await r.text()).slice(0, 200);
-    try { const j = JSON.parse(msg); msg = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail); } catch { /* raw */ }
+    try {
+      const j = JSON.parse(msg);
+      msg = typeof j.detail === "string" ? j.detail
+        : Array.isArray(j.detail)                 // pydantic: "maxiter: Input should be …"
+          ? j.detail.map((d) => `${(d.loc || []).filter((l) => l !== "body").join(".")}: ${d.msg}`).join("; ")
+          : JSON.stringify(j.detail);
+    } catch { /* raw */ }
     throw new Error(msg);
   }
   return r.json();
@@ -195,8 +202,26 @@ function draw2d() {
     ctx.strokeStyle = S.sel === i ? "#2563eb" : "#047857"; ctx.lineWidth = 1.4;
     ctx.fillRect(px - s, py - s, 2 * s, 2 * s); ctx.strokeRect(px - s, py - s, 2 * s, 2 * s);
   });
+  // lesions: dashed discs with a centre handle and a rim (radius) handle
+  S.lesions.forEach((le, i) => {
+    const [cx, cy] = tc(le.center[0], le.center[1]);
+    const [rx] = tc(le.center[0] + le.radius, le.center[1]);
+    lesionCircle(cx, cy, rx - cx, i);
+    ctx.beginPath(); ctx.arc(rx, cy, 4.5, 0, 7); ctx.fillStyle = "#fff"; ctx.fill(); ctx.stroke();
+  });
   // roots + direction handles
   rootMarker("a", true, "#dc2626"); rootMarker("v", false, "#2563eb");
+}
+
+const LESION_COLOR = "#a21caf";
+function lesionCircle(cx, cy, r, i) {
+  const col = S.dim === 3 ? "#f0abfc" : LESION_COLOR;   // light on the dark 3-D view
+  ctx.strokeStyle = col; ctx.lineWidth = S.dim === 3 ? 2.5 : 1.8; ctx.setLineDash([6, 4]);
+  ctx.beginPath(); ctx.arc(cx, cy, Math.max(r, 2), 0, 7); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = S.dim === 3 ? "rgba(240,171,252,.12)" : "rgba(162,28,175,.08)"; ctx.fill();
+  ctx.beginPath(); ctx.arc(cx, cy, 5, 0, 7); ctx.fillStyle = col; ctx.fill();
+  ctx.fillStyle = col; ctx.font = "600 11px system-ui, sans-serif";
+  ctx.fillText(`L${i + 1}`, cx + 7, cy - 7);
 }
 
 function rootMarker(prefix, up, color) {
@@ -289,6 +314,12 @@ function draw3d() {
     ctx.lineWidth = rw(s.r, 0.9, 0.8);
     ctx.beginPath(); ctx.moveTo(s.a[0], s.a[1]); ctx.lineTo(s.b[0], s.b[1]); ctx.stroke();
   }
+  S.lesions.forEach((le, i) => {                 // spheres, drawn as their outline
+    const [sx, sy] = project(...le.center);
+    const span = Math.max(x1 - x0, y1 - y0, z1 - z0);
+    const r = Math.abs(S.vp.toCanvas(le.radius / span, 0)[0] - S.vp.toCanvas(0, 0)[0]);
+    lesionCircle(sx, sy, r, i);
+  });
   for (const [kind, color] of [["artery", "#ff6b6b"], ["vein", "#5b8dff"]]) {
     const [sx, sy] = project(...d.roots[kind]);
     ctx.beginPath(); ctx.arc(sx, sy, 6, 0, 7); ctx.fillStyle = color; ctx.fill();
@@ -313,8 +344,17 @@ function showStats() {
     + (a.loops || v.loops ? stat(`${a.loops} / ${v.loops}`, "loops art / ven") : "")
     + stat(d.active_cells, "tissue cells");
   if (d.inflow != null) h += stat(fmt(d.inflow), "perfused inflow");
-  if (d.objective != null) h += stat(fmt(d.objective), d.kind);
+  if (d.objective != null) h += stat(fmt(d.objective), d.kind + (S.lesions.length ? " (healthy)" : ""));
+  if (d.lesion) {
+    const L = d.lesion;
+    if (L.flux_ratio != null) h += stat(L.flux_ratio.toFixed(2) + "×", "lesion flux / healthy");
+    h += stat(L.terminals_inside, "terminals in lesions");
+  }
   $("summary").innerHTML = h;
+  $("lesion-info").textContent = !S.lesions.length ? ""
+    : d.lesion ? `${d.lesion.cells} lesion cells · flux ${d.lesion.flux_ratio != null ? d.lesion.flux_ratio.toFixed(2) + "× healthy" : "–"}`
+      + ` · ${d.lesion.terminals_inside} vessel terminals inside`
+    : "solve to see the lesion's perfusion";
   $("obj-info").textContent = d.objective != null ? `${d.kind} = ${fmt(d.objective)}`
     : ($("solve").checked ? "—" : "solving is off");
 }
@@ -328,6 +368,11 @@ function hit2d(px, py) {
   for (const p of ["a", "v"]) {
     if (near(...dirHandle(p), 9)) return { what: p + "-aim" };
     if (near(num(p + "-x"), num(p + "-y"), 11)) return { what: p + "-root" };
+  }
+  for (let i = S.lesions.length - 1; i >= 0; i--) {
+    const le = S.lesions[i];
+    if (near(le.center[0] + le.radius, le.center[1], 8)) return { what: "lesion-rim", i };
+    if (near(le.center[0], le.center[1], 9)) return { what: "lesion", i };
   }
   const o = S.data.outline;
   for (let i = 0; i < o.length; i++) if (near(o[i][0], o[i][1], 8)) return { what: "vertex", i };
@@ -370,6 +415,13 @@ canvas.addEventListener("pointermove", (e) => {
     const p = drag.what[0];
     const ang = Math.atan2(y - num(p + "-y"), x - num(p + "-x")) * 180 / Math.PI;
     $(p + "-angle").value = Math.round(ang);
+  } else if (drag.what === "lesion") {
+    S.lesions[drag.i].center = [+x.toFixed(1), +y.toFixed(1)];
+    renderLesions(); draw(); return;              // regrow on release
+  } else if (drag.what === "lesion-rim") {
+    const c = S.lesions[drag.i].center;
+    S.lesions[drag.i].radius = +Math.max(1, Math.hypot(x - c[0], y - c[1])).toFixed(1);
+    renderLesions(); draw(); return;
   } else if (drag.what === "vertex") {
     ensureCustom();
     S.polygon[drag.i] = [x, y];
@@ -484,11 +536,16 @@ function onExtent() {
     if ($(id).value !== "") $(id).value = +(num(id) * k).toFixed(2);
   }
   if (S.polygon) S.polygon = S.polygon.map(([x, y]) => [x * k, y * k]);
+  for (const le of S.lesions) {                 // lesions scale with the object too
+    le.center = le.center.map((c) => +(c * k).toFixed(2)); le.radius = +(le.radius * k).toFixed(2);
+  }
+  renderLesions();
   syncLabels(); S.vp.fit(); schedule(300);
 }
 
 function setDim(dim) {
   S.dim = dim; S.sel = null; S.data = null; S.autoRoots = true;
+  S.lesions = []; renderLesions();               // a disc is not a sphere
   S.view.yaw = 0.7; S.view.pitch = 0.35;
   S.vp.fit();
   document.querySelector(".viewhint").textContent = dim === 3
@@ -558,6 +615,58 @@ for (const id of ["a-radius", "a-gamma", "v-radius", "v-gamma", "n-points", "ste
   $(id).addEventListener("change", () => evaluate());
 }
 $("btn-root-default").addEventListener("click", organDefaultRoots);
+
+// ── lesions: a list of discs / spheres with their own K and vessel density ─────
+function tissueCentre() {
+  const d = S.data;
+  if (S.dim === 2 && d && d.outline) {
+    const n = d.outline.length;
+    return [d.outline.reduce((a, p) => a + p[0], 0) / n, d.outline.reduce((a, p) => a + p[1], 0) / n];
+  }
+  const dom = d ? d.domain : [0, 60 * num("extent"), 0, 60 * num("extent"), 0, 60 * num("extent")];
+  return S.dim === 3 ? [0, 2, 4].map((k) => (dom[k] + dom[k + 1]) / 2)
+                     : [(dom[0] + dom[1]) / 2, (dom[2] + dom[3]) / 2];
+}
+function addLesion() {
+  const c = tissueCentre(), d = S.data;
+  const span = d ? Math.min(d.domain[1] - d.domain[0], d.domain[3] - d.domain[2]) : 60 * num("extent");
+  S.lesions.push({ center: c.map((v) => +v.toFixed(1)), radius: +(0.15 * span).toFixed(1),
+                   permeability: 0.1, density: 0 });
+  $("lesion-card").open = true;
+  renderLesions(); evaluate();
+}
+function renderLesions() {
+  const axes = S.dim === 3 ? ["x", "y", "z"] : ["x", "y"];
+  $("lesion-list").innerHTML = S.lesions.map((le, i) => `
+    <div class="lesion" data-i="${i}">
+      <div class="roothead"><span class="dot lesion-dot"></span> L${i + 1}
+        <button class="lesion-del" data-i="${i}" title="remove this lesion">✕</button></div>
+      <div class="grid2">
+        ${axes.map((a, k) => `<label>${a} <input type="number" step="1" data-i="${i}" data-k="c${k}" value="${le.center[k]}" /></label>`).join("")}
+        <label>radius <input type="number" step="1" min="0.5" data-i="${i}" data-k="radius" value="${le.radius}" /></label>
+        <label title="bed permeability relative to healthy tissue (1)">K × <input type="number" step="0.05" min="0.001" data-i="${i}" data-k="permeability" value="${le.permeability}" /></label>
+        <label title="vessel density for growth relative to healthy tissue: 0 = avascular (necrotic core), > 1 = angiogenic (tumour rim)">vessel density × <input type="number" step="0.5" min="0" max="20" data-i="${i}" data-k="density" value="${le.density}" /></label>
+      </div>
+    </div>`).join("");
+}
+$("btn-lesion-add").addEventListener("click", addLesion);
+$("lesion-list").addEventListener("change", (e) => {
+  const t = e.target, i = +t.dataset.i, k = t.dataset.k;
+  if (!k || !S.lesions[i]) return;
+  const v = Number(t.value);
+  if (!Number.isFinite(v)) return;
+  if (k.startsWith("c")) S.lesions[i].center[+k.slice(1)] = v;
+  else if (k === "radius") S.lesions[i].radius = Math.max(0.5, v);
+  else if (k === "permeability") S.lesions[i].permeability = Math.max(0.001, v);
+  else S.lesions[i].density = Math.min(20, Math.max(0, v));
+  evaluate();
+});
+$("lesion-list").addEventListener("click", (e) => {
+  const b = e.target.closest(".lesion-del");
+  if (!b) return;
+  S.lesions.splice(+b.dataset.i, 1);
+  renderLesions(); evaluate();
+});
 $("solve").addEventListener("change", () => evaluate());
 stepper("gen-dec", "gen-inc", "generations", 1);
 stepper("steps-dec", "steps-inc", "fill-steps", 10);
@@ -621,8 +730,10 @@ async function optimise() {
   $("opt-info").textContent = "searching… (each step grows + solves the trees)";
   status("optimising…");
   try {
+    const maxiter = Math.min(200, Math.max(1, Math.round(num("maxiter")) || 15));
+    $("maxiter").value = maxiter;
     const o = await post("/explore/optimize", {
-      ...request({ solve: true }), free, method: $("method").value, maxiter: num("maxiter") || 15,
+      ...request({ solve: true }), free, method: $("method").value, maxiter,
     });
     $("a-gamma").value = (+o.a_gamma).toFixed(3); $("v-gamma").value = (+o.v_gamma).toFixed(3);
     $("ltr").value = o.length_to_radius; $("exponent").value = o.exponent;

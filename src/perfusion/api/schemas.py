@@ -215,6 +215,22 @@ class ExploreTree(BaseModel):
     gamma: float = Field(1.4, ge=1.0, le=1.9)             # branching asymmetry
 
 
+class ExploreLesion(BaseModel):
+    """A lesion in the explorer's tissue: a disc (2-D) / sphere (3-D) with its own bed
+    permeability and vessel density, both relative to healthy tissue (= 1)."""
+
+    center: list[float]                                  # [x, y] or [x, y, z]
+    radius: float = Field(gt=0)
+    permeability: float = Field(0.1, gt=0)               # Darcy K (bed conductance)
+    density: float = Field(1.0, ge=0, le=20)             # growth: 0 avascular, >1 angiogenic
+
+    @model_validator(mode="after")
+    def _dims(self):
+        if len(self.center) not in (2, 3):
+            raise ValueError("center must be [x, y] or [x, y, z]")
+        return self
+
+
 class ExploreGrowRequest(BaseModel):
     """Tree Explorer 'grow' mode: place the roots, pick a tissue shape (2-D preset,
     custom polygon, or 3-D preset), grow a fractal skeleton of ``generations``
@@ -240,6 +256,7 @@ class ExploreGrowRequest(BaseModel):
     step: float | None = Field(None, gt=0, le=1000)          # (scale with extent)
     influence: float | None = Field(None, gt=0, le=5000)
     close_loops: bool = False                 # colonisation: tips fuse → vessel loops
+    lesions: list[ExploreLesion] = Field(default_factory=list, max_length=8)
     n_terminals: int = Field(60, ge=1, le=600)
     leaf_radius: float | None = Field(None, gt=0, le=100)
     seed: int = 0
@@ -273,12 +290,13 @@ class ExploreOptimizeRequest(ExploreGrowRequest):
     ``free`` picks the tunables to vary (``a_gamma``, ``v_gamma``,
     ``length_to_radius``, ``exponent``, ``v_radius_scale``, 3-D ``twist``; default:
     the first four, plus ``twist`` in 3-D). The search runs on a grid capped at
-    ``search_nx`` (2-D: ×``ny`` in proportion; 3-D: ``search_nx``³) for speed."""
+    ``search_nx`` (2-D: ×``ny`` in proportion — by default the user's own grid, since
+    the homogeneity objectives are grid-sensitive; 3-D: at most 32³) for speed."""
 
     method: str = "local"                                # "local" | "global"
-    maxiter: int = Field(15, ge=1, le=60)
+    maxiter: int = Field(15, ge=1, le=200)
     free: list[str] | None = None
-    search_nx: int = Field(50, ge=12, le=120)
+    search_nx: int = Field(200, ge=12, le=200)
 
 
 class GrowRequest(BaseModel):
