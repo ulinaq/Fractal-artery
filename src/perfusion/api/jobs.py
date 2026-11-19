@@ -31,6 +31,10 @@ def execute_job(store, jid: str, project_id: str, kind: str, req_data: dict) -> 
     """Run one job against ``store`` and record its lifecycle in the registry."""
     store.set_job_state(jid, "running")
     try:
+        if kind in ANALYSES:                    # returns a JSON result, kept per job
+            store.save_job_result(jid, _run_analysis(store, project_id, kind, req_data))
+            store.set_job_state(jid, "done")
+            return
         project = store.get(project_id)
         if kind == "tracer":
             runner.run_tracer(store, project, TracerRequest(**req_data))
@@ -44,6 +48,32 @@ def execute_job(store, jid: str, project_id: str, kind: str, req_data: dict) -> 
         store.set_job_state(jid, "error", _describe_error(exc))
     else:
         store.set_job_state(jid, "done")
+
+
+# Long analyses that used to run inside the HTTP request: as jobs their result is a
+# JSON document (``store.save_job_result``) fetched from ``GET /jobs/{id}/result``.
+ANALYSES = ("uq", "calibrate", "explore_optimize")
+
+
+def _run_analysis(store, project_id: str, kind: str, req_data: dict) -> dict:
+    from .schemas import CalibrateRequest, ExploreOptimizeRequest, UQRequest
+
+    try:
+        if kind == "explore_optimize":
+            from .routes_explore import optimize_setup
+
+            return optimize_setup(ExploreOptimizeRequest(**req_data))
+        project = store.get(project_id)
+        if kind == "uq":
+            body = UQRequest(**req_data)
+            return runner.uncertainty(project, body.params, n_samples=body.n_samples,
+                                      seed=body.seed, method=body.method)
+        body = CalibrateRequest(**req_data)
+        return runner.calibrate(project, body.target, body.param, body.bounds, qoi=body.qoi)
+    except runner.InputError:
+        raise
+    except ValueError as exc:            # bad option values: a clean message, as a 422 was
+        raise runner.InputError(str(exc)) from exc
 
 
 def _describe_error(exc: Exception) -> str:

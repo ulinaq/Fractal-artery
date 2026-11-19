@@ -81,3 +81,14 @@ export async function submitJob(path, body = {}, opts) {
   }
   return pollJob(job && job.id, opts);
 }
+
+/** Run a long analysis (UQ, calibration, explorer optimise) as a background job and
+ *  return its JSON result: POST ``path?background=true``, wait, then GET the job's
+ *  result. A rejected request or a failed / interrupted job throws with its message.
+ *  The request no longer has to stay open for the whole search. */
+export async function runAnalysis(path, body, opts) {
+  const sep = path.includes("?") ? "&" : "?";
+  const st = await submitJob(`${path}${sep}background=true`, body, opts);
+  if (st.state !== "done") throw new Error(st.error || "the analysis failed");
+  return fetchJSON("GET", `/jobs/${st.id}/result`);
+}

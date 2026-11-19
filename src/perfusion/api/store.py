@@ -462,6 +462,22 @@ class ProjectStore:
         with np.load(self._nettracer_path(pid)) as d:
             return {k: d[k] for k in d.files}
 
+    # -- analysis-job results (UQ, calibration, explorer optimise) ------------ #
+    def _job_result_path(self, jid: str) -> Path:
+        return self.blobs / f"job.{jid}.json"
+
+    def save_job_result(self, jid: str, payload: dict) -> None:
+        """Keep a finished analysis job's JSON result (``GET /jobs/{id}/result``)."""
+        def default(o):                       # NumPy scalars / arrays → JSON
+            return o.tolist() if hasattr(o, "tolist") else str(o)
+
+        text = json.dumps(payload, default=default)
+        _atomic_write(self._job_result_path(jid), lambda t: t.write_text(text))
+
+    def load_job_result(self, jid: str) -> dict | None:
+        p = self._job_result_path(jid)
+        return json.loads(p.read_text()) if p.exists() else None
+
     # -- DCE-MRI fit (latest per project) ------------------------------------ #
     def _dcefit_path(self, pid: str) -> Path:
         return self.blobs / f"{pid}.dcefit.json"
