@@ -31,3 +31,15 @@ def test_time_of_flight_grows_downstream(flow_field):
     assert np.isfinite(near)
     assert np.isfinite(far)
     assert far > near
+
+
+def test_flux_is_nan_off_the_mask_in_2d_like_3d(masked_grid):
+    import numpy as np
+
+    from perfusion.core.timeofflight import flux_magnitude
+
+    fx = np.ones((masked_grid.nx + 1, masked_grid.ny))
+    fy = np.ones((masked_grid.nx, masked_grid.ny + 1))
+    f = flux_magnitude(masked_grid, fx, fy)
+    assert np.all(np.isnan(f[~masked_grid.mask]))
+    assert np.all(np.isfinite(f[masked_grid.mask]))

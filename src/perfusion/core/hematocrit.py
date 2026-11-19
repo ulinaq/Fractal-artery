@@ -45,59 +45,77 @@ def segment_hematocrit(net, flow, inlet_hd: float = 0.45,
                        radius_to_um: float = 1.0) -> np.ndarray:
     """Per-segment discharge hematocrit from RBC phase separation.
 
-    Propagates H_D from ``net.root_node`` downstream (segments oriented
-    start→end), splitting red cells at binary diverging bifurcations by
-    :func:`phase_separation_fraction` and mixing (RBC-flux-conserving) elsewhere.
-    ``flow`` is the per-segment blood-flow magnitude. RBC flux is conserved at
-    every node, so arterial inflow hematocrit is preserved on average.
+    ``flow`` is the per-segment blood flow, signed ``seg_start → seg_end`` (a
+    magnitude works for a tree whose segments all point downstream). Red cells are
+    followed *with the flow*: nodes are visited in flow order (upstream first), each
+    node pools the RBC flux of **every** segment feeding it — so a loop node (two
+    parents, e.g. an anastomosis) mixes both — and splits it among the segments
+    leaving it: by :func:`phase_separation_fraction` at a binary diverging
+    bifurcation (the parent diameter is the widest feeder), well-mixed otherwise.
+    Segments leaving a node with no inflow (the inlet) carry ``inlet_hd``. RBC flux
+    is conserved at every node.
     """
-    flow = np.abs(np.asarray(flow, dtype=float))
+    q = np.asarray(flow, dtype=float)
     m = int(net.n_segments)
     hd = np.full(m, float(inlet_hd))
     if m == 0:
         return hd
     d = 2.0 * np.asarray(net.seg_radius, dtype=float) * radius_to_um
+    ss, se = np.asarray(net.seg_start, int), np.asarray(net.seg_end, int)
+    up = np.where(q >= 0, ss, se)            # flow runs up → down
+    down = np.where(q >= 0, se, ss)
+    mag = np.abs(q)
 
-    children: dict[int, list[int]] = defaultdict(list)
+    feeds: dict[int, list[int]] = defaultdict(list)
+    drains: dict[int, list[int]] = defaultdict(list)
     for s in range(m):
-        children[int(net.seg_start[s])].append(s)
-    parent_seg = net.incoming_segment
-    root = int(net.root_node)
+        feeds[int(down[s])].append(s)
+        drains[int(up[s])].append(s)
 
-    for s in children[root]:               # trunk carries the systemic hematocrit
-        hd[s] = inlet_hd
-
-    order, seen, dq = [], {root}, deque([root])
-    while dq:                              # BFS so a node's parent is set before it
+    # topological order of the flow graph (Kahn): steady potential flow has no
+    # directed cycles; any node left over (stagnant ties) is appended in index order
+    indeg = {n: len(feeds[n]) for n in range(net.n_nodes)}
+    dq = deque(n for n in range(net.n_nodes) if indeg[n] == 0)
+    order, done = [], set()
+    while dq:
         node = dq.popleft()
         order.append(node)
-        for s in children[node]:
-            c = int(net.seg_end[s])
-            if c not in seen:
-                seen.add(c)
+        done.add(node)
+        for s in drains[node]:
+            c = int(down[s])
+            indeg[c] -= 1
+            if indeg[c] == 0:
                 dq.append(c)
+    order += [n for n in range(net.n_nodes) if n not in done]
 
     for node in order:
-        ps = int(parent_seg[node])
-        ch = children[node]
-        if ps < 0 or not ch:              # root feed already set; leaves have no children
+        out = drains[node]
+        if not out:
             continue
-        qp, rp = flow[ps], hd[ps] * flow[ps]
-        if qp <= 0:
-            for s in ch:
+        inn = feeds[node]
+        if not inn:                          # an inlet: the systemic hematocrit
+            for s in out:
+                hd[s] = inlet_hd
+            continue
+        q_in = float(mag[inn].sum())
+        rbc_in = float((hd[inn] * mag[inn]).sum())
+        if q_in <= 0:
+            for s in out:
                 hd[s] = 0.0
             continue
-        if len(ch) == 2:                  # binary diverging bifurcation -> Pries skimming
-            c1, c2 = ch
-            q1, q2 = flow[c1], flow[c2]
+        h_in = min(rbc_in / q_in, 1.0)
+        if len(out) == 2:                    # binary diverging bifurcation -> skimming
+            c1, c2 = out
+            q1, q2 = mag[c1], mag[c2]
             if q1 + q2 <= 0:
                 hd[c1] = hd[c2] = 0.0
                 continue
-            fe1 = phase_separation_fraction(q1 / (q1 + q2), hd[ps], d[ps], d[c1], d[c2])
-            hd[c1] = min(fe1 * rp / q1, 1.0) if q1 > 0 else 0.0
-            hd[c2] = min((1.0 - fe1) * rp / q2, 1.0) if q2 > 0 else 0.0
-        else:                             # pass-through / multifurcation: well-mixed
-            hbar = min(rp / qp, 1.0)
-            for s in ch:
-                hd[s] = hbar
+            d_par = float(d[inn].max())
+            fe1 = phase_separation_fraction(q1 / (q1 + q2), h_in, d_par, d[c1], d[c2])
+            rbc_out = h_in * (q1 + q2)        # what leaves (= what arrived, by mass balance)
+            hd[c1] = min(fe1 * rbc_out / q1, 1.0) if q1 > 0 else 0.0
+            hd[c2] = min((1.0 - fe1) * rbc_out / q2, 1.0) if q2 > 0 else 0.0
+        else:                                # pass-through / multifurcation: well-mixed
+            for s in out:
+                hd[s] = h_in
     return hd

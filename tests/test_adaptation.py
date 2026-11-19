@@ -57,3 +57,23 @@ def test_adaptation_is_deterministic():
     b = run_adaptation(prm, grid, n_iter=40, domain_limit=(-70, 70, 0, 160))
     assert a.murray_exponent == pytest.approx(b.murray_exponent)
     assert a.n_iter == b.n_iter
+
+
+def test_adaptation_uses_the_given_inlets():
+    # the reused Darcy response must match the boundary nodes of every solve
+    import numpy as np
+
+    from perfusion import Grid, Parameters
+    from perfusion.core.geometry import arterial_tree
+    from perfusion.core.pipeline import run_adaptation
+
+    prm = Parameters(r_min_frac=0.5, seed=0)
+    grid = Grid(nx=40, ny=46, lx=140, ly=160)
+    art = arterial_tree(prm)
+    extra = int(art.terminal_nodes[0])
+    inlets = [art.root_node, extra]
+    ad = run_adaptation(prm, grid, n_iter=3, art_inlets=inlets)
+    assert set(ad.art.inlet_nodes.tolist()) == set(inlets)
+    sol = ad.result.solution
+    assert np.isclose(sol.terminal_flux.sum(), 0.0, atol=1e-8)
+    assert extra not in ad.art.terminal_nodes

@@ -17,10 +17,12 @@ from .darcy import Grid, upwind_operator
 
 
 def flux_magnitude(grid: Grid, fx: np.ndarray, fy: np.ndarray) -> np.ndarray:
-    """Cell-centred Darcy flux magnitude ``|v|`` ``(nx, ny)`` from face fluxes."""
+    """Cell-centred Darcy flux magnitude ``|v|`` ``(nx, ny)`` from face fluxes —
+    NaN on inactive (masked-out) cells, like the 3-D ``flux_magnitude_3d`` and the
+    time-of-flight, so outside-the-organ cells never count as zero-flux tissue."""
     qx = 0.5 * (fx[0:grid.nx, :] + fx[1:grid.nx + 1, :])
     qy = 0.5 * (fy[:, 0:grid.ny] + fy[:, 1:grid.ny + 1])
-    return np.hypot(qx, qy)
+    return np.where(grid.mask, np.hypot(qx, qy), np.nan)
 
 
 def _cell_sources(grid: Grid, sources, terminal_flux: np.ndarray) -> np.ndarray:

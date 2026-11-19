@@ -839,3 +839,7 @@ are being fixed in four PRs.
   synthetic DCE check simulates from the whole `truth`; flow videos moved to
   `perfusion.video` (MCP no longer imports FastAPI); `optimize_tree` keeps `r_min_frac`;
   `io` save functions return the file actually written; obstacles carve 3-D masks.
+- ✅ **Review leftovers** — hematocrit follows the flow and mixes every feed at loop
+  nodes; 2-D flux is NaN off the mask like 3-D; `validate_run` returns the trees with
+  the legacy inlet points snapped, so adapt / UQ / calibration / oxygen solve with the
+  same boundary nodes as a run (`run_adaptation(art_inlets=, ven_outlets=)`).
