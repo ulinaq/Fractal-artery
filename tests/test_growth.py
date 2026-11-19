@@ -328,3 +328,15 @@ def test_cco_keeps_loops_and_tolerates_reversed_segments():
     b = growth.cco_grow(rev, pool, n_terminals=30)
     assert b.n_segments == a.n_segments == b.n_nodes - 1
     assert np.all(b.seg_radius > 0)
+
+
+def test_obstacles_carve_3d_masks_too():
+    mask = np.ones((10, 10, 10), bool)
+    out = growth.mask_without_obstacles(mask, (0, 10, 0, 10, 0, 10),
+                                        [{"center": [5, 5, 5], "radius": 2.0}])
+    assert not out[5, 5, 5]
+    assert out[0, 0, 0]
+    flat = growth.mask_without_obstacles(np.ones((10, 10), bool), (0, 10, 0, 10),
+                                         [[(0, 0), (5, 0), (5, 5), (0, 5)]])
+    assert not flat[1, 1]
+    assert flat[8, 8]

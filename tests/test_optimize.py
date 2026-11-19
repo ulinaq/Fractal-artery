@@ -64,3 +64,12 @@ def test_optimize_tree_local_improves(coarse_grid):
 def test_optimize_tree_unknown_method(coarse_grid):
     with pytest.raises(ValueError, match="unknown method"):
         optimize.optimize_tree(grid=coarse_grid, method="bogus", maxiter=1)
+
+
+def test_optimize_tree_keeps_r_min_frac_and_checks_inputs(coarse_grid):
+    r = optimize.optimize_tree(kind="flux_std", grid=coarse_grid, maxiter=2, r_min_frac=0.5)
+    assert r.params.r_min_frac == pytest.approx(0.5)      # was reset to the 0.15 default
+    with pytest.raises(ValueError, match="unknown objective"):
+        optimize.optimize_tree(kind="flux_cv", grid=coarse_grid, maxiter=1)
+    with pytest.raises(ValueError, match="unknown method"):
+        optimize.optimize_tree(method="anneal", grid=coarse_grid, maxiter=1)

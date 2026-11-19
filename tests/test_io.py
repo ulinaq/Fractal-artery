@@ -126,3 +126,14 @@ def test_network_to_vtp_roundtrips(tmp_path):
     assert int(piece.attrib["NumberOfLines"]) == net.n_segments
     names = {d.attrib.get("Name") for d in tree.iter("DataArray")}
     assert {"connectivity", "offsets", "radius", "order"} <= names
+
+
+def test_save_functions_return_the_file_they_wrote(tmp_path, art):
+    # np.savez appends .npz to any other suffix; the returned path must match
+    p = io.save_network(art, tmp_path / "net.v1")
+    assert p.exists()
+    assert p.name == "net.v1.npz"
+    assert io.save_network(art, tmp_path / "plain.npz").name == "plain.npz"
+    v = io.network_to_vtp(art, tmp_path / "art")           # written exactly as named
+    assert v.exists()
+    assert v.name == "art"

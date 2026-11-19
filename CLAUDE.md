@@ -66,6 +66,11 @@ imports use `perfusion.core.*`.
   (`run_simulation`, `describe_model`) — run with `uv run --extra mcp perfusion-mcp`;
   the repo's `.mcp.json` registers it for Claude Code. Tool logic lives in plain
   functions (`simulate`, `model_info`); the `@server.tool()` wrappers are thin.
+  Organ tools start from `_grow_organ(...)` and validate with the shared
+  `_check_drop` / `_check_positive` / `_check_choice` (a clear `ValueError`, never a
+  solver traceback); optional 2-D angles / roots use `None` for "anatomical" (never a
+  magic default value). The MCP server must not import `perfusion.api` (FastAPI) —
+  flow videos come from the service module `perfusion.video` (tested).
 - **Expose new capabilities as MCP tools.** When you add a user-facing feature
   (a new solve/analysis mode, growth method, exporter, etc.), also surface it as
   an MCP tool in `mcp_server.py` — keep the logic in a plain, testable function
@@ -368,8 +373,8 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   CSV `x,y[,z],…` rows x-fastest, VTI a voxel volume); a direct result has no field →
   409 (`_require_field_result`), its vessels still export as `vtp`. The bundle also ships
   `tracer.npz`. **3-D flow videos**: `tracer.gif`/`tracer.mp4` on a 3-D project render
-  `helpers.tracer_images_3d` — a maximum-intensity projection of the bolus + the trees,
-  seen through `helpers.project_3d` (the same camera as `viewer3d.js`'s `project` — keep
+  `video.tracer_images_3d` (re-exported by `api.helpers`) — a maximum-intensity
+  projection of the bolus + the trees, seen through `video.project_3d` (the same camera as `viewer3d.js`'s `project` — keep
   them in step), turning once round the organ unless `spin=false`. **Lesions & hotspots
   in 3-D** are spheres (`center` [x,y,z] + `radius`; schemas `_Region` = polygon *or*
   ball, discs allowed in 2-D, `PUT` checks the shape matches the project's dimension).

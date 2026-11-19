@@ -333,7 +333,9 @@ def homogeneity(res, exclude=None) -> dict:
     tof = tof[np.isfinite(tof) & (tof > 0)]
     out = {"flux_range": float(v.max() - v.min()) if v.size else float("inf"),
            "flux_std": float(v.std()) if v.size else float("inf"),
-           "flux_l2": float(np.linalg.norm(v)), "flux_mean": float(v.mean()) if v.size else 0.0,
+           # no finite flux at all is the *worst* score, never a perfect 0
+           "flux_l2": float(np.linalg.norm(v)) if v.size else float("inf"),
+           "flux_mean": float(v.mean()) if v.size else 0.0,
            "tof_std": float(tof.std()) if tof.size else float("inf"),
            "tof_max": float(tof.max()) if tof.size else float("inf")}
     return out
@@ -449,7 +451,10 @@ def optimize(spec: GenSpec, kind: str = "tof_std", free=None, method: str = "loc
         raise ValueError(f"unknown objective {kind!r}")
     if free is None:
         free = [*OPT_DEFAULT_FREE, *(["twist"] if spec.dim == 3 else [])]
-    free = [f for f in free if f in OPT_BOUNDS and (f != "twist" or spec.dim == 3)]
+    unknown = [f for f in free if f not in OPT_BOUNDS]
+    if unknown:
+        raise ValueError(f"cannot optimise {unknown}; choose from {sorted(OPT_BOUNDS)}")
+    free = [f for f in free if f != "twist" or spec.dim == 3]   # twist is 3-D only
     if not free:
         raise ValueError(f"nothing to optimise; choose from {sorted(OPT_BOUNDS)}")
     x0 = spec_values(spec)

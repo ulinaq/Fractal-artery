@@ -534,17 +534,22 @@ def cco_grow_in_mask(base: Network, mask, domain_limit, *, n_terminals=200,
 
 
 def mask_without_obstacles(mask, domain_limit, obstacles) -> np.ndarray:
-    """Carve ``obstacles`` (a list of no-grow polygons) out of ``mask``.
+    """Carve ``obstacles`` out of ``mask`` (2-D or 3-D, like the rest of growth).
 
-    Cells whose centre falls inside any obstacle polygon are deactivated, so growth
+    An obstacle is a 2-D outline polygon (a list of ``[x, y]``) or a ball — a mapping
+    with ``center`` (``[x, y]`` / ``[x, y, z]``) and ``radius`` (or a ``polygon``).
+    Cells whose centre falls inside any obstacle are deactivated, so growth
     (attraction points and terminals) avoids those regions — domain-aware growth
     around organ sub-structures / obstacles without editing the organ outline.
     """
     mask = np.asarray(mask, dtype=bool)
     if not obstacles:
         return mask
-    from .core.geometry import rasterize_mask
-    blocked = rasterize_mask(mask.shape[0], mask.shape[1], domain_limit, obstacles)
+    from .core.geometry import rasterize_regions
+
+    regions = [{**ob, "value": 1.0} if isinstance(ob, dict) else {"polygon": ob, "value": 1.0}
+               for ob in obstacles]
+    blocked = rasterize_regions(mask.shape, domain_limit, regions, base=0.0) > 0
     return mask & ~blocked
 
 

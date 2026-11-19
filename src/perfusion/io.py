@@ -17,6 +17,13 @@ DATA_DIR = REPO_ROOT / "data"
 LEGACY_DIR = REPO_ROOT / "legacy"
 
 
+
+def _npz_written(path) -> Path:
+    """Where ``np.savez(path)`` actually wrote: it appends ``.npz`` to any path that
+    does not already end in it (``run.v1`` → ``run.v1.npz``)."""
+    path = Path(path)
+    return path if path.suffix == ".npz" else path.with_name(path.name + ".npz")
+
 def load_mat(path: str | Path) -> dict:
     """Load a MATLAB .mat file (v7 and earlier) into a dict of arrays."""
     return sio.loadmat(str(path), squeeze_me=True, struct_as_record=False)
@@ -118,7 +125,7 @@ def save_results(result: HybridResult, path: str | Path) -> Path:
         q_a=result.solution.q_a, q_v=result.solution.q_v,
         terminal_flux=result.solution.terminal_flux,
     )
-    return path if path.suffix else path.with_suffix(".npz")
+    return _npz_written(path)
 
 
 def _cell_centres(shape, domain_limit):
@@ -271,7 +278,7 @@ def network_to_vtp(net, path: str | Path, *, flow=None) -> Path:
     )
     path = Path(path)
     path.write_text(xml)
-    return path if path.suffix else path.with_suffix(".vtp")
+    return path                       # written exactly where asked
 
 
 def save_network(net, path: str | Path) -> Path:
@@ -293,7 +300,7 @@ def save_network(net, path: str | Path) -> Path:
         seg_radius=net.seg_radius, seg_angle=net.seg_angle,
         root_node=np.asarray(net.root_node), **extra,
     )
-    return path if path.suffix else path.with_suffix(".npz")
+    return _npz_written(path)
 
 
 def load_network(path: str | Path):
