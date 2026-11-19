@@ -5,6 +5,7 @@
 // Cross-module refs (app wires the buttons; edit reuses loadNetwork/stopFlow) are
 // resolved by ES-module live bindings — every call happens at runtime.
 import { $, api, getCss, numOf, state, status } from "./core.js";
+import { pollJob } from "./net.js";
 import { redraw } from "./render.js";
 import { uqHtml } from "./uqview.js";
 import { loadEditable } from "./edit.js";
@@ -175,14 +176,38 @@ export async function loadResultView() {
 // A signed difference map (current − a kept baseline), drawn with a diverging ramp
 // symmetric about zero change.
 export async function loadDeltaField(name, sid) {
-  const f = await api("GET", `/projects/${state.project}/compare/field/${name}?snapshot=${sid}`);
-  let m = 0;
-  for (const row of f.data) for (const v of row) if (v !== null && Math.abs(v) > m) m = Math.abs(v);
-  m = m || 1;
+  const f = await fetchMap(`/projects/${state.project}/compare/field/${name}?snapshot=${sid}`);
+  if (!f) return;
+  const { vmin, vmax } = rangeOf(f.data);
+  const m = Math.max(Math.abs(vmin), Math.abs(vmax)) || 1;
   stopFlow();
   document.querySelectorAll(".field").forEach((x) => x.classList.remove("active"));
-  state.fieldData = { ...f, vmin: -m, vmax: m, delta: true };
-  state.field = `Δ ${name}`;
+  showMap(f, `Δ ${name}`, { vmin: -m, vmax: m, delta: true });
+}
+
+// The heatmap shows one map at a time; requests can overlap (quick clicks, a slow
+// oxygen solve), so each takes a ticket and only the newest one's response is drawn.
+let mapTicket = 0;
+async function fetchMap(path) {
+  const mine = ++mapTicket;
+  const f = await api("GET", path);
+  return mine === mapTicket ? f : null;
+}
+
+/** finite min/max of a nested field (nulls = masked); (0, 1) when nothing is finite */
+export function rangeOf(data) {
+  let vmin = Infinity, vmax = -Infinity;
+  for (const row of data) for (const v of row) {
+    if (v !== null && Number.isFinite(v)) { if (v < vmin) vmin = v; if (v > vmax) vmax = v; }
+  }
+  return vmin <= vmax ? { vmin, vmax } : { vmin: 0, vmax: 1 };
+}
+
+// Draw a derived map. ``state.field`` stays the base result field (pressure / flux /
+// tof) that a re-run reloads; the map's own name only labels the colour bar.
+function showMap(f, label, extra = {}) {
+  state.fieldData = { ...f, ...rangeOf(f.data), ...extra };
+  state.fieldLabel = label;
   redraw();
 }
 
@@ -287,14 +312,11 @@ export async function loadKineticMap(which, method = "semi") {
   if (state.resultModel !== "hybrid") { status("maps need the hybrid tracer", "err"); return; }
   const q = `field=${which}&method=${method}`;
   let f;
-  try { f = await api("GET", `/projects/${state.project}/kinetics/maps?${q}`); }
-  catch (e) { status(/409/.test(e.message) ? "compute the ▶ Tracer first" : e.message, "err"); return; }
-  let vmin = Infinity, vmax = -Infinity;
-  for (const row of f.data) for (const v of row) if (v !== null) { if (v < vmin) vmin = v; if (v > vmax) vmax = v; }
+  try { f = await fetchMap(`/projects/${state.project}/kinetics/maps?${q}`); }
+  catch (e) { status(e.status === 409 ? "compute the ▶ Tracer first" : e.message, "err"); return; }
+  if (!f) return;
   stopFlow();
-  state.fieldData = { ...f, vmin, vmax };
-  state.field = MAP_LABELS[which] || which;
-  redraw();
+  showMap(f, MAP_LABELS[which] || which);
   status(`${which} map${method === "deconv" ? " (deconv)" : ""}`, "ok");
 }
 
@@ -306,16 +328,14 @@ export async function loadMulticompartment(which) {
   const field = which === "venule" ? `comp${n - 1}` : which === "arteriole" ? "comp0" : "perfusion";
   $("mc-info").textContent = "solving compartments…";
   let f;
-  try { f = await api("GET", `/projects/${state.project}/multicompartment?field=${field}&n=${n}&beta=${beta}`); }
+  try { f = await fetchMap(`/projects/${state.project}/multicompartment?field=${field}&n=${n}&beta=${beta}`); }
   catch (e) { status(e.message, "err"); $("mc-info").textContent = e.message; return; }
-  let vmin = Infinity, vmax = -Infinity;
-  for (const row of f.data) for (const v of row) if (v !== null) { if (v < vmin) vmin = v; if (v > vmax) vmax = v; }
+  if (!f) return;
   stopFlow();
-  state.fieldData = { ...f, vmin, vmax };
-  state.field = which === "perfusion" ? `capillary perfusion (N=${f.n})`
+  const label = which === "perfusion" ? `capillary perfusion (N=${f.n})`
     : which === "arteriole" ? "arteriole pressure" : "venule pressure";
-  redraw();
-  $("mc-info").textContent = `N=${f.n}, β=${f.beta} — ${state.field}`;
+  showMap(f, label);
+  $("mc-info").textContent = `N=${f.n}, β=${f.beta} — ${label}`;
   status(`multi-compartment ${which}`, "ok");
 }
 
@@ -327,14 +347,11 @@ export async function loadOxygen(which) {
   const q = `field=${which}&k=${k}&diffusivity=${diff}`;
   $("o2-info").textContent = "solving oxygen transport…";
   let f;
-  try { f = await api("GET", `/projects/${state.project}/oxygen?${q}`); }
+  try { f = await fetchMap(`/projects/${state.project}/oxygen?${q}`); }
   catch (e) { status(e.message, "err"); $("o2-info").textContent = e.message; return; }
-  let vmin = Infinity, vmax = -Infinity;
-  for (const row of f.data) for (const v of row) if (v !== null) { if (v < vmin) vmin = v; if (v > vmax) vmax = v; }
+  if (!f) return;
   stopFlow();
-  state.fieldData = { ...f, vmin, vmax };
-  state.field = which === "saturation" ? "O₂ saturation" : "O₂ uptake (k·C)";
-  redraw();
+  showMap(f, which === "saturation" ? "O₂ saturation" : "O₂ uptake (k·C)");
   $("o2-info").textContent = `global OEF = ${(f.oef * 100).toFixed(1)}%  (k=${f.k})`;
   status(`O₂ ${which}`, "ok");
 }
@@ -395,13 +412,6 @@ function drawTTD(el, d) {
   ctx.fillText("τ (transit time) →", pad.l, H - 5);
 }
 
-async function pollJob(jid) {
-  for (;;) {
-    const s = await api("GET", `/jobs/${jid}`);
-    if (s.state === "done" || s.state === "error") return s;
-    await new Promise((r) => setTimeout(r, 300));
-  }
-}
 
 async function showSummary() {
   const s = await api("GET", `/projects/${state.project}/results`);
@@ -427,13 +437,14 @@ export async function loadNetwork() {
   catch { state.network = null; }
 }
 
+const BASE_FIELDS = ["pressure", "flux", "tof"];
+
 export async function loadField(name) {
+  if (!BASE_FIELDS.includes(name)) name = "pressure";
+  const f = await fetchMap(`/projects/${state.project}/results/field/${name}`);
+  if (!f) return;                               // a newer map request superseded this one
   state.field = name;
-  const f = await api("GET", `/projects/${state.project}/results/field/${name}`);
-  let vmin = Infinity, vmax = -Infinity;
-  for (const row of f.data) for (const v of row) if (v !== null) { if (v < vmin) vmin = v; if (v > vmax) vmax = v; }
-  state.fieldData = { ...f, vmin, vmax };
-  redraw();
+  showMap(f, name);
 }
 
 // ── tracer flow video ─────────────────────────────────────────────────────────
@@ -509,7 +520,16 @@ export function pauseFlow() { stopTimer(); $("flow-play").textContent = "▶"; }
 export function toggleFlowPlay() { state.flow.timer ? pauseFlow() : playFlow(); }
 export function stopFlow() {
   pauseFlow(); state.flow.active = false;
-  ["flow-play", "flow-scrub", "flow-time"].forEach((id) => ($(id).hidden = true));
+  // the GIF / MP4 links point at *this* tracer: hide them with it, so a project switch
+  // or an edit never leaves a link to another project's (or a stale) video
+  ["flow-play", "flow-scrub", "flow-time", "flow-gif", "flow-mp4"].forEach((id) => ($(id).hidden = true));
+}
+
+/** The server dropped the result (an edit changed the model): forget the local copy
+ *  too — field, tracer, direct render — so nothing keeps showing / exporting it. */
+export function markResultStale() {
+  state.hasResult = false;
+  stopFlow(); state.tracer = null; state.fieldData = null; state.direct = null;
 }
 export function syncFlowUI() {
   $("flow-scrub").value = state.flow.idx;

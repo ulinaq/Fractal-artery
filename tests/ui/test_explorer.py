@@ -67,8 +67,8 @@ def test_3d_explorer_result_opens_as_a_project_and_runs(page, server):
     with page.context.expect_page() as new:
         page.click("#btn-project")
     viewer = new.value
+    viewer.wait_for_url("**/viewer3d.html?project=*", timeout=60000)
     viewer.wait_for_load_state()
-    assert "/viewer3d.html?project=" in viewer.url
     viewer.wait_for_selector("#proj-card:not([hidden])")
     viewer.click("#v3-run")
     viewer.wait_for_function("document.querySelector('#v3-summary').textContent"
@@ -87,6 +87,7 @@ def test_2d_explorer_result_opens_in_the_workspace(page, server):
     with page.context.expect_page() as new:
         page.click("#btn-project")
     ws = new.value
+    ws.wait_for_url("**/?project=*", timeout=60000)   # the tab opens first, then navigates
     ws.wait_for_load_state()
     ws.wait_for_function("document.querySelector('#status').textContent.includes('opened')",
                          timeout=60000)
@@ -492,9 +493,9 @@ def test_optimise_in_the_organ_then_use_it_in_the_simulation(page, server, dim):
     with page.context.expect_page() as new:
         page.click("#btn-opt-use")
     sim = new.value
-    sim.wait_for_load_state()
     want = "/?project=" if dim == 2 else "/viewer3d.html?project="
-    assert want in sim.url
+    sim.wait_for_url(f"**{want}*", timeout=60000)       # opened blank, then navigated
+    sim.wait_for_load_state()
     if dim == 2:                                  # the workspace opened it, trees editable
         wait_status(sim, "opened")
         assert "artery segments" in sim.inner_text("#node-info")

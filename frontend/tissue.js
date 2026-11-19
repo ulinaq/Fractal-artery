@@ -15,7 +15,8 @@
 // field updates that polygon.
 import { api, numOf, state, status, toCanvas, toDomain, $ } from "./core.js";
 import { redraw } from "./render.js";
-import { recordHistory, requireProject } from "./app.js";
+import { recordHistory, refreshUI, requireProject } from "./app.js";
+import { markResultStale } from "./run.js";
 
 const VERT_TOL = 9;       // px
 const EDGE_TOL = 6;       // px
@@ -237,8 +238,11 @@ export async function saveMask() {
   if (state.tissueStroke.length >= 3) closePolygon();
   await api("PUT", `/projects/${state.project}/mask`, { regions: state.regions });
   await api("PUT", `/projects/${state.project}/lesions`, { lesions: state.lesions });
-  await api("PUT", `/projects/${state.project}/hotspots`, { hotspots: state.hotspots });
+  const info = await api("PUT", `/projects/${state.project}/hotspots`, { hotspots: state.hotspots });
   clearTissueDirty();
+  if (state.hasResult && !info.has_result) {     // the new tissue made the result stale
+    markResultStale(); refreshUI(); redraw();
+  }
   const bits = [state.regions.length ? `${state.regions.length} region(s)` : "full domain"];
   if (state.lesions.length) bits.push(`${state.lesions.length} lesion(s)`);
   if (state.hotspots.length) bits.push(`${state.hotspots.length} hotspot(s)`);

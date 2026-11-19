@@ -3,6 +3,7 @@
 // (a lesion, the vessels, p_in…), re-run, then compare: a table of what changed
 // (GET /compare) and signed difference maps (Δ = current − baseline).
 
+import { escapeHtml, fetchJSON, pollJob } from "./net.js";
 import { viridisCss } from "./palette.js";
 
 const LABELS = {
@@ -32,7 +33,7 @@ export function compareHtml(c) {
       + `<td>${fmt(f.mean_current)}</td><td class="${cls(f.rel_change)}">${pct(f.rel_change)}</td></tr>`)
     .join("");
   const note = c.same_grid ? "" : '<p class="muted">The grid changed, so only the summary compares.</p>';
-  return `<p class="muted">vs <b>${c.snapshot.name}</b></p>`
+  return `<p class="muted">vs <b>${escapeHtml(c.snapshot.name)}</b></p>`
     + `<table class="cmp"><tr><th></th><th>baseline</th><th>now</th><th>Δ</th></tr>${rows}${fields}</table>${note}`;
 }
 
@@ -55,7 +56,7 @@ function sensitivityHtml(e, key, label) {
 // `metric` (rows: param, columns: param2) shaded on viridis. Every run is clickable
 // (data-snap) to compare against it.
 export function sweepHtml(e, metric = "arterial_inflow") {
-  const head = `<p class="muted"><b>${e.name}</b> <button class="ghost mini-btn" data-del-exp="${e.id}" `
+  const head = `<p class="muted"><b>${escapeHtml(e.name)}</b> <button class="ghost mini-btn" data-del-exp="${escapeHtml(e.id)}" `
     + `title="delete this experiment and its runs">✕</button></p>`;
   if (!e.param2) {
     const cols = SWEEP_COLS.map(([, l]) => `<th>${l}</th>`).join("");
@@ -98,12 +99,7 @@ export function createCompare({ projectId, ids, onMap, onInfo }) {
   const info = (msg, err) => onInfo && onInfo(msg, err);
 
   async function call(method, path, body) {
-    const r = await fetch(`/projects/${projectId()}/${path}`, {
-      method, headers: body ? { "content-type": "application/json" } : {},
-      body: body ? JSON.stringify(body) : undefined });
-    const j = r.status === 204 ? {} : await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : `${path} failed (${r.status})`);
-    return j;
+    return (await fetchJSON(method, `/projects/${projectId()}/${path}`, body)) || {};
   }
 
   async function refresh(selectId) {
@@ -111,7 +107,7 @@ export function createCompare({ projectId, ids, onMap, onInfo }) {
     const { snapshots } = await call("GET", "snapshots");
     const keep = selectId || el.select.value;
     el.select.innerHTML = snapshots.length
-      ? snapshots.map((s) => `<option value="${s.id}">${s.name}</option>`).join("")
+      ? snapshots.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`).join("")
       : '<option value="">no baseline yet</option>';
     if (snapshots.some((s) => s.id === keep)) el.select.value = keep;
     el.select.disabled = el.run.disabled = el.del.disabled = !snapshots.length;
@@ -191,11 +187,7 @@ export function createCompare({ projectId, ids, onMap, onInfo }) {
     info(`running ${n} solves…`);
     try {
       const job = await call("POST", "experiments", body);
-      let st = job;
-      while (st.state !== "done" && st.state !== "error") {
-        await new Promise((r) => setTimeout(r, 400));
-        st = await (await fetch(`/jobs/${job.id}`)).json();
-      }
+      const st = await pollJob(job.id);
       if (st.state === "error") { info(st.error || "experiment failed", true); return; }
       await refresh(); await refreshBatch();
       info(`${n} runs kept — click a ${body.param2 ? "cell" : "row"} to compare against it`);
