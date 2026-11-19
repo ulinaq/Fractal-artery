@@ -98,7 +98,8 @@ function show3dProject() {
     ? [["arterial inflow", s.arterial_inflow], ["venous outflow", s.venous_outflow],
        ...(direct ? [["connections", s.n_connections]] : [["MTT", s.mtt], ["CTH", s.cth]]),
        ...(s.viscosity_factor_max != null ? [["viscosity × min", s.viscosity_factor_min],
-         ["viscosity × max", s.viscosity_factor_max]] : [])]
+         ["viscosity × max", s.viscosity_factor_max]] : []),
+       ...(s.plugged_vessels != null ? [["plugged vessels", s.plugged_vessels]] : [])]
       .map(([k, v]) => `<div class="stat"><b>${f(v)}</b><span>${k}</span></div>`).join("")
     : "";
   if (data.oef != null) {
@@ -191,7 +192,8 @@ async function run3d() {
     const model = $("v3-model").value;
     const st = await runJob("run", { model, rho_c: Number($("v3-rhoc").value) || 0,
       shear_thinning: model === "hybrid" && $("v3-shear").checked,
-      carreau_lambda: Number($("v3-lambda").value) || 3000 });
+      carreau_lambda: Number($("v3-lambda").value) || 3000,
+      blood_law: $("v3-law").value, casson_yield: Number($("v3-yield").value) || 0 });
     $("v3-run-info").textContent = st.state === "done" ? "" : (st.error || "run failed");
     $("v3-kin").textContent = "";
     if (model === "direct" || !["pressure", "flux", "tof"].includes($("v3-field").value)) {
@@ -356,9 +358,13 @@ function syncModelRows() {                  // each model's own settings
   const direct = $("v3-model").value === "direct";
   $("v3-rhoc-row").hidden = !direct;
   $("v3-shear-row").hidden = direct;
-  $("v3-lambda-row").hidden = direct || !$("v3-shear").checked;
+  const blood = !direct && $("v3-shear").checked, casson = $("v3-law").value === "casson";
+  $("v3-law-row").hidden = !blood;
+  $("v3-lambda-row").hidden = !blood || casson;
+  $("v3-yield-row").hidden = !blood || !casson;
 }
 $("v3-shear").addEventListener("change", syncModelRows);
+$("v3-law").addEventListener("change", syncModelRows);
 $("v3-model").addEventListener("change", (e) => {
   syncModelRows();
   const stored = data && data.has_result ? (data.direct ? "direct" : "hybrid") : null;

@@ -65,6 +65,12 @@ class Parameters:
     carreau_lambda: float = 3000.0   # time constant, model time units
     carreau_n: float = 0.3568        # power-law index (blood, Cho & Kensey 1991)
     carreau_mu0_ratio: float = 16.23  # zero-shear / high-shear viscosity (56 / 3.45)
+    # blood_law picks the non-Newtonian law used when shear_thinning is on: "carreau"
+    # (above) or "casson" — a yield stress casson_yield (pressure units; mu is then the
+    # Casson high-shear viscosity): each segment carries the exact Casson tube flow for
+    # its pressure drop (viscosity.casson_factor), so flow stops below yield.
+    blood_law: str = "carreau"
+    casson_yield: float = 0.001
 
     # Arterial geometry
     r0: float = 2.0           # initial (root) radius

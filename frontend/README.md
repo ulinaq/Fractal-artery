@@ -57,9 +57,10 @@ no separate dev server.
   via the method picker; `POST /projects/{id}/grow`); the grown tree is overlaid.
 - **Run** — solve the hybrid model as an async job (`POST …/run` + poll
   `/jobs/{id}`). Options: nonlinear junction losses, phase separation, wall
-  elasticity and **shear-thinning blood** (Carreau law, time constant λ — the
-  summary then shows the viscosity-factor range); the 3-D viewer has the same
-  shear-thinning option.
+  elasticity and **non-Newtonian blood** — Carreau (shear-thinning, time constant
+  λ) or Casson (yield stress τ_y; vessels below yield plug) — the summary then shows
+  the viscosity-factor range (and, for Casson, the plugged vessels); the 3-D viewer
+  has the same option.
 - **Result** — view the pressure / flux / time-of-flight field as a
   colour-blind-safe *viridis* heatmap with the vascular network overlaid and a
   colour bar; read the inflow/outflow summary; **export** the fields as `.npz`,

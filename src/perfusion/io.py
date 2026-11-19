@@ -95,12 +95,16 @@ def results_summary(result: HybridResult) -> dict:
 
 
 def _rheology_summary(info: dict | None) -> dict:
-    """Shear-thinning solve diagnostics (the Carreau viscosity-factor range)."""
+    """Non-Newtonian solve diagnostics: the viscosity-factor range (Carreau or Casson)
+    and, for Casson blood, how many vessels are plugged below yield."""
     if not info:
         return {}
-    return {"viscosity_factor_min": info["factor_min"],
-            "viscosity_factor_max": info["factor_max"],
-            "rheology_iterations": int(info["iterations"])}
+    out = {"viscosity_factor_min": info["factor_min"],
+           "viscosity_factor_max": info["factor_max"],
+           "rheology_iterations": int(info["iterations"])}
+    if "plugged" in info:
+        out["plugged_vessels"] = int(info["plugged"])
+    return out
 
 
 def save_results(result: HybridResult, path: str | Path) -> Path:

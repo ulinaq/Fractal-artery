@@ -200,12 +200,15 @@ def grid_for(spec: GenSpec, mask, domain):
 
 def solve(spec: GenSpec, art: Network, ven: Network, mask, domain,
           p_in: float = 10.0, p_out: float = 0.0, permeability=None,
-          shear_thinning: bool = False, carreau_lambda: float = 3000.0):
+          shear_thinning: bool = False, carreau_lambda: float = 3000.0,
+          blood_law: str = "carreau", casson_yield: float = 0.001):
     """Solve the hybrid perfusion model on the tissue (2-D or 3-D); ``permeability``
     (a per-cell field shaped like ``mask``) makes the bed heterogeneous;
-    ``shear_thinning`` uses Carreau blood (time constant ``carreau_lambda``)."""
+    ``shear_thinning`` uses non-Newtonian blood — ``blood_law`` "carreau" (time
+    constant ``carreau_lambda``) or "casson" (yield stress ``casson_yield``)."""
     prm = Parameters(p_in=p_in, p_out=p_out, shear_thinning=shear_thinning,
-                     carreau_lambda=carreau_lambda)
+                     carreau_lambda=carreau_lambda, blood_law=blood_law,
+                     casson_yield=casson_yield)
     grid = grid_for(spec, mask, domain)
     if permeability is not None:
         grid.permeability = np.asarray(permeability, dtype=float)

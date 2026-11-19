@@ -84,7 +84,8 @@ def test_server_registers_expected_tools():
             "tissue_uncertainty_calibration", "direct_model_in_tissue",
             "export_tissue_fields", "lesion_in_tissue", "compare_scenarios",
             "experiment_in_tissue", "fit_dce_curve",
-            "anastomosis_rescue", "shear_thinning_blood", "describe_model"} <= tools
+            "anastomosis_rescue", "shear_thinning_blood", "yield_stress_blood",
+            "describe_model"} <= tools
 
 
 def test_calibrate_to_flow_recovers_value():
@@ -454,6 +455,22 @@ def test_shear_thinning_blood_in_an_organ(dim):
     assert all(r["viscosity_factor_min"] >= 1.0 for r in out["rows"])
     with pytest.raises(ValueError, match="positive"):
         mcp_server.tissue_rheology(dim=dim, pressures=(0.0, 5.0))
+
+
+@pytest.mark.parametrize("dim", [2, 3])
+def test_yield_stress_blood_in_an_organ(dim):
+    out = mcp_server.tissue_yield_stress(dim=dim, shape="kidney", generations=4,
+                                         pressures=(0.2, 2.0, 10.0, 20.0))
+    rows = out["rows"]
+    ratios = [r["flow_ratio"] for r in rows]
+    assert all(0 <= q < 1 for q in ratios)                 # yield stress always slows flow
+    assert ratios == sorted(ratios)                        # ... most at low pressure
+    plugged = [r["plugged_fraction"] for r in rows]
+    assert plugged[0] > plugged[-1]                         # vessels plug as Δp falls
+    assert out["yield_pressure"] is not None
+    assert 0 < out["yield_pressure"] < 10.0
+    with pytest.raises(ValueError, match="casson_yield"):
+        mcp_server.tissue_yield_stress(dim=dim, casson_yield=-1.0)
 
 
 def test_generate_trees_can_close_loops():

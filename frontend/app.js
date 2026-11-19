@@ -427,9 +427,15 @@ $("nonlinear").addEventListener("change", (e) => {   // max-iter only matters fo
 $("elasticity").addEventListener("change", (e) => {  // compliance only matters with elasticity on
   $("compliance-row").style.display = e.target.checked ? "" : "none";
 });
-$("shear-thin").addEventListener("change", (e) => {  // λ only matters with shear-thinning on
-  $("lambda-row").style.display = e.target.checked ? "" : "none";
-});
+function syncBloodRows() {          // the law and its constant only matter when it is on
+  const on = $("shear-thin").checked && $("run-model").value !== "direct";
+  const casson = $("blood-law").value === "casson";
+  $("law-row").style.display = on ? "" : "none";
+  $("lambda-row").style.display = on && !casson ? "" : "none";
+  $("yield-row").style.display = on && casson ? "" : "none";
+}
+$("shear-thin").addEventListener("change", syncBloodRows);
+$("blood-law").addEventListener("change", syncBloodRows);
 $("run-model").addEventListener("change", (e) => {   // show the settings each model needs
   const direct = e.target.value === "direct";
   $("rhoc-row").style.display = direct ? "" : "none";
@@ -438,7 +444,7 @@ $("run-model").addEventListener("change", (e) => {   // show the settings each m
   $("elastic-row").style.display = direct ? "none" : "";
   $("compliance-row").style.display = (!direct && $("elasticity").checked) ? "" : "none";
   $("shear-row").style.display = direct ? "none" : "";
-  $("lambda-row").style.display = (!direct && $("shear-thin").checked) ? "" : "none";
+  syncBloodRows();
   $("maxiter-row").style.display = (!direct && $("nonlinear").checked) ? "" : "none";
 });
 $("btn-export").addEventListener("click", () => {

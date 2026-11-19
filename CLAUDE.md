@@ -180,6 +180,15 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   `run_hybrid_3d`; the result's `rheology` dict feeds `viscosity_factor_*` into the
   summary. `carreau_mu0_ratio=1` must stay identical to the Newtonian solve (tested).
   Run option `RunRequest.shear_thinning`/`carreau_lambda`; MCP `shear_thinning_blood`.
+  **Casson (yield-stress) blood**: `Parameters.blood_law="casson"` + `casson_yield` (τ_y)
+  — same wrapper (`solve_shear_thinning(law="casson", yield_stress=)`); each segment's
+  factor is the secant viscosity of the *exact* Casson tube law at its flow
+  (`viscosity.casson_factor`, Newton inversion), plugs capped at `CASSON_MAX_FACTOR`;
+  Anderson-accelerated Picard with a stall fallback to plain Picard (which always
+  converges — keep that fallback). `casson_yield=0` ≡ Newtonian (tested); summary adds
+  `plugged_vessels`. `RunRequest.blood_law`/`casson_yield`; UI law picker next to the
+  non-Newtonian checkbox (2-D + 3-D); MCP `yield_stress_blood` (yield pressure from a
+  √Q–√Δp fit).
 - **Nonlinear solve is a fixed-point** that reuses one LU factorisation of the
   linear operator (`solve_nonlinear`), ~12× faster than the old dense-Jacobian
   Newton and reducing exactly to `solve_linear` when `junction_loss=False`.

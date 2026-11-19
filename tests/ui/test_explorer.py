@@ -519,6 +519,14 @@ def test_3d_viewer_shear_thinning_run(page, server):
                            ".includes('viscosity')", timeout=120000)
     page.select_option("#v3-model", "direct")
     assert page.is_hidden("#v3-shear-row")
+    page.select_option("#v3-model", "hybrid")
+    page.select_option("#v3-law", "casson")                     # Casson: τ_y replaces λ
+    assert page.is_hidden("#v3-lambda-row")
+    assert page.is_visible("#v3-yield-row")
+    page.fill("#v3-yield", "10")
+    page.click("#v3-run")
+    page.wait_for_function("document.querySelector('#v3-summary').textContent"
+                           ".includes('plugged vessels')", timeout=120000)
     assert not errors
 
 

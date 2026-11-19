@@ -216,6 +216,26 @@ def test_shear_thinning_run_reports_the_viscosity_range(page, server):
     assert not page.errors
 
 
+def test_casson_run_reports_plugged_vessels(page, server):
+    """Pick the Casson law: λ gives way to the yield stress, and a yield stress far
+    above the wall stresses plugs vessels, which the summary reports."""
+    _new_project(page, server)
+    assert page.is_hidden("#law-row")
+    page.check("#shear-thin")
+    page.select_option("#blood-law", "casson")
+    assert page.is_hidden("#lambda-row")
+    assert page.is_visible("#yield-row")
+    page.fill("#casson-yield", "10")
+    page.click("#btn-run")
+    wait_status(page, "solved", "failed", timeout=120000)
+    page.wait_for_function("document.querySelector('#summary').textContent"
+                           ".includes('plugged vessels')", timeout=30000)
+    page.select_option("#run-model", "direct")
+    assert page.is_hidden("#law-row")
+    assert page.is_hidden("#yield-row")
+    assert not page.errors
+
+
 def test_two_input_grid_experiment(page, server):
     """A p_in × K grid from the Result tab: a matrix of runs shaded by the chosen
     quantity with its sensitivities; switching the quantity re-renders; clicking a

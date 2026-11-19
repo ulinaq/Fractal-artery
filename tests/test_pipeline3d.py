@@ -300,3 +300,16 @@ def test_3d_shear_thinning_conserves_mass_and_thickens_blood():
     assert thin.rheology["factor_max"] > 1.0
     assert 0 < tf[:n_art].sum() < newt.solution.terminal_flux[:n_art].sum()
     assert newt.rheology is None
+
+
+def test_3d_casson_yield_stress_blood():
+    art, ven, grid, dom = _system(max_gen=4)
+    newt = run_hybrid_3d(Parameters(p_in=10.0, p_out=0.0), grid, art, ven, dom, eps=2.0)
+    cas = run_hybrid_3d(Parameters(p_in=10.0, p_out=0.0, shear_thinning=True,
+                                   blood_law="casson", casson_yield=0.001),
+                        grid, art, ven, dom, eps=2.0)
+    n_art = cas.art.terminal_nodes.size
+    tf = cas.solution.terminal_flux
+    assert cas.rheology["converged"]
+    assert np.isclose(tf[:n_art].sum(), -tf[n_art:].sum(), rtol=1e-8)
+    assert 0 < tf[:n_art].sum() < newt.solution.terminal_flux[:n_art].sum()

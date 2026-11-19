@@ -11,6 +11,7 @@ const LABELS = {
   tof_max: "TOF max", flux_range: "flux range", pressure_min: "pressure min",
   flux_std: "flux std", tof_mean: "TOF mean", tof_std: "TOF std",
   viscosity_factor_min: "viscosity × min", viscosity_factor_max: "viscosity × max",
+  plugged_vessels: "plugged vessels",
 };
 // network sizes / solver counts: listed only when they changed (e.g. after regrowing a tree)
 const STRUCTURE = /(_nodes|_segments|_iterations)$/;

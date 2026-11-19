@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, model_validator
 
 from ..core.darcy import Grid
@@ -180,6 +182,8 @@ class RunRequest(BaseModel):
     compliance: float = Field(0.01, ge=0)          # radius change per unit transmural pressure
     shear_thinning: bool = False                   # Carreau (non-Newtonian) blood viscosity
     carreau_lambda: float = Field(3000.0, gt=0)    # Carreau time constant (model time units)
+    blood_law: Literal["carreau", "casson"] = "carreau"   # law used with shear_thinning
+    casson_yield: float = Field(0.001, ge=0)       # Casson yield stress (pressure units)
 
 
 class ExploreRequest(BaseModel):

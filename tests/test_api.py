@@ -2115,6 +2115,17 @@ def test_run_with_shear_thinning_blood(client, dim):
     bad = client.post(f"/projects/{pid}/run", json={"shear_thinning": True,
                                                     "carreau_lambda": 0})
     assert bad.status_code == 422
+    assert "plugged_vessels" not in thin
+    cas = run(shear_thinning=True, blood_law="casson", casson_yield=0.001)
+    assert 0 < cas["arterial_inflow"] < newt["arterial_inflow"]
+    assert cas["arterial_inflow"] == pytest.approx(cas["venous_outflow"], rel=1e-6)
+    assert cas["plugged_vessels"] >= 0
+    stuck = run(shear_thinning=True, blood_law="casson", casson_yield=10.0)   # τ_y ≫ τ_w
+    assert stuck["plugged_vessels"] > 0
+    assert stuck["arterial_inflow"] < 1e-2 * newt["arterial_inflow"]
+    for body in ({"blood_law": "bingham"}, {"casson_yield": -1}):
+        bad = client.post(f"/projects/{pid}/run", json={"shear_thinning": True, **body})
+        assert bad.status_code == 422
 
 
 def test_grow_with_loop_closure_then_run(client):
