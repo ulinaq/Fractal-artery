@@ -38,11 +38,13 @@ def _alpha_from(req: ExploreRequest):
     return a
 
 
-def _objective_of(res, grid, kind: str) -> float:
-    """The chosen homogeneity objective of a 2-D or 3-D result."""
-    from ..treegen import homogeneity
+def _objective_of(res, spec, mask, domain, kind: str) -> float:
+    """The chosen homogeneity objective of a 2-D or 3-D result (over the healthy
+    tissue — lesion cells are left out, as in the optimiser)."""
+    from ..treegen import homogeneity, lesion_mask
 
-    metrics = homogeneity(res)
+    exclude = lesion_mask(spec, mask, domain) if spec is not None else None
+    metrics = homogeneity(res, exclude=exclude)
     if kind not in metrics:
         raise HTTPException(422, f"kind must be one of {sorted(metrics)}")
     return metrics[kind]
@@ -72,7 +74,7 @@ def explore(req: ExploreRequest) -> dict:
                 for x0, y0, x1, y1, r in helpers.segment_lines(net)]
 
     return {
-        "objective": _objective_of(res, grid, req.kind), "kind": req.kind,
+        "objective": _objective_of(res, None, None, None, req.kind), "kind": req.kind,
         "domain": list(_DOMAIN),
         "field": {"name": req.field, "shape": list(fld.shape),
                   "vmin": vmin, "vmax": vmax, "data": data.tolist()},
@@ -92,6 +94,7 @@ def explore_optimize(req: ExploreOptimizeRequest) -> dict:
 
     try:
         spec = grow_spec(req)
+        treegen.build(spec)                 # a setup that does not even build: say why
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from None
     n = int(req.search_nx)
@@ -105,6 +108,10 @@ def explore_optimize(req: ExploreOptimizeRequest) -> dict:
                              maxiter=req.maxiter, seed=req.seed)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from None
+    if not np.isfinite(r.start) and not np.isfinite(r.best):
+        raise HTTPException(422, "this setup does not solve (no perfused tissue — e.g. the "
+                                 "trees miss the tissue or it is too small for the grid); "
+                                 "grow it first and check the field")
     # the search ran on a coarser grid: re-score both setups at the user's resolution
     # and never hand back something worse than what they had there
     best_spec = treegen.with_values(spec, {k: r.values[k] for k in r.free})
@@ -112,6 +119,16 @@ def explore_optimize(req: ExploreOptimizeRequest) -> dict:
         start, best = r.start, r.best
     else:
         start, best = treegen.objective(spec, req.kind), treegen.objective(best_spec, req.kind)
+    if not best < start and (search.nx, search.ny) != (spec.nx, spec.ny):
+        # the coarse optimum did not carry over: polish at the user's resolution
+        try:
+            p = treegen.optimize(spec, kind=req.kind, free=req.free, method="local",
+                                 maxiter=min(req.maxiter, 8), seed=req.seed)
+        except ValueError:
+            p = None
+        if p is not None and p.best < start:
+            best_spec, best = treegen.with_values(spec, {k: p.values[k] for k in p.free}), p.best
+            r.n_eval += p.n_eval
     kept = not best < start
     if kept:
         best_spec, best = spec, start
@@ -172,7 +189,8 @@ def grow_spec(req: ExploreGrowRequest):
         fill_steps=req.fill_steps, n_points=req.n_points, step=req.step,
         influence=req.influence, close_loops=req.close_loops,
         n_terminals=req.n_terminals, leaf_radius=req.leaf_radius,
-        seed=req.seed, nx=nx, ny=req.ny)
+        seed=req.seed, nx=nx, ny=req.ny,
+        lesions=[le.model_dump() for le in req.lesions])
 
 
 def _voxels(pressure, mask, domain, budget=3500):
@@ -249,8 +267,11 @@ def explore_grow(req: ExploreGrowRequest) -> dict:
                         "vmin": float(fin.min()) if fin.size else 0.0,
                         "vmax": float(fin.max()) if fin.size else 1.0,
                         "data": np.where(np.isfinite(fld), fld, None).tolist()}
-    out["objective"] = _objective_of(res, res.grid, req.kind)
+    out["objective"] = _objective_of(res, spec, mask, domain, req.kind)
     out["kind"] = req.kind
+    lesion = treegen.lesion_stats(spec, res)
+    if lesion is not None:
+        out["lesion"] = lesion
     return out
 
 
@@ -307,6 +328,14 @@ def explore_to_project(req: ExploreProjectRequest, store=Depends(get_store)) -> 
         project.mask = np.asarray(mask, dtype=bool)
     else:
         project.regions = [outline]
+    # lesions travel along: their K as project lesions, their vessel density as
+    # growth hotspots (so regrowing in the project keeps them avascular / angiogenic)
+    project.lesions = [{"center": list(le.center), "radius": le.radius,
+                        "permeability": le.permeability}
+                       for le in req.lesions if le.permeability != 1.0]
+    project.hotspots = [{"center": list(le.center), "radius": le.radius,
+                         "weight": max(le.density, 1e-3)}
+                        for le in req.lesions if le.density != 1.0]
     store.save(project)
     page = (f"/viewer3d.html?project={project.id}" if req.dim == 3
             else f"/?project={project.id}")

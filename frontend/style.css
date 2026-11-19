@@ -117,6 +117,10 @@ select { width: 100%; margin-top: 3px; padding: 7px 9px; font-size: 13px; color:
 .tri-dn.ven { border-top: 8px solid var(--ven); }
 .dot.art { background: var(--art); }
 .dot.ven { background: var(--ven); }
+.dot.lesion-dot { background: #a21caf; }
+.lesion { border-top: 1px solid var(--line, #e5e7eb); padding-top: 6px; margin-top: 6px; }
+.lesion .roothead { display: flex; align-items: center; gap: 6px; }
+.lesion-del { margin-left: auto; padding: 0 6px; }
 
 /* stage */
 .stage { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }

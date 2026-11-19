@@ -842,7 +842,8 @@ def generate_trees(dim: int = 2, shape: str = "ellipse", generations: int = 4,
                    artery_root=None, vein_root=None, artery_direction=None,
                    vein_direction=None, artery_angle: float = 90.0, vein_angle: float = -90.0,
                    solve: bool = True, seed: int = 0, extent: float = 1.0,
-                   close_loops: bool = False, _return_model: bool = False) -> dict:
+                   close_loops: bool = False, lesions=None,
+                   _return_model: bool = False) -> dict:
     """Grow an arterial + venous tree into a tissue shape (2-D or 3-D) and solve.
 
     A fractal skeleton of ``generations`` branching levels starts at each root
@@ -854,6 +855,10 @@ def generate_trees(dim: int = 2, shape: str = "ellipse", generations: int = 4,
     bigger object). 3-D trees branch in twisting planes (truly volumetric).
     ``close_loops`` (colonisation fill) lets growing tips fuse with a nearby branch,
     forming vessel loops (each tree's ``loops`` stat counts them).
+    ``lesions`` — discs (2-D) / spheres (3-D) ``{center, radius, permeability,
+    density}`` with their own bed permeability K and vessel density (relative to
+    healthy tissue = 1; density 0 = avascular): growth avoids / favours them and the
+    Darcy solve uses their K; the result then reports the ``lesion`` perfusion.
     Returns per-tree stats and, with ``solve``, the perfused inflow."""
     from . import organs, treegen
 
@@ -875,7 +880,7 @@ def generate_trees(dim: int = 2, shape: str = "ellipse", generations: int = 4,
         dim=dim_, shape=shape, generations=int(np.clip(generations, 1, 10)),
         fill=fill, fill_steps=int(np.clip(fill_steps, 0, 400)),
         n_terminals=int(np.clip(n_terminals, 1, 600)), seed=seed, nx=20 if d3 else 60,
-        extent=e, close_loops=bool(close_loops),
+        extent=e, close_loops=bool(close_loops), lesions=_lesion_dicts(lesions),
         artery=treegen.TreeSpec(tuple(artery_root or anat["artery"]["root"]), a_ang, a_dir),
         vein=treegen.TreeSpec(tuple(vein_root or anat["vein"]["root"]), v_ang, v_dir,
                               radius=2.4, gamma=1.2))
@@ -889,7 +894,23 @@ def generate_trees(dim: int = 2, shape: str = "ellipse", generations: int = 4,
         q = res.solution.terminal_flux
         out["inflow"] = float(q[q > 0].sum())
         out["outflow"] = float(-q[q < 0].sum())
-        out["homogeneity"] = treegen.homogeneity(res)
+        out["homogeneity"] = treegen.homogeneity(
+            res, exclude=treegen.lesion_mask(spec, mask, domain))
+        lesion = treegen.lesion_stats(spec, res)
+        if lesion is not None:
+            out["lesion"] = lesion
+    return out
+
+
+def _lesion_dicts(lesions) -> list:
+    """Normalise MCP lesion input: ``{center, radius[, permeability=0.1][, density=1]}``."""
+    out = []
+    for le in lesions or []:
+        if "center" not in le or "radius" not in le:
+            raise ValueError("each lesion needs a center and a radius")
+        out.append({"center": [float(c) for c in le["center"]], "radius": float(le["radius"]),
+                    "permeability": float(le.get("permeability", 0.1)),
+                    "density": float(le.get("density", 1.0))})
     return out
 
 
@@ -1035,21 +1056,23 @@ def tissue_sweep(dim: int = 3, shape: str = "kidney", generations: int = 4,
 def optimize_tissue_trees(dim: int = 2, shape: str = "kidney", kind: str = "tof_std",
                           free=None, method: str = "local", maxiter: int = 15,
                           generations: int = 4, fill: str = "cco", n_terminals: int = 40,
-                          extent: float = 1.0, seed: int = 0) -> dict:
+                          extent: float = 1.0, seed: int = 0, lesions=None) -> dict:
     """Optimise artery + vein trees for homogeneous perfusion **in a given organ**
     (Paper D, organ-aware; 2-D or 3-D). Grows the organ's trees from its anatomical
     roots with ``fill``, then searches the ``free`` tunables (``a_gamma``, ``v_gamma``,
     ``length_to_radius``, ``exponent``, ``v_radius_scale``, 3-D ``twist``) to minimise
     the homogeneity objective ``kind`` (``tof_std``, ``tof_max``, ``flux_std``,
-    ``flux_range``, ``flux_l2``). Returns the before/after objective and best values."""
+    ``flux_range``, ``flux_l2``) over the healthy tissue (``lesions`` as in
+    :func:`generate_trees` shape growth and the bed but are left out of the score).
+    Returns the before/after objective and best values."""
     from . import treegen
 
     grown = generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
                            n_terminals=n_terminals, solve=False, seed=seed, extent=extent,
-                           _return_model=True)
+                           lesions=lesions, _return_model=True)
     spec = grown["_model"][0]
     r = treegen.optimize(spec, kind=kind, free=free, method=method,
-                         maxiter=int(np.clip(maxiter, 1, 60)), seed=seed)
+                         maxiter=int(np.clip(maxiter, 1, 200)), seed=seed)
     gain = (r.start - r.best) / r.start if np.isfinite(r.start) and r.start > 0 else 0.0
     return {"dim": spec.dim, "shape": shape, "kind": kind, "start": r.start, "best": r.best,
             "improvement": gain, "n_eval": r.n_eval, "free": r.free,
@@ -1489,7 +1512,8 @@ def build_server():
                              vein_direction: list[float] | None = None,
                              artery_angle: float = 90.0, vein_angle: float = -90.0,
                              solve: bool = True, seed: int = 0, extent: float = 1.0,
-                             close_loops: bool = False) -> dict:
+                             close_loops: bool = False,
+                             lesions: list[dict] | None = None) -> dict:
         """Grow artery + vein trees into a tissue shape in 2-D or 3-D: a fractal
         skeleton (`generations` levels) from placed roots, then a space-filling
         `fill` (colonization steps / CCO terminals). `close_loops` (colonization) lets
@@ -1498,31 +1522,37 @@ def build_server():
         kidney, brain, liver, lung, tongue, tumour, placenta, ellipse, rectangle,
         wedge; 3-D: heart, kidney, brain, liver, lung, tumour, ellipsoid, box,
         cylinder, hemisphere. `extent` scales the domain (>1 = bigger object). Returns
-        segment/terminal/Strahler stats per tree and the perfused inflow/outflow."""
+        segment/terminal/Strahler stats per tree and the perfused inflow/outflow.
+        `lesions`: discs (2-D) / spheres (3-D) `{center, radius, permeability, density}`
+        — tissue with its own bed permeability K and vessel density relative to healthy
+        = 1 (density 0 = avascular core, > 1 = angiogenic): growth follows the density,
+        the solve uses K, and the result adds `lesion` (flux inside vs healthy,
+        terminals inside)."""
         return generate_trees(dim=dim, shape=shape, generations=generations, fill=fill,
                               fill_steps=fill_steps, n_terminals=n_terminals,
                               artery_root=artery_root, vein_root=vein_root,
                               artery_direction=artery_direction,
                               vein_direction=vein_direction, artery_angle=artery_angle,
                               vein_angle=vein_angle, solve=solve, seed=seed, extent=extent,
-                              close_loops=close_loops)
+                              close_loops=close_loops, lesions=lesions)
 
     @server.tool()
     def optimize_trees_in_tissue(dim: int = 2, shape: str = "kidney", kind: str = "tof_std",
                                  free: list[str] | None = None, method: str = "local",
                                  maxiter: int = 15, generations: int = 4, fill: str = "cco",
                                  n_terminals: int = 40, extent: float = 1.0,
-                                 seed: int = 0) -> dict:
+                                 seed: int = 0, lesions: list[dict] | None = None) -> dict:
         """Optimise artery + vein trees for homogeneous perfusion in a chosen organ
         (2-D or 3-D; anatomical roots, space-filling `fill`). Varies `free` from
         a_gamma, v_gamma, length_to_radius, exponent, v_radius_scale, twist (3-D) to
         minimise `kind` (tof_std, tof_max, flux_std, flux_range, flux_l2); `method`
-        local (Nelder-Mead) or global (differential evolution). Returns before/after
-        objective and the best values."""
+        local (Nelder-Mead) or global (differential evolution). `lesions` (as in
+        grow_trees_in_tissue) shape growth and the bed and are left out of the score.
+        Returns before/after objective and the best values."""
         return optimize_tissue_trees(dim=dim, shape=shape, kind=kind, free=free,
                                      method=method, maxiter=maxiter, generations=generations,
                                      fill=fill, n_terminals=n_terminals, extent=extent,
-                                     seed=seed)
+                                     seed=seed, lesions=lesions)
 
     @server.tool()
     def tissue_perfusion_analysis(dim: int = 3, shape: str = "kidney", generations: int = 4,

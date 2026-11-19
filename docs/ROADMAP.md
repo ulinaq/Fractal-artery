@@ -739,6 +739,19 @@ Editing 3-D trees by hand is now done too (§11.4).
   and never returns a worse setup; **📤 Use optimised trees in simulation** hands it to
   the workspace / 3-D viewer; MCP `optimize_trees_in_tissue`. (The thesis-frame
   `optimize.optimize_tree` / MCP `optimize_tree_config` remain for Paper D.)
+  **Fixed:** the coarse 2-D search grew *different* trees (attraction points were drawn
+  from the Darcy-grid mask), so its optimum rarely held at the user's resolution and the
+  page reported "kept yours"; growth now samples a fixed raster
+  (`treegen.growth_mask`), 2-D searches at the user's grid, 3-D polishes at full
+  resolution when needed, an unsolvable setup gives a clear 422 and validation errors
+  read as text. Also fixed: colonisation stalled when the fractal skeleton overshot the
+  organ (3-D kidney grew nothing) — it now sprouts from the trunk nodes within reach.
+- ✅ **Explorer lesions** — discs / spheres with their own bed permeability K and
+  vessel density (0 = avascular, > 1 = angiogenic), 2-D and 3-D: growth sampling follows
+  the density, the Darcy bed uses K, the homogeneity objective / optimiser score the
+  healthy tissue, the summary reports lesion vs healthy flux and terminals inside; a
+  *Lesions* card (drag centre / rim in 2-D), carried into projects (lesions + hotspots);
+  MCP `grow_trees_in_tissue` / `optimize_trees_in_tissue(lesions=)`.
 
 ## 11.4 Platform & UI
 

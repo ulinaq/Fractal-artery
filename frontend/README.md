@@ -105,10 +105,14 @@ no separate dev server.
   colonisation (growth steps, attraction points, step length, influence radius) or
   CCO (terminals) — then see the solved field, Strahler orders and inflow.
   *Animate growth* replays it generation by generation, then step by step.
+  **Lesions** — ＋ Add lesion places a disc (2-D) / sphere (3-D) with its own bed
+  permeability K and vessel density (0 = avascular core, > 1 = angiogenic rim); drag
+  its centre / rim handle in 2-D. Growth follows the density, the solve uses K, and the
+  summary shows the lesion's flux relative to healthy tissue and the terminals inside.
   **Optimise trees** (`POST /explore/optimize`) tunes the ticked branching parameters
-  for the chosen homogeneity objective in the current organ setup (2-D or 3-D),
-  searching on a coarser grid and re-scoring at your resolution (your settings are
-  kept if nothing beats them); **📤 Use optimised trees in simulation** opens the
+  for the chosen homogeneity objective (over the healthy tissue) in the current organ
+  setup (2-D or 3-D) — 2-D at your own resolution, 3-D on a capped grid and re-scored
+  at yours (your settings are kept if nothing beats them); **📤 Use optimised trees in simulation** opens the
   result as a project — the 2-D workspace or the 3-D viewer.
   **📤 Open as project** saves the setup as a project (`POST /explore/project`):
   2-D → this workspace (editable), 3-D → the 3-D viewer (run, grow / prune / adapt,

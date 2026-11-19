@@ -50,6 +50,19 @@
         <p class="muted d3">Drag to rotate · scroll to zoom · right-drag or Space+drag to pan.</p>
       </details>
 
+      <details class="card" id="lesion-card">
+        <summary>Lesions</summary>
+        <p class="muted">A lesion is a disc (2-D) / sphere (3-D) of tissue with its own
+          <b>bed permeability K</b> (the Darcy solve) and <b>vessel density</b> (where
+          growth sends vessels: 0 = avascular, &gt; 1 = angiogenic), both relative to
+          healthy tissue = 1. <span class="d2"><b>Drag</b> a lesion's centre to move it and
+          its rim handle to resize it.</span> The homogeneity objective and the optimiser
+          score the healthy tissue only.</p>
+        <div id="lesion-list"></div>
+        <button id="btn-lesion-add" title="add a lesion at the centre of the tissue">＋ Add lesion</button>
+        <p class="muted" id="lesion-info"></p>
+      </details>
+
       <details class="card" open>
         <summary>Domain &amp; resolution</summary>
         <label>object size (domain scale) <span class="rv" id="v-extent"></span>
@@ -222,7 +235,7 @@
             <option value="global">global (differential evolution)</option>
           </select>
         </label>
-        <label>max iterations <input id="maxiter" type="number" value="15" min="1" max="60" /></label>
+        <label>max iterations <input id="maxiter" type="number" value="15" min="1" max="200" /></label>
         <button id="btn-opt" class="primary">Optimise trees</button>
         <p class="muted" id="opt-info"></p>
         <button id="btn-opt-use" hidden title="open the optimised trees + tissue as a project in the simulation page">📤 Use optimised trees in simulation</button>

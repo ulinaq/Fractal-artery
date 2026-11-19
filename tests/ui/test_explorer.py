@@ -170,7 +170,10 @@ def test_3d_viewer_multicompartment_uncertainty_and_calibration(page, server):
     page.click("#v3-cal")
     page.wait_for_function("document.querySelector('#v3-cal-out').textContent"
                            ".includes('solves')", timeout=120000)
-    assert page.inner_text("#v3-cal-out").startswith("p_in = 12.")   # 1.2 × the inflow
+    import re
+
+    p_in = float(re.match(r"p_in = ([0-9.]+)", page.inner_text("#v3-cal-out"))[1])
+    assert p_in == pytest.approx(12.0, rel=0.01)    # 1.2 × the (rounded) inflow target
     assert not errors
 
 
@@ -288,7 +291,7 @@ def _3d_project(server, name):
     import httpx
 
     return httpx.post(server + "/explore/project", timeout=60, json={
-        "dim": 3, "shape": "heart", "fill": "cco", "n_terminals": 12, "generations": 3,
+        "dim": 3, "shape": "heart", "fill": "cco", "n_terminals": 30, "generations": 3,
         "nx": 16, "name": name}).json()["id"]
 
 
@@ -538,5 +541,36 @@ def test_explorer_close_loops_counts_loops(page, server):
     assert "loops" not in page.inner_text("#summary")
     page.check("#close-loops")
     page.wait_for_function("document.querySelector('#summary').textContent.includes('loops')",
+                           timeout=60000)
+    assert not page.errors
+
+
+def test_explorer_lesion_changes_growth_and_perfusion(page, server):
+    """Add a lesion: it defaults to avascular + low K, the summary reports its
+    perfusion; making it angiogenic draws vessels in; removing it clears the stats."""
+    import re
+
+    page.goto(server + "/explorer.html")
+    _ready(page)
+    page.select_option("#shape2", "kidney")
+    _ready(page)
+    page.click("#lesion-card summary")
+    page.click("#btn-lesion-add")
+    page.wait_for_function("document.querySelector('#lesion-info').textContent.includes('terminals')",
+                           timeout=60000)
+    assert "lesion flux / healthy" in page.text_content("#summary")
+
+    def inside():
+        return int(re.search(r"(\d+) vessel terminals inside", page.inner_text("#lesion-info"))[1])
+
+    avascular = inside()
+    page.fill("#lesion-list input[data-k='density']", "5")
+    page.dispatch_event("#lesion-list input[data-k='density']", "change")
+    page.wait_for_function(f"!document.querySelector('#lesion-info').textContent"
+                           f".includes(' {avascular} vessel terminals')", timeout=60000)
+    _ready(page)
+    assert inside() > avascular
+    page.click(".lesion-del")
+    page.wait_for_function("!document.querySelector('#summary').textContent.includes('lesion')",
                            timeout=60000)
     assert not page.errors
