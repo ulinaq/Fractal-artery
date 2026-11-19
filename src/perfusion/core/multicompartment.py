@@ -22,13 +22,13 @@ uses the 3-D TPFA operator and bump source, and fields keep the mask's shape.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
-from .darcy import Grid, mollifier, reconstruct_field, tpfa_operator
+from .darcy import Grid, mollifier, reconstruct_field, tpfa_operator, with_permeability
 
 
 def _is_3d(grid) -> bool:
@@ -57,14 +57,27 @@ def multicompartment_operator(grid: Grid, permeabilities, betas) -> sp.csc_matri
     """Block ``(N·n) × (N·n)`` operator for ``N`` exchange-coupled Darcy compartments.
 
     ``permeabilities`` is the per-compartment scalar ``K_c`` (length ``N``); ``betas``
-    the exchange coefficients between adjacent compartments (length ``N−1``). Each
+    the exchange coefficients between adjacent compartments (length ``N−1``, each
+    > 0 — a zero leaves a compartment stack uncoupled and singular). A heterogeneous
+    grid keeps its pattern: compartment ``c`` is the grid rescaled to ``K_c``
+    (:func:`perfusion.core.darcy.with_permeability`), so lesions apply to every
+    compartment. Each
     diagonal block is the TPFA operator for that compartment plus the exchange it
     participates in (on active cells only); off-diagonal blocks are the exchange.
     """
+    permeabilities, betas = np.atleast_1d(permeabilities), np.atleast_1d(betas)
+    if permeabilities.size < 1 or (permeabilities <= 0).any():
+        raise ValueError("every compartment needs a permeability > 0")
+    if betas.size != permeabilities.size - 1:
+        raise ValueError(f"{permeabilities.size} compartments need "
+                         f"{permeabilities.size - 1} exchange coefficients, got {betas.size}")
+    if (betas <= 0).any():
+        raise ValueError("exchange coefficients must be > 0 (β = 0 decouples the "
+                         "compartments and the bed becomes singular)")
     n = grid.n_cells
     active = grid.mask.ravel(order="F").astype(float)
     vol = grid.cell_volume
-    ls = [_tpfa(replace(grid, permeability=float(k))) for k in permeabilities]
+    ls = [_tpfa(with_permeability(grid, k)) for k in permeabilities]
 
     n_comp = len(permeabilities)
     diag_add = [np.zeros(n) for _ in range(n_comp)]

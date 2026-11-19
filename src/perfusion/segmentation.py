@@ -99,7 +99,9 @@ def _trace_edges(skel, node_label, is_node, is_link, dist, pixel_size):
             if a == b or a < 0 or b < 0:
                 continue                      # self-loop or dangling
             rows, cols = zip(*path, strict=False)
-            length = pixel_size * (len(path) - 1)
+            # arc length of the traced pixel path: a diagonal step is √2, not 1
+            steps = np.diff(np.asarray(path, dtype=float), axis=0)
+            length = pixel_size * float(np.hypot(steps[:, 0], steps[:, 1]).sum())
             radius = pixel_size * float(np.mean(dist[list(rows), list(cols)]))
             edges.append((a, b, length, max(radius, pixel_size)))
     return edges

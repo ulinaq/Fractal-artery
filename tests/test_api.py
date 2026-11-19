@@ -1937,7 +1937,10 @@ def test_3d_project_flow_kinetics_and_oxygen(client):
         v = client.get(f"/projects/{pid}/view3d?field={field}").json()
         assert v["pressure"]["name"] == field
         assert v["pressure"]["voxels"], field
-    assert 0 < client.get(f"/projects/{pid}/view3d?field=saturation&k=2").json()["oef"] < 1
+    oefs = [client.get(f"/projects/{pid}/view3d?field=saturation&k={k}").json()["oef"]
+            for k in (1, 5)]
+    assert 0 < oefs[0] < oefs[1] < 1          # ?k= reaches the solve (it was overwritten
+    assert oefs[0] == pytest.approx(ox["oef"])  # by the voxel stride) and matches /oxygen
     assert client.get(f"/projects/{pid}/view3d?field=nope").status_code == 422
 
 

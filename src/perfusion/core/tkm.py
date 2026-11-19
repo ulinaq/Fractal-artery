@@ -30,10 +30,17 @@ class TKMResult:
     curve: np.ndarray | None = None  # fitted tissue concentration
 
 
+def _lag(t: np.ndarray) -> np.ndarray:
+    """Time since the first sample: the impulse response is a function of the lag,
+    so a time axis that does not start at 0 must not shift (or underflow) it."""
+    t = np.asarray(t, dtype=float)
+    return t - t[0]
+
+
 def one_compartment(t: np.ndarray, ca: np.ndarray, Fp: float, vp: float) -> np.ndarray:
     """1CM tissue concentration: C = Fp e^{-t Fp/vp} ⊛ ca (Eq. 3.16)."""
     dt = t[1] - t[0]
-    imp = Fp * np.exp(-t * Fp / max(vp, 1e-9))
+    imp = Fp * np.exp(-_lag(t) * Fp / max(vp, 1e-9))
     return _convolve(imp, ca, dt)
 
 
@@ -42,7 +49,7 @@ def two_compartment_uptake(t, ca, Fp, vp, PS) -> np.ndarray:
     dt = t[1] - t[0]
     Tp = vp / max(Fp + PS, 1e-9)
     EF = PS / max(Fp + PS, 1e-9)
-    imp = Fp * ((1.0 - EF) * np.exp(-t / max(Tp, 1e-9)) + EF)
+    imp = Fp * ((1.0 - EF) * np.exp(-_lag(t) / max(Tp, 1e-9)) + EF)
     return _convolve(imp, ca, dt)
 
 
@@ -58,7 +65,8 @@ def two_compartment_exchange(t, ca, Fp, vp, PS, ve) -> np.ndarray:
     x2 = -0.5 * (a + disc)
     denom = x1 - x2 if abs(x1 - x2) > 1e-12 else 1e-12
     A = (x1 + (PS / vp + PS / ve)) / denom
-    imp = Fp * (A * np.exp(x1 * t) + (1.0 - A) * np.exp(x2 * t))
+    tau = _lag(t)
+    imp = Fp * (A * np.exp(x1 * tau) + (1.0 - A) * np.exp(x2 * tau))
     return _convolve(imp, ca, dt)
 
 

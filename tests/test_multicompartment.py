@@ -50,3 +50,29 @@ def test_three_compartment_interfaces_match(prm, grid):
 def test_beta_length_validated(prm, grid):
     with pytest.raises(ValueError, match="betas must have length"):
         run_multicompartment(prm, grid, permeabilities=(1.0, 0.5), betas=(1.0, 1.0))
+
+
+def test_compartments_keep_a_lesion_permeability_field(prm, grid):
+    # Each compartment used replace(grid, permeability=K_c), erasing the lesion.
+    from dataclasses import replace
+
+    from perfusion.core.multicompartment import multicompartment_operator
+
+    k = np.ones((grid.nx, grid.ny))
+    k[20:30, 25:35] = 0.05
+    lesion = replace(grid, permeability=k)
+    a_lesion = multicompartment_operator(lesion, (1.0, 0.5), (1.0,))
+    a_plain = multicompartment_operator(grid, (1.0, 0.5), (1.0,))
+    assert abs(a_lesion - a_plain).max() > 0
+    m = run_multicompartment(prm, lesion, permeabilities=(1.0, 0.5), betas=(1.0,),
+                             domain_limit=(-70, 70, 0, 160))
+    assert np.isclose(m.solution.terminal_flux.sum(), 0.0, atol=1e-8)
+
+
+def test_zero_exchange_is_rejected(grid):
+    from perfusion.core.multicompartment import multicompartment_operator
+
+    with pytest.raises(ValueError, match="exchange coefficients must be > 0"):
+        multicompartment_operator(grid, (1.0, 0.5), (0.0,))
+    with pytest.raises(ValueError, match="permeability > 0"):
+        multicompartment_operator(grid, (1.0, -1.0), (1.0,))

@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 from scipy.optimize import minimize_scalar
 
-from .core.darcy import Grid
+from .core.darcy import Grid, with_permeability
 from .core.geometry import Network
 from .core.parameters import Parameters
 
@@ -67,7 +67,7 @@ def calibrate(target: float, param: str, grid: Grid, bounds: tuple[float, float]
         kw = dict(base)
         g = grid
         if param == "permeability":
-            g = replace(grid, permeability=float(x))
+            g = with_permeability(grid, x)
         elif param in _PARAM_FIELDS:
             kw[param] = float(x)
         else:
@@ -197,8 +197,8 @@ def fit_dce(times, tissue, aif, grid: Grid, params: dict, *, base: dict | None =
         key = tuple(round(float(vals[n]), 12) for n in flow_names)
         if key not in flows:
             kw = {**base, **{n: vals[n] for n in flow_names if n not in ("permeability",)}}
-            g = grid if "permeability" not in vals else replace(grid,
-                                                                permeability=vals["permeability"])
+            g = grid if "permeability" not in vals else with_permeability(
+                grid, vals["permeability"])
             flows[key] = solver(Parameters(**kw), g)
         return simulate_tissue_curve(flows[key], times, aif, porosity=vals.get("porosity"))
 

@@ -146,3 +146,16 @@ def test_osvd_is_delay_insensitive():
     # block-circulant oSVD is (near-)invariant to a bolus arrival delay; sSVD is not
     assert osvd_shift < 0.02
     assert osvd_shift < ssvd_shift
+
+
+def test_fit_does_not_depend_on_the_time_origin(timeline):
+    # The impulse response is a function of the lag; a clock that starts at t = 10
+    # used to shift (and underflow) it, returning the initial guess.
+    t, aif = timeline
+    C = tkm.one_compartment(t, aif, Fp=0.8, vp=0.2)
+    for model in ("1CM", "2CUM", "2CXM"):
+        a = tkm.fit(t, aif, C, model)
+        b = tkm.fit(t + 10.0, aif, C, model)
+        assert b.Fp == pytest.approx(a.Fp, rel=1e-6)
+        assert b.vp == pytest.approx(a.vp, rel=1e-6)
+    assert tkm.fit(t + 10.0, aif, C, "1CM").Fp == pytest.approx(0.8, rel=1e-2)

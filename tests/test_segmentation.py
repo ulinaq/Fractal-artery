@@ -78,3 +78,14 @@ def test_load_frog_system():
     assert system.artery.n_segments == system.artery.n_nodes - 1
     assert system.vein.n_segments >= system.vein.n_nodes
     assert system.grid.mask.shape == system.mask.shape
+
+
+def test_diagonal_vessel_length_is_its_arc_length():
+    # A diagonal pixel step is sqrt(2), not 1: a 45-degree vessel was ~29 % short.
+    img = np.zeros((80, 80), dtype=np.uint8)
+    for i in range(10, 70):
+        img[i - 2:i + 2, i - 2:i + 2] = 255
+    net = seg.segment_network(img, min_size=5)
+    ends = net.positions(np.flatnonzero(net.node_degree == 1))
+    chord = float(np.linalg.norm(ends[0] - ends[1]))
+    assert net.seg_length.sum() == pytest.approx(chord, rel=0.08)

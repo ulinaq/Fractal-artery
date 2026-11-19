@@ -80,3 +80,39 @@ def test_spread_coincident_resolves_duplicates(grid):
     cells = np.array([100, 100, 100, 205, 205])
     spread = _spread_coincident(grid, cells)
     assert len(np.unique(spread)) == len(spread)
+
+
+def test_terminals_map_to_the_cell_that_contains_them():
+    # Cell i spans [xmin + i h, xmin + (i+1) h): arteries used ceil (a MATLAB
+    # 1-based leftover) and landed one cell up and right of the veins.
+    from perfusion import Grid
+    from perfusion.core.geometry import network_from_polylines
+    from perfusion.core.pipeline import _terminal_cells
+
+    grid = Grid(nx=10, ny=10, lx=10, ly=10)
+    art = network_from_polylines([[(0.5, 0.2), (3.5, 6.5)]], radii=1.0, root_xy=(0.5, 0.2))
+    ven = network_from_polylines([[(9.5, 9.8), (3.5, 6.5)]], radii=1.0, root_xy=(9.5, 9.8))
+    a, v = _terminal_cells(grid, art, ven, (0, 10, 0, 10), strict=True)
+    assert a == grid.sub2ind(3, 6)
+    assert v != a                             # coincident -> spread to a neighbour
+    # the last column is inside the grid, so strict mode must accept it
+    art_edge = network_from_polylines([[(0.5, 0.2), (9.9, 9.9)]], radii=1.0,
+                                      root_xy=(0.5, 0.2))
+    (a_edge, _) = _terminal_cells(grid, art_edge, ven, (0, 10, 0, 10), strict=True)
+    assert a_edge in (grid.sub2ind(9, 9), grid.sub2ind(8, 9), grid.sub2ind(9, 8))
+
+
+def test_elasticity_and_phase_separation_combine(grid):
+    # They were an if/elif pair: asking for both silently dropped phase separation.
+    import warnings
+
+    from perfusion import Parameters, run_hybrid
+
+    prm = Parameters(seed=0, r_min_frac=0.5, compliance=0.02, radius_to_um=20.0,
+                     fahraeus_lindqvist=True)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        el = run_hybrid(prm, grid, elasticity=True)
+        both = run_hybrid(prm, grid, elasticity=True, phase_separation=True)
+    assert not np.isclose(el.solution.q_a[0], both.solution.q_a[0], rtol=1e-6)
+    assert both.solution.q_a[0] == pytest.approx(both.solution.q_v[0], rel=1e-6)

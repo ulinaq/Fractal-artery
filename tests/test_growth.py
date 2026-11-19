@@ -303,3 +303,28 @@ def test_close_loops_in_3d():
     assert net.is_3d
     assert n_loops(net) >= 1
     assert net.n_segments == net.n_nodes - 1 + n_loops(net)
+
+
+def test_cco_keeps_loops_and_tolerates_reversed_segments():
+    # CCO built parents as parent[seg_end] = seg_start: loops were dropped and a
+    # reversed segment broke the tree (zero radii, lost segments).
+    import dataclasses
+
+    from perfusion.core.anastomosis import add_anastomoses, n_loops
+
+    tree = growth.grow_network(_default_art(), _default_points(), max_iter=12)
+    looped, _ = add_anastomoses(tree, n_links=2)
+    pool = _default_points(n=600, seed=3)
+    grown = growth.cco_grow(looped, pool, n_terminals=30)
+    assert n_loops(grown) == 2
+    assert np.all(grown.seg_radius > 0)
+
+    base = _default_art()
+    s = int(base.leaf_segments(base.terminal_nodes[:1])[0][0])
+    ss, se = base.seg_start.copy(), base.seg_end.copy()
+    ss[s], se[s] = se[s], ss[s]
+    rev = dataclasses.replace(base, seg_start=ss, seg_end=se)
+    a = growth.cco_grow(base, pool, n_terminals=30)
+    b = growth.cco_grow(rev, pool, n_terminals=30)
+    assert b.n_segments == a.n_segments == b.n_nodes - 1
+    assert np.all(b.seg_radius > 0)

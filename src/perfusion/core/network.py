@@ -103,10 +103,12 @@ class _Layout:
         columns of the Darcy response matrix.
         """
         ta, tv = self.art.terminal_nodes, self.ven.terminal_nodes
-        art_cols = self.qa + self.art.incoming_segment[ta]
-        ven_cols = self.qv + self.ven.incoming_segment[tv]
-        columns = np.concatenate([art_cols, ven_cols])
-        signs = np.concatenate([np.ones(len(ta)), -np.ones(len(tv))])
+        seg_a, orient_a = self.art.leaf_segments(ta)
+        seg_v, orient_v = self.ven.leaf_segments(tv)
+        columns = np.concatenate([self.qa + seg_a, self.qv + seg_v])
+        # arterial flux out of the tree = flow into the leaf (+q at a seg_end leaf);
+        # venous q is positive toward the root, so a seg_end leaf drains −q.
+        signs = np.concatenate([orient_a, -orient_v])
         return columns, signs, ta, tv
 
 
@@ -314,8 +316,16 @@ def _junction_geometry(net: Network):
     has_parent = parent >= 0
     cos_phi = np.zeros(net.n_segments)
     p = parent[has_parent]
-    cos_phi[has_parent] = np.cos(
-        3.0 * (net.seg_angle[has_parent] - net.seg_angle[p]) / 4.0)
+    if net.is_3d:
+        # the turning angle between parent and child directions (seg_angle is a
+        # planar angle and means nothing for a 3-D tree)
+        xyz = net.positions()
+        d = xyz[net.seg_end] - xyz[net.seg_start]
+        d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-300)
+        dtheta = np.arccos(np.clip(np.einsum("ij,ij->i", d[has_parent], d[p]), -1.0, 1.0))
+    else:
+        dtheta = net.seg_angle[has_parent] - net.seg_angle[p]
+    cos_phi[has_parent] = np.cos(3.0 * dtheta / 4.0)
     return {"parent": parent, "has_parent": has_parent, "cos_phi": cos_phi,
             "r": net.seg_radius}
 

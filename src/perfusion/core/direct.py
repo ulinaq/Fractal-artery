@@ -65,7 +65,7 @@ def connect_terminals(art: Network, ven: Network, rho_c: float,
         near = within[i]
         if not near:                                   # fall back to the single nearest
             near = [int(ven_tree.query(art_xy[i])[1])]
-        r_terminal = art.seg_radius[art.incoming_segment[a]]
+        r_terminal = art.seg_radius[art.leaf_segments([a])[0][0]]
         radius = r_terminal * len(near) ** (-1.0 / 3.0)
         for j in near:
             length = float(np.linalg.norm(art_xy[i] - ven_xy[j]))
@@ -119,20 +119,23 @@ def solve_direct(art: Network, ven: Network, connections: list[Connection],
     Ca = sp.csr_matrix((np.ones(nc), (ca_rows, conn_col)), shape=(len(ta), nc))
     Cv = sp.csr_matrix((np.ones(nc), (cv_rows, conn_col)), shape=(len(tv), nc))
 
-    # selection of the terminal-feeding segment flow (q at incoming segment)
-    sel_a = sp.csr_matrix((np.ones(len(ta)),
-                           (np.arange(len(ta)), art.incoming_segment[ta])),
-                          shape=(len(ta), ma))
-    sel_v = sp.csr_matrix((np.ones(len(tv)),
-                           (np.arange(len(tv)), ven.incoming_segment[tv])),
-                          shape=(len(tv), mv))
+    # flow reaching each terminal through its (single) segment: orient · q, where
+    # orient = +1 if the leaf is the segment's end node, −1 if its start node
+    seg_a, orient_a = art.leaf_segments(ta)
+    seg_v, orient_v = ven.leaf_segments(tv)
+    sel_a = sp.csr_matrix((orient_a, (np.arange(len(ta)), seg_a)), shape=(len(ta), ma))
+    sel_v = sp.csr_matrix((orient_v, (np.arange(len(tv)), seg_v)), shape=(len(tv), mv))
 
-    root_a = sp.csr_matrix(([1.0], ([0], [pa + art.root_node])), shape=(1, size))
+    # one Dirichlet row per prescribed-pressure node (inlets p_in, outlets p_out)
+    ia, iv = art.inlet_nodes, ven.inlet_nodes
+    root_a = sp.csr_matrix((np.ones(len(ia)), (np.arange(len(ia)), pa + ia)),
+                           shape=(len(ia), size))
     pois_a = pad(Sa, pa, na) + pad(-sp.diags(Ra), qa, ma)
     cons_a = pad(Sa.T.tocsr()[art.bifurcation_nodes, :], qa, ma)
     term_a = pad(sel_a, qa, ma, n_rows=len(ta)) + pad(-Ca, qc, nc, n_rows=len(ta))
 
-    root_v = sp.csr_matrix(([1.0], ([0], [pv + ven.root_node])), shape=(1, size))
+    root_v = sp.csr_matrix((np.ones(len(iv)), (np.arange(len(iv)), pv + iv)),
+                           shape=(len(iv), size))
     pois_v = pad(-Sv, pv, nv) + pad(-sp.diags(Rv), qv, mv)
     cons_v = pad(Sv.T.tocsr()[ven.bifurcation_nodes, :], qv, mv)
     term_v = pad(sel_v, qv, mv, n_rows=len(tv)) + pad(-Cv, qc, nc, n_rows=len(tv))
@@ -149,8 +152,9 @@ def solve_direct(art: Network, ven: Network, connections: list[Connection],
     A = sp.vstack([root_a, pois_a, cons_a, term_a,
                    root_v, pois_v, cons_v, term_v, conn_pois], format="csr")
     b = np.zeros(size)
-    b[0] = p_in
-    b[1 + ma + len(art.bifurcation_nodes) + len(ta)] = p_out  # root_v row
+    b[:len(ia)] = p_in
+    v0 = len(ia) + ma + len(art.bifurcation_nodes) + len(ta)  # first root_v row
+    b[v0:v0 + len(iv)] = p_out
 
     x = spla.spsolve(A, b)
     return DirectSolution(

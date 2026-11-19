@@ -801,3 +801,27 @@ Editing 3-D trees by hand is now done too (§11.4).
   ~3× faster. Each step is still one vectorised `O(n)` nearest-segment scan.
 - ✅ ~~Vectorise `network_transit.arrival_times` edge construction~~ — edges are built as
   arrays and relaxed through a CSR adjacency with `np.minimum.at`; identical arrival times.
+
+## 11.6 Code review — correctness & robustness (Nov 2026)
+
+A four-area review (core, API, service layers + MCP, frontend) found ~60 issues; they
+are being fixed in four PRs.
+
+- ✅ **Physics correctness** — terminal flux sign from the topology (reversed hand-drawn
+  vessels and leaf roots gave wrong / pressure-valued fluxes); the direct model pins every
+  inlet/outlet; 2-D arterial terminals on the right cell (`floor`, not MATLAB `ceil`;
+  reference regenerated: q −0.01 %, TOF σ −4 %); F-L clamped at 3 µm (was singular at
+  1.1 µm); TKM independent of the time origin; one shared flow stage (`solve_flow`) so
+  3-D honours F-L / elasticity / junction losses / phase separation, and elasticity +
+  phase separation combine; lesion K fields survive UQ, calibration, DCE fits and
+  multi-compartment (`with_permeability`); masks coerced to bool; segmented vessel length
+  is the arc length (diagonals √2); CCO keeps base loops and reversed segments; the 3-D
+  oxygen view honours `k`.
+- ☐ **API state & robustness** — jobs saving a stale copy over concurrent edits, RQ jobs
+  reaping each other, edits not invalidating results, input bounds (grid size,
+  `r_min_frac`, NaN coordinates, documents), 500 → 4xx, atomic blob writes, export temp
+  files.
+- ☐ **Frontend** — one shared job poller (stops on `interrupted` / HTTP errors), HTML
+  escaping of user names, per-project state reset, request-race guards.
+- ☐ **MCP** — shared input validation and an organ-model helper (mcp_server.py ~1,000
+  lines of repeated organ bodies).

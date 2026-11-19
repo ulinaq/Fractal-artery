@@ -35,3 +35,22 @@ def test_hematocrit_monotonic():
     low = viscosity.apparent_viscosity(30.0, hematocrit=0.30)
     high = viscosity.apparent_viscosity(30.0, hematocrit=0.60)
     assert high > low
+
+
+def test_small_diameters_are_clamped_not_singular():
+    # (D/(D-1.1))^2 is singular at 1.1 um; below the clamp every value is the clamp's
+    d = np.array([0.4, 1.0, 1.1, 1.2, 2.0, viscosity.FL_MIN_DIAMETER_UM])
+    with pytest.warns(RuntimeWarning, match="radius_to_um"):
+        mu = viscosity.apparent_viscosity(d)
+    assert np.all(np.isfinite(mu))
+    assert np.allclose(mu, viscosity.apparent_viscosity(viscosity.FL_MIN_DIAMETER_UM))
+
+
+def test_viscosity_never_falls_as_vessels_narrow_below_ten_microns():
+    d = np.linspace(viscosity.FL_MIN_DIAMETER_UM - 2, 10.0, 60)
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        mu = viscosity.apparent_viscosity(d)
+    assert np.all(np.diff(mu) <= 1e-12)            # monotone: narrower is never thinner
