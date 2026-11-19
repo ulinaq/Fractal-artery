@@ -285,6 +285,13 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   with actionable messages (empty mask, mask split into disconnected Darcy regions,
   `p_in == p_out`); `jobs._describe_error` surfaces those verbatim and adds a
   traceback tail for unexpected errors. The frontend shows it in a styled box.
+- **Frontend I/O** (`frontend/net.js`): every page fetches through `fetchJSON` and waits
+  for jobs with `pollJob`/`submitJob`, which always resolve to done/error (an
+  `interrupted` job, a 404 or a lost server end the wait — never a hand-rolled poll
+  loop). Any user/server text put into `innerHTML` goes through `escapeHtml`. Map loads
+  take a ticket (`run.js` `fetchMap`, `viewer3d.js` `loadTicket`) so a slow, older
+  response never overwrites a newer one; `state.field` is only ever a base field
+  (pressure/flux/tof) — a derived map's name lives in `state.fieldLabel`.
 - **Viewport** (`frontend/viewport.js`): every canvas fills its stage (HiDPI) with
   zoom/pan/fit. Map coordinates only through `toCanvas`/`toDomain` (workspace,
   `core.js`) or the explorer's `tc`/`td` — never through raw canvas width/height.

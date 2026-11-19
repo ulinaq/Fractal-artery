@@ -239,7 +239,7 @@ function paintHeatmap(data, nx, ny, vmin, vmax, ramp = viridis) {
 function drawField() {
   const { shape, data, vmin, vmax, delta } = state.fieldData;
   paintHeatmap(data, shape[0], shape[1], vmin, vmax, delta ? diverging : viridis);
-  updateColorbar(vmin, vmax, state.field, delta ? DIVERGING : VIRIDIS);
+  updateColorbar(vmin, vmax, state.fieldLabel || state.field, delta ? DIVERGING : VIRIDIS);
 }
 
 // Vessels tab: the editable networks with node handles, the selection and a

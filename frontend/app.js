@@ -6,7 +6,7 @@
 // and Result. This module owns project lifecycle, history, modes and wiring.
 
 import {
-  canvas, DOMAIN, GRID_L, api, state, status, $, numOf, onViewChange, setDomain, vp,
+  canvas, DOMAIN, api, state, status, $, numOf, onViewChange, setDomain, vp,
 } from "./core.js";
 import { redraw } from "./render.js";
 import {
@@ -22,9 +22,10 @@ import {
 import {
   adapt, addLoops, computeFlow, fitKinetics, grow, loadField, loadKineticMap, loadMorphometry,
   loadMulticompartment, loadNetwork, loadOxygen, loadResultView, pauseFlow, prune, run,
-  runTransient, runUQ, stopFlow, stopTimer, syncFlowUI, toggleFlowPlay, loadDeltaField,
+  runTransient, runUQ, stopFlow, syncFlowUI, toggleFlowPlay, loadDeltaField,
 } from "./run.js";
 import { createCompare } from "./compare.js";
+import { escapeHtml } from "./net.js";
 import { mountDceFit } from "./dcefit.js";
 
 // ── undo / redo (workspace geometry history) ───────────────────────────────────
@@ -135,22 +136,30 @@ function resetGeometry() {
   $("cmp-bout").innerHTML = "";
   $("cmp-snap").innerHTML = '<option value="">no baseline yet</option>';
   ["cmp-snap", "cmp-run", "cmp-del"].forEach((id) => ($(id).disabled = true));
+  // every analysis panel still shows the previous project's output — clear it all
+  ["uq-out", "morph-out"].forEach((id) => ($(id).innerHTML = ""));
+  ["mc-info", "o2-info", "adapt-info", "prune-info", "loop-info", "img-info", "grow-info",
+   "ttd-info", "tkm-info"].forEach((id) => ($(id).textContent = ""));
+  ["ttd", "tkm-chart", "tr-chart"].forEach((id) => {
+    const c = $(id); c.getContext("2d").clearRect(0, 0, c.width, c.height);
+  });
+  state.fieldLabel = state.field;
+  dce.load().catch(() => {});             // the new project's own fit (or an empty panel)
   clearEditDirty(); clearTissueDirty();
 }
 
 async function newProject() {
   const w = Math.max(10, numOf("dom-w")), h = Math.max(10, numOf("dom-h"));
-  setDomain(0, w, 0, h);
   const body = {
     name: $("proj-name").value || "workspace",
     params: { p_in: numOf("p_in"), p_out: numOf("p_out"),
               r_min_frac: numOf("r_min_frac"), seed: numOf("seed") },
-    grid: { nx: numOf("nx"), ny: numOf("ny"), ...GRID_L,
-            domain_limit: [DOMAIN.xmin, DOMAIN.xmax, DOMAIN.ymin, DOMAIN.ymax] },
+    grid: { nx: numOf("nx"), ny: numOf("ny"), lx: w, ly: h, domain_limit: [0, w, 0, h] },
   };
   const ky = numOf("perm_y");
   if (ky && ky !== 1) body.grid.permeability_y = ky;   // anisotropic capillary bed (Kx = 1)
   const p = await api("POST", "/projects", body);
+  setDomain(0, w, 0, h);         // only once the server accepted it (a 422 keeps the open project)
   state.project = p.id;
   resetGeometry();
   stopFlow(); state.tracer = null; state.hasResult = false;
@@ -165,9 +174,10 @@ async function newProject() {
 }
 
 function showProjectLink(id) {
-  const url = `${location.origin}/?project=${id}`;
-  $("proj-id").innerHTML = `project <a href="${url}" title="shareable link">${id}</a>`;
-  $("link-3d").href = `/viewer3d.html?project=${id}`;    // 3-D view keeps this project
+  const q = encodeURIComponent(id);                       // the id may come from the URL
+  const url = `${location.origin}/?project=${q}`;
+  $("proj-id").innerHTML = `project <a href="${escapeHtml(url)}" title="shareable link">${escapeHtml(id)}</a>`;
+  $("link-3d").href = `/viewer3d.html?project=${q}`;    // 3-D view keeps this project
 }
 
 async function loadFrog() {
@@ -203,13 +213,13 @@ async function saveToFile() {
 async function loadFromFile() {
   const file = $("file-load").files[0];
   if (!file) return;
+  $("file-load").value = "";      // allow picking the same (fixed) file again, even after an error
   status("loading project file…");
   let doc;
   try { doc = JSON.parse(await file.text()); }
   catch { status("not a valid project .json file", "err"); return; }
   const info = await api("POST", "/projects/import", doc);
   await openProject(info.id);
-  $("file-load").value = "";                 // allow re-loading the same file
   status(`loaded “${info.name}” from file`, "ok");
 }
 
@@ -300,7 +310,7 @@ export function setMode(mode) {
   document.querySelectorAll(".card[data-mode]").forEach((c) => {
     c.style.display = c.dataset.mode === mode ? "" : "none";
   });
-  if (mode !== "result") stopTimer();
+  if (mode !== "result") pauseFlow();          // (also resets the ⏸ button to ▶)
   canvas.style.cursor = mode === "result" ? "default" : "crosshair";
   syncEditPanel(); syncTissuePanel();
   redraw();
@@ -331,6 +341,8 @@ document.addEventListener("keydown", (e) => {
   const t = e.target;
   if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;   // don't hijack typing in fields
   const m = state.mode, k = e.key.toLowerCase();
+  // geometry edits wait for a running job (it reads the stored geometry)
+  if (state.busy && (["Delete", "Backspace", "Enter"].includes(e.key) || k === "i")) return;
   let handled = true;
   if (e.key === "Delete" || e.key === "Backspace") {
     if (m === "vessels") deleteSelectedNode();

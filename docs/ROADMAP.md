@@ -824,7 +824,13 @@ are being fixed in four PRs.
   bounded, documents + graph edits validated (422 instead of a later 500); synchronous
   re-solves return 400/422; atomic blob writes; per-export temp dirs cleaned after the
   response; upload size / pixel caps; grow folds the strokes it started from.
-- ☐ **Frontend** — one shared job poller (stops on `interrupted` / HTTP errors), HTML
-  escaping of user names, per-project state reset, request-race guards.
+- ✅ **Frontend** — `net.js`: one fetch helper and one job poller for every page (ends
+  on `interrupted` / 404 / lost server instead of spinning with the UI locked); HTML
+  escaping of baseline / experiment names and the project link (stored XSS); request
+  tickets so slow map responses can't overwrite newer ones (2-D + 3-D); a derived map
+  no longer breaks the next Run; saving tissue drops the stale result in the UI; panels,
+  DCE fit and video links reset per project; 3-D undo keeps its step while saving;
+  explorer animation can't double-run and opens projects inside the click (popup
+  blockers).
 - ☐ **MCP** — shared input validation and an organ-model helper (mcp_server.py ~1,000
   lines of repeated organ bodies).

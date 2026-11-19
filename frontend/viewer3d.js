@@ -4,6 +4,7 @@
 
 import { divergingCss, viridisCss } from "./palette.js";
 import { createCompare } from "./compare.js";
+import { errorText, fetchJSON, submitJob } from "./net.js";
 import { mountDceFit } from "./dcefit.js";
 import { createViewport } from "./viewport.js";
 import { uqHtml } from "./uqview.js";
@@ -43,7 +44,12 @@ async function load() {
 const OXYGEN = new Set(["saturation", "consumption"]);
 const anim = { idx: 0, playing: true, last: 0 };     // tracer (flow video) playback
 
+// Field / k / compartment changes each reload the scene and can overlap (an oxygen
+// solve is slow): every call takes a ticket and only the newest one may draw.
+let loadTicket = 0;
+
 async function loadProject() {
+  const mine = ++loadTicket;
   $("model-row").style.display = "none";     // project mode: no demo picker
   $("gen-row").style.display = "none";
   const field = $("v3-field").value;
@@ -56,10 +62,11 @@ async function loadProject() {
                                   n: $("v3-mc-n").value || 3, beta: $("v3-mc-beta").value || 1 });
   if (field.startsWith("d_") && compare) q.set("snapshot", compare.selected());
   const r = await fetch(`/projects/${PROJECT}/view3d?${q}`);
+  if (mine !== loadTicket) return;                     // superseded by a newer request
   if ((r.status === 409 || r.status === 422) && field !== "pressure") {   // not available yet
     const j = await r.clone().json().catch(() => ({}));
     $("status").textContent = field.startsWith("d_")
-      ? (typeof j.detail === "string" ? j.detail : "keep a baseline in Compare runs first")
+      ? (j.detail ? errorText(j.detail) : "keep a baseline in Compare runs first")
       : "compute the 🌊 flow first for tracer fields";
     $("status").className = "status err";
     $("v3-field").value = "pressure";
@@ -68,10 +75,12 @@ async function loadProject() {
   if (!r.ok) {
     const j = await r.json().catch(() => ({}));
     $("status").textContent = r.status === 404 ? "project not found"
-      : typeof j.detail === "string" ? j.detail : "3-D view unavailable";
+      : j.detail ? errorText(j.detail) : "3-D view unavailable";
     $("status").className = "status err"; return;
   }
-  setData(await r.json());
+  const payload = await r.json();
+  if (mine !== loadTicket) return;
+  setData(payload);
   if (data.direct) $("v3-model").value = "direct";      // reflect the stored result's model
   if (data.tracer || data.net_tracer) startAnimation();
   else $("v3-play-row").hidden = true;
@@ -166,24 +175,10 @@ function showFrame() {
 }
 
 // POST a job (run / tracer) and wait for it; returns the final job record.
-async function runJob(path, body = {}) {
-  const job = await (await fetch(`/projects/${PROJECT}/${path}`, {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).json();
-  let st = job;
-  while (st.state !== "done" && st.state !== "error") {
-    await new Promise((r) => setTimeout(r, 400));
-    st = await (await fetch(`/jobs/${job.id}`)).json();
-  }
-  return st;
-}
+// (a rejected request or an interrupted job resolves as state "error", never hangs)
+const runJob = (path, body = {}) => submitJob(`/projects/${PROJECT}/${path}`, body);
 
-async function postJSON(path, body) {
-  const r = await fetch(`/projects/${PROJECT}/${path}`, {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : `${path} failed (${r.status})`);
-  return j;
-}
+const postJSON = (path, body) => fetchJSON("POST", `/projects/${PROJECT}/${path}`, body);
 
 async function run3d() {
   const btn = $("v3-run"); btn.disabled = true;
@@ -221,7 +216,9 @@ async function flow3d() {
         + ` · last arrival t = ${f(Math.max(...arr, 0))}`;
       return;
     }
-    const k = await (await fetch(`/projects/${PROJECT}/kinetics?model=1CM`)).json();
+    let k;
+    try { k = await fetchJSON("GET", `/projects/${PROJECT}/kinetics?model=1CM`); }
+    catch (e) { $("v3-kin").textContent = `kinetics fit failed: ${e.message}`; return; }
     $("v3-kin").textContent = `1-compartment fit of the tissue curve: Fp = ${f(k.Fp)}, vp = ${f(k.vp)}`
       + " · pick Fp / vp / CBV / MTT for voxel maps";
   } finally { btn.disabled = false; }

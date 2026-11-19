@@ -6,6 +6,7 @@
 // The canvas fills the stage and zooms/pans over the physical window (see
 // viewport.js). W/H are its logical (CSS-pixel) size — live bindings, updated
 // on resize — and toCanvas/toDomain include the current zoom + pan.
+import { fetchJSON } from "./net.js";
 import { createViewport } from "./viewport.js";
 
 // the physical window — per project (Parameters → domain size; restored on open)
@@ -36,19 +37,15 @@ export const toDomain = (px, py) => vp.toDomain(px, py);
 export const zoomPx = () => vp.scale / 6.4;
 
 // ── tiny API client ───────────────────────────────────────────────────────────
-export async function api(method, path, body) {
-  const opt = { method, headers: {} };
-  if (body !== undefined) { opt.headers["content-type"] = "application/json"; opt.body = JSON.stringify(body); }
-  const r = await fetch(path, opt);
-  if (!r.ok) throw new Error(`${method} ${path} → ${r.status} ${(await r.text()).slice(0, 200)}`);
-  return r.status === 204 ? null : r.json();
-}
+// throws an Error carrying the server's (readable) message and .status
+export const api = (method, path, body) => fetchJSON(method, path, body);
 
 // ── application state ───────────────────────────────────────────────────────
 export const state = {
   project: null,
   mode: "vessels",           // "vessels" | "tissue" | "result"
-  field: "pressure",
+  field: "pressure",         // the base result field shown / reloaded (pressure|flux|tof)
+  fieldLabel: "pressure",    // what the colour bar calls the map on screen (Δ, O₂, Fp, …)
   vessels: { arteries: [], veins: [] },   // legacy hand-drawn polylines (vectorized on open)
   regions: [],               // tissue outline polygons (domain coords) -> mask
   lesions: [],               // low-K patches: {polygon:[[x,y]...], permeability}

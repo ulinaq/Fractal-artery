@@ -280,3 +280,56 @@ def test_grow_with_loop_closure(page, server):
     wait_status(page, "solved", "failed", timeout=120000)
     assert "solved" in page.inner_text("#status")
     assert not page.errors
+
+
+def test_baseline_names_are_shown_as_text_never_markup(page, server):
+    """A kept baseline's name is user text: it used to go into innerHTML raw, so a
+    name with markup ran script for anyone opening the shared project link."""
+    _new_project(page, server)
+    page.click("#btn-run")
+    wait_status(page, "solved", "failed", timeout=120000)
+    evil = '<img src=x onerror="window.__xss = 1">'
+    page.fill("#cmp-name", evil)
+    page.click("#cmp-keep")
+    page.wait_for_function("document.querySelector('#cmp-info').textContent.includes('kept')")
+    assert page.inner_text("#cmp-snap") == evil
+    page.click("#cmp-run")
+    page.wait_for_selector("#cmp-out table.cmp")
+    assert evil in page.inner_text("#cmp-out")
+    assert page.evaluate("document.querySelectorAll('#cmp-snap img, #cmp-out img').length") == 0
+    assert page.evaluate("window.__xss") is None
+    assert not page.errors
+
+
+def test_rerun_after_viewing_a_derived_map(page, server):
+    """An O₂ (or Δ / kinetic) map used to overwrite state.field with its label, so the
+    next Run asked the server for the field "O₂ saturation" and failed with a 404."""
+    _new_project(page, server)
+    page.click("#btn-run")
+    wait_status(page, "solved", "failed", timeout=120000)
+    page.click("details:has(#btn-o2-sat) > summary")     # open the (collapsed) O₂ card
+    page.click("#btn-o2-sat")
+    page.wait_for_function("document.querySelector('#o2-info').textContent.includes('OEF')",
+                           timeout=60000)
+    assert page.inner_text("#cb-title") == "O₂ saturation"
+    page.click("#btn-run")
+    wait_status(page, "solved", "failed", timeout=120000)
+    # ("solved" shows before the field reloads: wait for the colour bar to follow)
+    page.wait_for_function("['pressure', 'flux', 'tof'].includes("
+                           "document.querySelector('#cb-title').textContent)", timeout=60000)
+    assert "solved" in page.inner_text("#status")
+    assert not page.errors
+
+
+def test_an_interrupted_job_ends_the_run_instead_of_locking_the_ui(page, server):
+    """The pollers only stopped on done/error: a job reaped to `interrupted` (server
+    restart) spun forever with every button disabled."""
+    _new_project(page, server)
+    page.route("**/jobs/*", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body='{"id": "x", "state": "interrupted", "project_id": "p", "error": null}'))
+    page.click("#btn-run")
+    wait_status(page, "failed", timeout=30000)
+    assert "restarted" in page.inner_text("#run-info")
+    assert not page.is_disabled("#btn-run")             # the UI is usable again
+    assert not page.errors

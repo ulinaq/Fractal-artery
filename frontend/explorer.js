@@ -91,7 +91,11 @@ async function post(path, body) {
 
 // coalesce bursts of changes into one in-flight request + one queued
 let busy = false, queued = null;
+// growth animation: `animating` gates evaluate(); `animRun` identifies the current run,
+// so a stop + restart while the old loop sleeps cannot leave two loops interleaving
+let animating = false, animRun = 0;
 async function evaluate(over = {}) {
+  if (animating) return;                // the animation owns the view; it re-evaluates at the end
   if (busy) { queued = over; return; }
   busy = true;
   syncLabels();
@@ -472,7 +476,7 @@ canvas.addEventListener("dblclick", (e) => {
 document.addEventListener("keydown", (e) => {
   const t = e.target;
   if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
-  if ((e.key === "Delete" || e.key === "Backspace") && S.sel != null && S.data.dim === 2) {
+  if ((e.key === "Delete" || e.key === "Backspace") && S.sel != null && S.data && S.data.dim === 2) {
     ensureCustom();
     if (S.polygon.length <= 3) { status("the tissue outline needs at least 3 points", "err"); return; }
     S.polygon.splice(S.sel, 1); S.sel = null;
@@ -675,10 +679,10 @@ $("btn-reseed").addEventListener("click", () => { $("seed").value = num("seed") 
 $("btn-reset").addEventListener("click", () => location.reload());
 
 // ── animate: replay growth generation by generation, then fill step by step ────
-let animating = false;
 async function animate() {
-  if (animating) { animating = false; return; }
+  if (animating) { animating = false; animRun++; return; }
   animating = true;
+  const run = ++animRun;
   const btn = $("btn-animate"); btn.textContent = "■ Stop";
   const G = num("generations"), fill = $("fill").value;
   const frames = [];
@@ -692,13 +696,16 @@ async function animate() {
   }
   try {
     for (const f of frames) {
-      if (!animating) break;
-      setData(await post("/explore/grow", request({ ...f, solve: false })));
+      if (run !== animRun) break;
+      const d = await post("/explore/grow", request({ ...f, solve: false }));
+      if (run !== animRun) break;                     // stopped while this frame loaded
+      setData(d);
       showStats();
       status(f.generations ? `generation ${f.generations} / ${G}` : `filling: ${f.fill_steps ?? f.n_terminals}`, "ok");
       await new Promise((r) => setTimeout(r, 260));
     }
   } catch (e) { status(e.message, "err"); }
+  if (run !== animRun && animating) return;          // a newer run owns the button now
   animating = false; btn.textContent = "▶ Animate growth";
   evaluate();
 }
@@ -708,14 +715,20 @@ $("btn-animate").addEventListener("click", animate);
 async function toProject(tag = "") {
   const btn = $("btn-project"); btn.disabled = true;
   status("creating project…");
+  // open the tab now, inside the click — a window.open after an await is no longer a
+  // user gesture and popup blockers drop it; it is pointed at the project once made
+  const win = window.open("", "_blank");
   try {
     const shape = S.dim === 3 ? $("shape3").value : (S.polygon ? "custom" : $("shape2").value);
     const name = `${tag ? tag + " " : ""}explorer ${shape} (${S.dim}-D)`;
     const made = await post("/explore/project", { ...request({ solve: false }), name });
     status("project created", "ok");
-    window.open(made.open, "_blank");
-  } catch (e) { status(e.message, "err"); }
-  finally { btn.disabled = false; }
+    if (win) win.location.href = made.open;
+    else window.location.href = made.open;            // popups blocked: open it here
+  } catch (e) {
+    if (win) win.close();
+    status(e.message, "err");
+  } finally { btn.disabled = false; }
 }
 $("btn-project").addEventListener("click", () => toProject());
 

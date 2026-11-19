@@ -156,8 +156,9 @@ export function createEditor3d(o) {
   }
 
   ed.undo = async () => {
+    if (ed.busy) return;                  // a save is in flight: keep the step for later
     const prev = ed.history.pop();
-    if (!prev || ed.busy) return;
+    if (!prev) return;
     const changed = KINDS.filter((k) => JSON.stringify(prev[k]) !== JSON.stringify(ed.model[k]));
     ed.sel = null;
     for (const k of changed) {

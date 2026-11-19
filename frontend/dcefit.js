@@ -3,6 +3,7 @@
 // container: paste CSV (t, tissue, aif) or take this project's own tracer curve,
 // tick the inputs to fit (+ bounds), Fit → a job of full forward simulations, then
 // the fitted values ± standard errors, R², warnings and measured-vs-model curves.
+import { submitJob } from "./net.js";
 
 const INPUTS = [
   ["p_in", "p_in (flow)", 1, 50, true],
@@ -99,16 +100,7 @@ export function mountDceFit(box, { projectId, prefix }) {
     $("go").disabled = true;
     $("info").textContent = "fitting… (each step is a full simulation)";
     try {
-      const r = await fetch(`/projects/${projectId()}/fit-dce`, {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...data, params }) });
-      const job = await r.json();
-      if (!r.ok) throw new Error(typeof job.detail === "string" ? job.detail : "fit failed");
-      let st = job;
-      while (st.state !== "done" && st.state !== "error") {
-        await new Promise((res) => setTimeout(res, 400));
-        st = await (await fetch(`/jobs/${job.id}`)).json();
-      }
+      const st = await submitJob(`/projects/${projectId()}/fit-dce`, { ...data, params });
       if (st.state === "error") throw new Error(st.error || "fit failed");
       show(await (await fetch(`/projects/${projectId()}/fit-dce`)).json());
       $("info").textContent = "";
