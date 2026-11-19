@@ -2427,3 +2427,72 @@ def test_every_solve_path_gets_the_snapped_legacy_inlets(tmp_path):
     assert leaf in art.inlet_nodes.tolist()
     ad = runner.adapt_network(store.get(pid), n_iter=2)
     assert leaf in ad.art.inlet_nodes.tolist()
+
+
+# --------------------------------------------------------------------------- #
+# Long analyses as background jobs (?background=true → GET /jobs/{id}/result)
+# --------------------------------------------------------------------------- #
+def _job_result(client, started):
+    assert started["state"] == "pending"
+    job = _wait_for_job(client, started["id"], timeout=120)
+    return job, client.get(f"/jobs/{started['id']}/result")
+
+
+def test_uq_and_calibration_run_as_background_jobs(client):
+    pid = client.post("/projects", json={"name": "bg", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    uq = {"n_samples": 6, "params": {"p_in": [8, 12]}}
+    sync = client.post(f"/projects/{pid}/uq", json=uq).json()
+    job, r = _job_result(client, client.post(f"/projects/{pid}/uq?background=true",
+                                             json=uq).json())
+    assert job["state"] == "done"
+    assert job["kind"] == "uq"
+    assert r.status_code == 200
+    assert r.json()["mean"] == pytest.approx(sync["mean"])          # same answer
+    cal = {"target": 0.1, "param": "p_in", "bounds": [1, 50]}
+    job, r = _job_result(client, client.post(f"/projects/{pid}/calibrate?background=true",
+                                             json=cal).json())
+    assert job["state"] == "done"
+    assert r.json()["achieved"] == pytest.approx(0.1, rel=0.02)
+    # a bad option fails the job with a clean message (no traceback) and no result
+    job, r = _job_result(client, client.post(
+        f"/projects/{pid}/uq?background=true",
+        json={"n_samples": 6, "params": {"nonsense": [1, 2]}}).json())
+    assert job["state"] == "error"
+    assert "where:" not in job["error"]
+    assert r.status_code == 409
+
+
+def test_background_analysis_refuses_an_unbuildable_model_up_front(client):
+    pid = client.post("/projects", json={"name": "bad", "grid": SMALL_GRID,
+                                         "params": {"p_in": 5, "p_out": 5}}).json()["id"]
+    r = client.post(f"/projects/{pid}/uq?background=true",
+                    json={"n_samples": 6, "params": {"mu": [1, 2]}})
+    assert r.status_code == 400
+    assert "no pressure drop" in r.text
+
+
+def test_explorer_optimise_as_a_background_job(client):
+    setup = {"dim": 2, "shape": "kidney", "fill": "cco", "n_terminals": 20,
+             "generations": 3, "nx": 40, "ny": 46, "kind": "tof_std", "maxiter": 3}
+    job, r = _job_result(client, client.post("/explore/optimize?background=true",
+                                             json=setup).json())
+    assert job["state"] == "done"
+    assert job["project_id"] == "explore"
+    o = r.json()
+    assert o["best"] <= o["start"] + 1e-9
+    assert o["n_eval"] > 0
+    # the setup is still validated before queueing
+    assert client.post("/explore/optimize?background=true",
+                       json={"kind": "nope"}).status_code == 422
+
+
+def test_job_result_errors(client):
+    assert client.get("/jobs/nope/result").status_code == 404
+    pid = client.post("/projects", json={"name": "j", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    r = client.get(f"/jobs/{jid}/result")                # a run stores on the project
+    assert r.status_code == 404
+    assert "no result document" in r.text

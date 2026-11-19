@@ -4,7 +4,7 @@
 
 import { divergingCss, viridisCss } from "./palette.js";
 import { createCompare } from "./compare.js";
-import { errorText, fetchJSON, submitJob } from "./net.js";
+import { errorText, fetchJSON, runAnalysis, submitJob } from "./net.js";
 import { mountDceFit } from "./dcefit.js";
 import { createViewport } from "./viewport.js";
 import { uqHtml } from "./uqview.js";
@@ -275,7 +275,8 @@ async function uq3d() {
   $("v3-uq").disabled = true;
   out.textContent = `running ${ns} 3-D solves…`;
   try {
-    const d = await postJSON("uq", { n_samples: ns, params, method: sobol ? "sobol" : "correlation" });
+    const d = await runAnalysis(`/projects/${PROJECT}/uq`,
+      { n_samples: ns, params, method: sobol ? "sobol" : "correlation" });
     out.innerHTML = uqHtml(d);
   } catch (e) { out.textContent = e.message; } finally { $("v3-uq").disabled = false; }
 }
@@ -291,7 +292,7 @@ async function calibrate3d() {
   $("v3-cal").disabled = true;
   out.textContent = "searching (one 3-D solve per step)…";
   try {
-    const d = await postJSON("calibrate", { target, param, qoi,
+    const d = await runAnalysis(`/projects/${PROJECT}/calibrate`, { target, param, qoi,
       bounds: [Number($("v3-cal-lo").value), Number($("v3-cal-hi").value)] });
     const f = (v) => (Math.abs(v) < 1e-3 || Math.abs(v) > 1e4 ? v.toExponential(3) : v.toPrecision(4));
     const err = Math.abs(d.achieved - d.target) / (Math.abs(d.target) || 1);

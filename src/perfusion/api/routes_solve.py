@@ -125,6 +125,24 @@ def job_status(jid: str, jobs=Depends(get_jobs)) -> JobInfo:
         raise HTTPException(404, f"job {jid!r} not found") from None
 
 
+@router.get("/jobs/{jid}/result")
+def job_result(jid: str, jobs=Depends(get_jobs),
+               store: ProjectStore = Depends(get_store)) -> dict:
+    """The JSON result of a finished analysis job (UQ, calibration, explorer
+    optimise). 404 for an unknown job, 409 while it runs or if it failed."""
+    try:
+        job = jobs.get(jid)
+    except KeyError:
+        raise HTTPException(404, f"job {jid!r} not found") from None
+    if job["state"] != "done":
+        raise HTTPException(409, job.get("error") or f"job is {job['state']}")
+    payload = store.load_job_result(jid)
+    if payload is None:
+        raise HTTPException(404, "this job has no result document (run / tracer jobs "
+                                 "store theirs on the project)")
+    return payload
+
+
 @router.get("/projects/{pid}/results")
 def results(project: Project = Depends(get_project)) -> dict:
     if project.summary is None:
@@ -349,11 +367,25 @@ def oxygen_map(pid: str, field: str = "saturation", k: float = 1.0, c_art: float
             "oef": oef, "k": k}
 
 
+def _submit_analysis(jobs, project, kind: str, body) -> dict:
+    """Queue a long analysis as a job; a model that cannot even be built is refused
+    now (400) rather than failing later in the background."""
+    with solve_errors():
+        runner.validate_run(project, use_vessels=True)
+    jid = jobs.submit(project.id, kind, body.model_dump(mode="json"))
+    return {"id": jid, "state": "pending", "kind": kind}
+
+
 @router.post("/projects/{pid}/calibrate")
-def calibrate_parameter(body: CalibrateRequest, project: Project = Depends(get_project)) -> dict:
+def calibrate_parameter(body: CalibrateRequest, background: bool = False,
+                        project: Project = Depends(get_project),
+                        jobs=Depends(get_jobs)) -> dict:
     """Inverse problem: recover ``param`` so the model's ``qoi`` matches ``target``
     (bounded 1-D search over forward solves). Useful to fit permeability or inlet
-    pressure to a measured flow."""
+    pressure to a measured flow. ``background=true``: run it as a job (``{id, state}``;
+    the answer is ``GET /jobs/{id}/result``)."""
+    if background:
+        return _submit_analysis(jobs, project, "calibrate", body)
     try:
         return runner.calibrate(project, body.target, body.param, body.bounds, qoi=body.qoi)
     except runner.InputError as e:
@@ -363,11 +395,16 @@ def calibrate_parameter(body: CalibrateRequest, project: Project = Depends(get_p
 
 
 @router.post("/projects/{pid}/uq")
-def uncertainty_quantification(body: UQRequest, project: Project = Depends(get_project)) -> dict:
+def uncertainty_quantification(body: UQRequest, background: bool = False,
+                               project: Project = Depends(get_project),
+                               jobs=Depends(get_jobs)) -> dict:
     """Monte-Carlo uncertainty quantification: sample the given input ranges
     (Latin-hypercube), re-solve, and return each quantity of interest's
     mean/std/5-95 percentiles plus first-order sensitivities (Pearson r). Runs
-    ``n_samples`` full solves — keep the grid coarse and the sample count modest."""
+    ``n_samples`` full solves — keep the grid coarse and the sample count modest, or
+    pass ``background=true`` to run it as a job (result: ``GET /jobs/{id}/result``)."""
+    if background:
+        return _submit_analysis(jobs, project, "uq", body)
     try:
         return runner.uncertainty(project, body.params, n_samples=body.n_samples,
                                   seed=body.seed, method=body.method)

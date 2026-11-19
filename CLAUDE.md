@@ -293,6 +293,14 @@ After any change to the solvers or grid conventions, run `uv run pytest` and
   with actionable messages (empty mask, mask split into disconnected Darcy regions,
   `p_in == p_out`); `jobs._describe_error` surfaces those verbatim and adds a
   traceback tail for unexpected errors. The frontend shows it in a styled box.
+- **Long analyses are jobs**: `POST /projects/{id}/uq|calibrate` and `/explore/optimize`
+  take `?background=true` → `{id, state}`; the job (`jobs.ANALYSES`, run by
+  `jobs._run_analysis`) stores its JSON in `store.save_job_result` and
+  `GET /jobs/{id}/result` serves it (409 while running / failed). The model is checked
+  before queueing (`_submit_analysis` → `validate_run`; the explorer builds the spec),
+  so a bad setup is still an immediate 4xx. The explorer's logic is the plain
+  `routes_explore.optimize_setup`; explorer jobs use project id `"explore"`. The web
+  UI uses `net.runAnalysis`; the synchronous form stays for scripts.
 - **Frontend I/O** (`frontend/net.js`): every page fetches through `fetchJSON` and waits
   for jobs with `pollJob`/`submitJob`, which always resolve to done/error (an
   `interrupted` job, a 404 or a lost server end the wait — never a hand-rolled poll

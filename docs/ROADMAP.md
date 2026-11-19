@@ -843,3 +843,7 @@ are being fixed in four PRs.
   nodes; 2-D flux is NaN off the mask like 3-D; `validate_run` returns the trees with
   the legacy inlet points snapped, so adapt / UQ / calibration / oxygen solve with the
   same boundary nodes as a run (`run_adaptation(art_inlets=, ven_outlets=)`).
+- ✅ **Long analyses off the request** — UQ, calibration and the explorer's optimise run
+  as background jobs (`?background=true`, `GET /jobs/{id}/result`); the web UI no longer
+  holds a request open for minutes (proxies / timeouts) and a server restart reports the
+  job as interrupted instead of a dropped connection.

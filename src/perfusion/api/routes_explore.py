@@ -16,7 +16,7 @@ from .. import optimize
 from ..core.darcy import Grid
 from ..core.pipeline import run_hybrid
 from . import helpers
-from .deps import get_store
+from .deps import get_jobs, get_store
 from .schemas import (
     ExploreGrowRequest,
     ExploreOptimizeRequest,
@@ -83,35 +83,56 @@ def explore(req: ExploreRequest) -> dict:
 
 
 @router.post("/explore/optimize")
-def explore_optimize(req: ExploreOptimizeRequest) -> dict:
+def explore_optimize(req: ExploreOptimizeRequest, background: bool = False,
+                     jobs=Depends(get_jobs)) -> dict:
     """Optimise the current explorer setup — in its own organ, with its roots and
     fill, 2-D or 3-D — for the chosen homogeneity objective (``kind``). Returns the
     best tunables (load them into the explorer, or send the setup to the simulation
-    page via ``POST /explore/project``) and the before/after objective."""
-    from dataclasses import replace
+    page via ``POST /explore/project``) and the before/after objective.
 
+    A search is many full solves; ``background=true`` runs it as a job instead and
+    returns ``{id, state}`` — poll ``GET /jobs/{id}``, then read ``GET /jobs/{id}/result``.
+    The setup is still checked up front, so a bad one is a 422 either way."""
     from .. import treegen
 
     try:
-        spec = grow_spec(req)
-        treegen.build(spec)                 # a setup that does not even build: say why
+        treegen.build(grow_spec(req))       # a setup that does not even build: say why
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from None
+    if background:
+        jid = jobs.submit(EXPLORE_JOBS, "explore_optimize", req.model_dump(mode="json"))
+        return {"id": jid, "state": "pending", "kind": "explore_optimize"}
+    try:
+        return optimize_setup(req)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+
+
+EXPLORE_JOBS = "explore"     # the job registry's project id for explorer (project-less) jobs
+
+
+def optimize_setup(req: ExploreOptimizeRequest) -> dict:
+    """The explorer optimisation itself (a plain function: the endpoint and the
+    ``explore_optimize`` job both call it). Raises ``ValueError`` for a setup that
+    cannot be optimised."""
+    from dataclasses import replace
+
+    from .. import treegen
+    from .runner import InputError
+
+    spec = grow_spec(req)
     n = int(req.search_nx)
     if spec.dim == 3:
         search = replace(spec, nx=min(spec.nx, min(n, 32)))
     else:                                   # keep the aspect ratio of the user's grid
         nx = min(spec.nx, n)
         search = replace(spec, nx=nx, ny=max(12, round(spec.ny * nx / spec.nx)))
-    try:
-        r = treegen.optimize(search, kind=req.kind, free=req.free, method=req.method,
-                             maxiter=req.maxiter, seed=req.seed)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from None
+    r = treegen.optimize(search, kind=req.kind, free=req.free, method=req.method,
+                         maxiter=req.maxiter, seed=req.seed)
     if not np.isfinite(r.start) and not np.isfinite(r.best):
-        raise HTTPException(422, "this setup does not solve (no perfused tissue — e.g. the "
-                                 "trees miss the tissue or it is too small for the grid); "
-                                 "grow it first and check the field")
+        raise InputError("this setup does not solve (no perfused tissue — e.g. the trees "
+                         "miss the tissue or it is too small for the grid); grow it first "
+                         "and check the field")
     # the search ran on a coarser grid: re-score both setups at the user's resolution
     # and never hand back something worse than what they had there
     best_spec = treegen.with_values(spec, {k: r.values[k] for k in r.free})

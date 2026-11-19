@@ -5,7 +5,7 @@
 // Cross-module refs (app wires the buttons; edit reuses loadNetwork/stopFlow) are
 // resolved by ES-module live bindings — every call happens at runtime.
 import { $, api, getCss, numOf, state, status } from "./core.js";
-import { pollJob } from "./net.js";
+import { pollJob, runAnalysis } from "./net.js";
 import { redraw } from "./render.js";
 import { uqHtml } from "./uqview.js";
 import { loadEditable } from "./edit.js";
@@ -80,7 +80,7 @@ export async function runUQ() {
   status(`uncertainty: ${n} solves…`);
   let d;
   try {
-    d = await api("POST", `/projects/${state.project}/uq`,
+    d = await runAnalysis(`/projects/${state.project}/uq`,
       { n_samples: n, params, method: sobol ? "sobol" : "correlation" });
   } catch (e) { status(e.message, "err"); $("uq-out").textContent = e.message; return; }
   $("uq-out").innerHTML = uqHtml(d);

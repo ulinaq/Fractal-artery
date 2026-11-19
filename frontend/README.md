@@ -152,7 +152,7 @@ are vectorised into the network and points snap onto the nearest end nodes.
 | `index.html` | layout & controls |
 | `style.css`  | styling (no framework) |
 | `core.js`    | domain/canvas geometry, API client, shared state |
-| `net.js`     | shared by every page: `fetchJSON` (readable server errors), `pollJob` / `submitJob` (always end in done/error — `interrupted`, 404 and lost contact included), `escapeHtml` for any user/server text put into markup |
+| `net.js`     | shared by every page: `fetchJSON` (readable server errors), `pollJob` / `submitJob` (always end in done/error — `interrupted`, 404 and lost contact included), `escapeHtml` for any user/server text put into markup, `runAnalysis` (UQ / calibration / optimise as background jobs) |
 | `app.js`     | project lifecycle, history (undo/redo), tabs, keyboard, wiring |
 | `edit.js`    | Vessels tab: node/edge network editor + inlet/outlet nodes |
 | `tissue.js`  | Tissue tab: polygon (organ / lesion / hotspot) editor |

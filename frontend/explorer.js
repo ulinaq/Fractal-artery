@@ -2,6 +2,7 @@
 // (2-D or 3-D) from user-placed roots: a fractal skeleton of N generations, then an
 // optional space-filling growth (colonisation steps / CCO terminals). Every change
 // re-grows (and optionally re-solves) via POST /explore/grow. Self-contained.
+import { fetchJSON, runAnalysis } from "./net.js";
 import { VIRIDIS, viridis, viridisCss } from "./palette.js";
 import { createViewport } from "./viewport.js";
 
@@ -72,22 +73,7 @@ function request(over = {}) {
   };
 }
 
-async function post(path, body) {
-  const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" },
-                                body: JSON.stringify(body) });
-  if (!r.ok) {
-    let msg = (await r.text()).slice(0, 200);
-    try {
-      const j = JSON.parse(msg);
-      msg = typeof j.detail === "string" ? j.detail
-        : Array.isArray(j.detail)                 // pydantic: "maxiter: Input should be …"
-          ? j.detail.map((d) => `${(d.loc || []).filter((l) => l !== "body").join(".")}: ${d.msg}`).join("; ")
-          : JSON.stringify(j.detail);
-    } catch { /* raw */ }
-    throw new Error(msg);
-  }
-  return r.json();
-}
+const post = (path, body) => fetchJSON("POST", path, body);   // readable 4xx messages
 
 // coalesce bursts of changes into one in-flight request + one queued
 let busy = false, queued = null;
@@ -745,7 +731,7 @@ async function optimise() {
   try {
     const maxiter = Math.min(200, Math.max(1, Math.round(num("maxiter")) || 15));
     $("maxiter").value = maxiter;
-    const o = await post("/explore/optimize", {
+    const o = await runAnalysis("/explore/optimize", {
       ...request({ solve: true }), free, method: $("method").value, maxiter,
     });
     $("a-gamma").value = (+o.a_gamma).toFixed(3); $("v-gamma").value = (+o.v_gamma).toFixed(3);
