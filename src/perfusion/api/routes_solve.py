@@ -7,11 +7,11 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .. import io as perfio
 from . import helpers, runner
-from .deps import get_jobs, get_project, get_project_2d, get_store
+from .deps import get_jobs, get_project, get_project_2d, get_store, solve_errors
 from .schemas import (
     CalibrateRequest,
     DCEFitRequest,
@@ -341,7 +341,9 @@ def oxygen_map(pid: str, field: str = "saturation", k: float = 1.0, c_art: float
                             "field" if project.has_result else "no result yet; run first")
     if field not in _OXYGEN_FIELDS:
         raise HTTPException(404, f"field must be one of {_OXYGEN_FIELDS}")
-    array, oef = runner.oxygen_field(project, field, k=k, c_art=c_art, diffusivity=diffusivity)
+    with solve_errors():
+        array, oef = runner.oxygen_field(project, field, k=k, c_art=c_art,
+                                         diffusivity=diffusivity)
     data = np.where(np.isfinite(array), array, None)
     return {"name": field, "shape": list(array.shape), "data": data.tolist(),
             "oef": oef, "k": k}
@@ -382,18 +384,19 @@ def multicompartment_map(pid: str, field: str = "perfusion", n: int = 3, beta: f
     exchange ``beta``. ``field='perfusion'`` returns the arteriole→next exchange (the
     capillary perfusion map); ``field='comp0'..'comp{n-1}'`` a compartment pressure.
     Re-solves the coupled system — needs a solvable model (vessels or fractal trees)."""
-    try:
+    with solve_errors():
         array, _ = runner.multicompartment_field(project, field=field, n=n, beta=beta)
-    except runner.InputError as e:
-        raise HTTPException(400, str(e)) from None
     data = np.where(np.isfinite(array), array, None)
     return {"name": field, "shape": list(array.shape), "data": data.tolist(),
             "n": int(np.clip(n, 2, 5)), "beta": beta}
 
 
 @router.get("/projects/{pid}/transient")
-def transient_response(pid: str, period: float = 1.0, pulse: float = 0.5,
-                       compliance: float = 0.02, cycles: int = 4, proximal: float = 0.1,
+def transient_response(pid: str, period: float = Query(1.0, gt=0),
+                       pulse: float = Query(0.5, ge=0, le=1),
+                       compliance: float = Query(0.02, gt=0),
+                       cycles: int = Query(4, ge=1, le=20),
+                       proximal: float = Query(0.1, ge=0, lt=1),
                        project: Project = Depends(get_project)) -> dict:
     """Pulsatile (Windkessel) response over one cardiac cycle.
 
@@ -495,7 +498,9 @@ def project_view3d(pid: str, field: str = "pressure", k: float = 1.0, n: int = 3
     ``mc_arteriole`` / ``mc_venule`` (an ``n``-compartment bed with exchange ``beta``:
     the capillary exchange, or the first / last compartment pressure)."""
     if project.grid.is_3d:
-        return _view3d_volume(project, store, field, k=k, n=n, beta=beta, snapshot=snapshot)
+        with solve_errors():
+            return _view3d_volume(project, store, field, k=k, n=n, beta=beta,
+                                  snapshot=snapshot)
     grid, dom = runner.build_grid(project)
     x0, x1, y0, y1 = dom
     art, ven = runner.build_networks(project, use_vessels=True, defaults=True)
@@ -509,7 +514,7 @@ def project_view3d(pid: str, field: str = "pressure", k: float = 1.0, n: int = 3
     segments = segs(art, 0) + segs(ven, 1)
     voxels, pmin, pmax, relief = [], 0.0, 0.0, 35.0
     zmax = 1.0
-    if project.has_result:
+    if store.result_path(pid).exists():          # a direct result has no field to show
         p = store.result_field(pid, "pressure")
         mask = grid.mask if grid.mask is not None else np.ones((grid.nx, grid.ny), bool)
         finite = np.isfinite(p) & mask
@@ -631,6 +636,18 @@ def _view3d_direct(project, store, field: str, out: dict) -> dict:
     return out
 
 
+def _export_dir():
+    """A private temp directory for one export + the background task that removes it
+    after the response is sent (fixed names in the shared temp dir let two exports of
+    one project overwrite each other mid-download, and were never cleaned up)."""
+    import shutil
+
+    from starlette.background import BackgroundTask
+
+    d = Path(tempfile.mkdtemp(prefix="perfusion-export-"))
+    return d, BackgroundTask(shutil.rmtree, d, ignore_errors=True)
+
+
 @router.get("/projects/{pid}/export")
 def export(pid: str, fmt: str = "npz", project: Project = Depends(get_project),
            store: ProjectStore = Depends(get_store)):
@@ -639,9 +656,11 @@ def export(pid: str, fmt: str = "npz", project: Project = Depends(get_project),
     name = project.name or project.id
     if fmt == "vtp":       # vessel-network PolyData (tubes) — no solved field needed
         net, _ = runner.build_networks(project, use_vessels=True, defaults=True)
-        out = Path(tempfile.gettempdir()) / f"perfusion_{pid}.vtp"
+        tmp, cleanup = _export_dir()
+        out = tmp / "vessels.vtp"
         perfio.network_to_vtp(net, out)
-        return FileResponse(out, media_type="application/xml", filename=f"{name}.vtp")
+        return FileResponse(out, media_type="application/xml", filename=f"{name}.vtp",
+                            background=cleanup)
     _require_field_result(project, store)
     if fmt == "npz":       # the stored blob is already the npz export
         return FileResponse(store.result_path(pid), media_type="application/octet-stream",
@@ -651,14 +670,15 @@ def export(pid: str, fmt: str = "npz", project: Project = Depends(get_project),
     with np.load(store.result_path(pid)) as d:
         dl, mask = tuple(d["domain_limit"]), d["mask"]
         fields = {"pressure": d["pressure"], "flux": d["flux"], "tof": d["tof"]}
-    out = Path(tempfile.gettempdir()) / f"perfusion_{pid}.{fmt}"
+    tmp, cleanup = _export_dir()
+    out = tmp / f"fields.{fmt}"
     if fmt == "csv":
         perfio.fields_to_csv(out, dl, mask=mask, **fields)
         media = "text/csv"
     else:
         perfio.fields_to_vtk(out, dl, mask=mask, **fields)
         media = "application/xml"
-    return FileResponse(out, media_type=media, filename=f"{name}.{fmt}")
+    return FileResponse(out, media_type=media, filename=f"{name}.{fmt}", background=cleanup)
 
 
 def _require_field_result(project, store) -> None:
@@ -671,13 +691,24 @@ def _require_field_result(project, store) -> None:
                                  "hybrid model")
 
 
+def _add_video(z, fname: str, render, tracer, scene) -> None:
+    """Add one tracer video to the bundle zip. A missing extra (GIF needs ``image``,
+    MP4 ``video``) skips it; any other failed encode is noted instead of losing the
+    whole bundle to a 500."""
+    try:
+        z.writestr(fname, render(tracer, scene=scene))
+    except ImportError:
+        pass
+    except Exception as exc:
+        z.writestr(f"{fname}.error.txt", f"{type(exc).__name__}: {exc}\n")
+
+
 @router.get("/projects/{pid}/bundle")
 def export_bundle(pid: str, project: Project = Depends(get_project),
                   store: ProjectStore = Depends(get_store)):
     """One zip with everything: npz + CSV + VTK fields (2-D or 3-D), summary/meta
     JSON, and — if a tracer exists — its frames (``tracer.npz``) plus the tracer
     GIF / MP4."""
-    import contextlib
     import json
     import zipfile
 
@@ -688,8 +719,8 @@ def export_bundle(pid: str, project: Project = Depends(get_project),
     with np.load(store.result_path(pid)) as d:
         dl, mask = tuple(d["domain_limit"]), d["mask"]
         fields = {"pressure": d["pressure"], "flux": d["flux"], "tof": d["tof"]}
-    tmp = Path(tempfile.gettempdir())
-    csv_path, vtk_path = tmp / f"{pid}_f.csv", tmp / f"{pid}_f.vti"
+    tmp, cleanup = _export_dir()
+    csv_path, vtk_path = tmp / "fields.csv", tmp / "fields.vti"
     perfio.fields_to_csv(csv_path, dl, mask=mask, **fields)
     perfio.fields_to_vtk(vtk_path, dl, mask=mask, **fields)
     meta = {"id": pid, "name": project.name,
@@ -697,7 +728,7 @@ def export_bundle(pid: str, project: Project = Depends(get_project),
             "inlets": project.inlets, "outlets": project.outlets,
             "regions": project.regions}
 
-    out = tmp / f"perfusion_bundle_{pid}.zip"
+    out = tmp / "bundle.zip"
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(store.result_path(pid), "results.npz")
         z.write(csv_path, "fields.csv")
@@ -708,11 +739,10 @@ def export_bundle(pid: str, project: Project = Depends(get_project),
             z.write(store.tracer_path(pid), "tracer.npz")
         if project.has_tracer:
             tracer, scene = store.load_tracer(pid), _video_scene(project)
-            with contextlib.suppress(ImportError):   # GIF needs the image extra
-                z.writestr("tracer.gif", helpers.render_gif(tracer, scene=scene))
-            with contextlib.suppress(ImportError):   # MP4 needs the video extra
-                z.writestr("tracer.mp4", helpers.render_mp4(tracer, scene=scene))
-    return FileResponse(out, media_type="application/zip", filename=f"{name}.zip")
+            _add_video(z, "tracer.gif", helpers.render_gif, tracer, scene)
+            _add_video(z, "tracer.mp4", helpers.render_mp4, tracer, scene)
+    return FileResponse(out, media_type="application/zip", filename=f"{name}.zip",
+                        background=cleanup)
 
 
 @router.get("/projects/{pid}/tracer", response_model=TracerInfo)

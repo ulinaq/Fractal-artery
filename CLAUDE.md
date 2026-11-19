@@ -30,7 +30,18 @@ registry): job execution lives in `api/runner.py` (+ `jobs.run_job`, which
 reopens the store from its root) so it runs in either the default thread pool
 (`JobManager`) or an optional RQ/Redis worker (`RQJobManager`, `PERFUSION_QUEUE=rq`),
 both writing lifecycle through the store; stale in-flight jobs are reaped to
-`interrupted` on startup. Physics goes in `core`; anything with optional deps or
+`interrupted` when a *thread-pool* server starts (`store.reap_interrupted()` in
+`create_app` — never on `ProjectStore(...)`, which every RQ job reopens). **Revisions**:
+every `store.save` bumps `projects.revision`; a job's `save_result` /
+`save_direct_result` / `save_tracer` commit only the result (never the whole project)
+and only onto the revision the job loaded, else `StaleProjectError` (a clean job
+error) — so an edit made during a run is never overwritten. Blobs are written to a
+temp sibling and `os.replace`d (atomic). Edits that change what the solve sees
+(`PUT vessels/mask/lesions/io`) clear the result (`routes_geometry._save_edit`); an
+unchanged re-save keeps it. Request models reject NaN/inf (`schemas.BaseModel`), bound
+grid size / `r_min_frac` (≥ 0.05) / positive physics, and validate graphs + masks
+(`_check_graph`, `MaskModel`) — a bad document or edit is a 422, not a later 500;
+synchronous re-solves wrap errors with `deps.solve_errors()` (400/422). Physics goes in `core`; anything with optional deps or
 side effects stays out of it. The public API (`from perfusion
 import Grid, Parameters, run_hybrid, …` and module handles `perfusion.darcy`,
 `perfusion.geometry`, …) is re-exported from `perfusion/__init__.py`; deep

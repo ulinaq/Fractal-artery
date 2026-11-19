@@ -7,14 +7,22 @@ from __future__ import annotations
 import dataclasses
 import io
 from itertools import pairwise
+from typing import Literal
 
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from .. import growth
 from ..core.geometry import rasterize_mask
 from . import helpers, runner
-from .deps import get_project, get_project_2d, get_store, project_info
+from .deps import (
+    check_region_dims,
+    get_project,
+    get_project_2d,
+    get_store,
+    project_info,
+    solve_errors,
+)
 from .schemas import (
     AdaptInfo,
     AdaptRequest,
@@ -38,6 +46,25 @@ from .store import Project, ProjectStore
 router = APIRouter()
 
 
+def _differs(a, b) -> bool:
+    """Compare edit payloads as stored JSON (tuples vs lists, models vs dicts)."""
+    import json
+
+    def norm(x):
+        return json.dumps(x, default=lambda m: m.model_dump(), sort_keys=True)
+
+    return norm(a) != norm(b)
+
+
+def _save_edit(store: ProjectStore, project: Project, changed: bool) -> None:
+    """Persist an edit; when it changes what the solve sees, drop the stale result
+    (and its tracer) so nothing keeps serving the previous geometry's fields."""
+    if changed and project.has_result:
+        store.clear_result(project)          # also saves
+    else:
+        store.save(project)
+
+
 @router.get("/projects/{pid}/vessels", response_model=VesselsIn)
 def get_vessels(project: Project = Depends(get_project)) -> VesselsIn:
     return VesselsIn(arteries=project.arteries, veins=project.veins)
@@ -46,8 +73,9 @@ def get_vessels(project: Project = Depends(get_project)) -> VesselsIn:
 @router.put("/projects/{pid}/vessels", response_model=ProjectInfo)
 def set_vessels(body: VesselsIn, project: Project = Depends(get_project_2d),
                 store: ProjectStore = Depends(get_store)) -> ProjectInfo:
+    changed = _differs((body.arteries, body.veins), (project.arteries, project.veins))
     project.arteries, project.veins = body.arteries, body.veins
-    store.save(project)
+    _save_edit(store, project, changed)
     return project_info(project)
 
 
@@ -59,8 +87,10 @@ def get_mask(project: Project = Depends(get_project)) -> dict:
 @router.put("/projects/{pid}/mask", response_model=ProjectInfo)
 def set_mask(body: MaskIn, project: Project = Depends(get_project_2d),
              store: ProjectStore = Depends(get_store)) -> ProjectInfo:
-    project.regions = [[list(pt) for pt in poly] for poly in body.regions]
-    store.save(project)
+    regions = [[list(pt) for pt in poly] for poly in body.regions]
+    changed = _differs(regions, project.regions)
+    project.regions = regions
+    _save_edit(store, project, changed)
     return project_info(project)
 
 
@@ -69,27 +99,17 @@ def get_lesions(project: Project = Depends(get_project)) -> dict:
     return {"lesions": project.lesions}
 
 
-def _check_region_dims(project, regions, what: str) -> None:
-    """A 3-D project takes spheres ([x, y, z] + radius); a 2-D one polygons or discs."""
-    want = 3 if project.grid.is_3d else 2
-    for i, r in enumerate(regions):
-        if r.dim != want:
-            shape = ("a sphere: center [x, y, z] + radius" if want == 3
-                     else "a polygon or a disc: center [x, y] + radius")
-            raise HTTPException(422, f"{what} {i}: a {want}-D project needs {shape}")
-
-
 @router.put("/projects/{pid}/lesions", response_model=ProjectInfo)
 def set_lesions(body: LesionsIn, project: Project = Depends(get_project),
                 store: ProjectStore = Depends(get_store)) -> ProjectInfo:
     """Set the low-permeability tissue patches (heterogeneous ``K``): outline polygons
     or discs on a 2-D project, spheres on a 3-D one. Invalidates any stale result so
     the next solve uses the new permeability field."""
-    _check_region_dims(project, body.lesions, "lesion")
-    project.lesions = [le.model_dump() for le in body.lesions]
-    if project.has_result:
-        store.clear_result(project)
-    store.save(project)
+    check_region_dims(project, body.lesions, "lesion")
+    lesions = [le.model_dump() for le in body.lesions]
+    changed = _differs(lesions, project.lesions)
+    project.lesions = lesions
+    _save_edit(store, project, changed)
     return project_info(project)
 
 
@@ -104,7 +124,7 @@ def set_hotspots(body: HotspotsIn, project: Project = Depends(get_project),
     """Set the data-constrained growth targets (polygons / discs in 2-D, spheres in
     3-D): subsequent grows sample attraction points with probability weighted by these
     hotspots (denser tree where demand is higher)."""
-    _check_region_dims(project, body.hotspots, "hotspot")
+    check_region_dims(project, body.hotspots, "hotspot")
     project.hotspots = [h.model_dump() for h in body.hotspots]
     store.save(project)
     return project_info(project)
@@ -119,9 +139,10 @@ def get_io(project: Project = Depends(get_project)) -> dict:
 def set_io(body: IOIn, project: Project = Depends(get_project_2d),
            store: ProjectStore = Depends(get_store)) -> ProjectInfo:
     """Set arterial inlet / venous outlet points (snapped to vessel ends on run)."""
-    project.inlets = [list(p) for p in body.inlets]
-    project.outlets = [list(p) for p in body.outlets]
-    store.save(project)
+    inlets, outlets = [list(p) for p in body.inlets], [list(p) for p in body.outlets]
+    changed = _differs((inlets, outlets), (project.inlets, project.outlets))
+    project.inlets, project.outlets = inlets, outlets
+    _save_edit(store, project, changed)
     return project_info(project)
 
 
@@ -229,7 +250,7 @@ def put_editable(body: NetworksEditIn, project: Project = Depends(get_project),
     three_d = runner.is_3d(project)
 
     if body.artery is None and body.vein is None:
-        raise HTTPException(404, "project has no editable arterial/venous tree")
+        raise HTTPException(422, "nothing to edit: send an artery and/or a vein")
     if body.artery is not None:
         project.artery_network = apply(project.artery_network, body.artery)
     if body.vein is not None:
@@ -238,8 +259,27 @@ def put_editable(body: NetworksEditIn, project: Project = Depends(get_project),
     return project_info(project)
 
 
+MAX_UPLOAD_BYTES = 32 * 1024 * 1024      # an uploaded vessel image
+MAX_UPLOAD_PIXELS = 64_000_000           # decoded values (rows × cols × channels)
+
+
+async def _read_limited(request: Request, limit: int) -> bytes:
+    """The request body, refusing (413) more than ``limit`` bytes without buffering it."""
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > limit:
+        raise HTTPException(413, f"upload too large (max {limit // 2**20} MB)")
+    chunks, size = [], 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > limit:
+            raise HTTPException(413, f"upload too large (max {limit // 2**20} MB)")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 @router.post("/projects/{pid}/image", response_model=ProjectInfo)
-async def upload_image(request: Request, kind: str = "artery", min_size: int = 20,
+async def upload_image(request: Request, kind: str = "artery",
+                       min_size: int = Query(20, ge=0, le=1_000_000),
                        project: Project = Depends(get_project_2d),
                        store: ProjectStore = Depends(get_store)) -> ProjectInfo:
     """Segment an uploaded vessel image into the arterial or venous network.
@@ -249,7 +289,7 @@ async def upload_image(request: Request, kind: str = "artery", min_size: int = 2
     """
     if kind not in ("artery", "vein"):
         raise HTTPException(422, "kind must be 'artery' or 'vein'")
-    data = await request.body()
+    data = await _read_limited(request, MAX_UPLOAD_BYTES)
     if not data:
         raise HTTPException(400, "empty request body; POST the image bytes")
     try:
@@ -260,8 +300,15 @@ async def upload_image(request: Request, kind: str = "artery", min_size: int = 2
         raise HTTPException(501, "image segmentation needs the 'image' extra: "
                                  "uv sync --extra image") from None
     try:
-        img = iio.imread(io.BytesIO(data))
+        props = iio.improps(io.BytesIO(data))       # header only: refuse before decoding
     except Exception as exc:  # unreadable / non-image payload
+        raise HTTPException(422, f"could not decode image: {exc}") from None
+    if int(np.prod(props.shape)) > MAX_UPLOAD_PIXELS:
+        raise HTTPException(413, f"image too large ({' × '.join(map(str, props.shape))}); "
+                                 f"at most {MAX_UPLOAD_PIXELS:,} values")
+    try:
+        img = iio.imread(io.BytesIO(data))
+    except Exception as exc:
         raise HTTPException(422, f"could not decode image: {exc}") from None
     try:
         net = seg.segment_network(img, min_size=min_size)
@@ -274,6 +321,30 @@ async def upload_image(request: Request, kind: str = "artery", min_size: int = 2
         project.vein_network = placed
     store.clear_result(project)   # persist the tree; invalidate stale result
     return project_info(project)
+
+
+def _base_tree(project: Project, target: str):
+    """The tree that grow / prune / anastomose start from: the drawn strokes (bends
+    kept, so growth extends them), else the stored segmented / grown tree, else the
+    default fractal tree fitted into the project's domain."""
+    polys, existing = ((project.arteries, project.artery_network) if target == "artery"
+                       else (project.veins, project.vein_network))
+    drawn = runner.network_from_strokes(polys) if polys else None
+    if drawn is not None:
+        return drawn
+    if existing is not None:
+        return existing
+    d_art, d_ven = runner.defaults_for(project)
+    return d_art if target == "artery" else d_ven
+
+
+def _store_tree(project: Project, target: str, network) -> None:
+    """Keep ``network`` as the project's tree; the strokes it came from are folded in
+    (otherwise the next grow would restart from them and discard this one)."""
+    if target == "artery":
+        project.artery_network, project.arteries = network, []
+    else:
+        project.vein_network, project.veins = network, []
 
 
 @router.post("/projects/{pid}/grow", response_model=GrowInfo)
@@ -309,14 +380,7 @@ def grow_vessels(body: GrowRequest | None = None, project: Project = Depends(get
         density = runner.region_field(project.hotspots, "weight", mask.shape,
                                       domain_limit, base=1.0)
 
-    d_art, d_ven = runner.defaults_for(project)       # fitted into this project's domain
-    if req.target == "artery":
-        polys, existing, default = project.arteries, project.artery_network, d_art
-    else:
-        polys, existing, default = project.veins, project.vein_network, d_ven
-    # prefer the drawn strokes (bends kept) so growth extends them, else an
-    # existing segmented/grown tree, else the default fractal tree
-    base = (polys and runner.network_from_strokes(polys)) or existing or default
+    base = _base_tree(project, req.target)
 
     if req.method == "cco":
         network = growth.cco_grow_in_mask(
@@ -333,10 +397,7 @@ def grow_vessels(body: GrowRequest | None = None, project: Project = Depends(get
             step=req.step, influence_radius=req.influence_radius,
             kill_radius=req.kill_radius, leaf_radius=req.leaf_radius,
             close_loops=req.close_loops, fuse_radius=req.fuse_radius)
-    if req.target == "artery":
-        project.artery_network = network
-    else:
-        project.vein_network = network
+    _store_tree(project, req.target, network)
     store.clear_result(project)   # persist the tree; invalidate stale result
     from ..core.anastomosis import n_loops
 
@@ -355,17 +416,9 @@ def prune_vessels(body: PruneRequest | None = None, project: Project = Depends(g
     req = body or PruneRequest()
     if req.target not in ("artery", "vein"):
         raise HTTPException(422, "target must be 'artery' or 'vein'")
-    d_art, d_ven = runner.defaults_for(project)       # fitted into this project's domain
-    if req.target == "artery":
-        polys, existing, default = project.arteries, project.artery_network, d_art
-    else:
-        polys, existing, default = project.veins, project.vein_network, d_ven
-    base = (polys and runner.network_from_strokes(polys)) or existing or default
+    base = _base_tree(project, req.target)
     network = prune_terminal_branches(base, req.steps)
-    if req.target == "artery":
-        project.artery_network, project.arteries = network, []
-    else:
-        project.vein_network, project.veins = network, []
+    _store_tree(project, req.target, network)
     store.clear_result(project)   # persist the tree; invalidate stale result
     return PruneInfo(id=project.id, n_segments=network.n_segments,
                      n_terminals=int(network.terminal_nodes.size),
@@ -385,22 +438,14 @@ def anastomose_vessels(body: AnastomoseRequest | None = None,
     req = body or AnastomoseRequest()
     if req.target not in ("artery", "vein"):
         raise HTTPException(422, "target must be 'artery' or 'vein'")
-    d_art, d_ven = runner.defaults_for(project)
-    if req.target == "artery":
-        polys, existing, default = project.arteries, project.artery_network, d_art
-    else:
-        polys, existing, default = project.veins, project.vein_network, d_ven
-    base = (polys and runner.network_from_strokes(polys)) or existing or default
+    base = _base_tree(project, req.target)
     network, links = add_anastomoses(base, req.n_links, max_distance=req.max_distance,
                                      min_detour=req.min_detour, min_hops=req.min_hops,
                                      radius_frac=req.radius_frac)
     if not links:
         raise HTTPException(409, "no pair of segments qualifies — raise max_distance or "
                                  "lower min_detour / min_hops")
-    if req.target == "artery":
-        project.artery_network, project.arteries = network, []
-    else:
-        project.vein_network, project.veins = network, []
+    _store_tree(project, req.target, network)
     store.clear_result(project)
     return AnastomoseInfo(id=project.id, n_segments=network.n_segments,
                           n_terminals=int(network.terminal_nodes.size), n_added=len(links),
@@ -417,11 +462,9 @@ def adapt_vessels(body: AdaptRequest | None = None, project: Project = Depends(g
     approach). The remodelled trees replace the project's networks; any stale result
     is invalidated. Works on 2-D and 3-D projects."""
     req = body or AdaptRequest()
-    try:
+    with solve_errors():
         ad = runner.adapt_network(project, target_exponent=req.target_exponent,
                                   rate=req.rate, n_iter=req.n_iter)
-    except runner.InputError as e:
-        raise HTTPException(400, str(e)) from None
     project.artery_network, project.vein_network = ad.art, ad.ven
     project.arteries, project.veins = [], []      # folded into the networks
     store.clear_result(project)                   # geometry changed → stale result
@@ -432,7 +475,8 @@ def adapt_vessels(body: AdaptRequest | None = None, project: Project = Depends(g
 
 
 @router.get("/projects/{pid}/morphometry")
-def morphometry(target: str = "artery", project: Project = Depends(get_project)) -> dict:
+def morphometry(target: Literal["artery", "vein"] = "artery",
+                project: Project = Depends(get_project)) -> dict:
     """Horton–Strahler morphometry of the project's ``target`` tree (artery/vein):
     per-order segment counts + mean length/radius, and the bifurcation / length /
     diameter ratios. Falls back to the default fractal tree when none is drawn."""

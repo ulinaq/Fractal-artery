@@ -288,9 +288,21 @@ def test_jobs_are_listed_and_persist(tmp_path):
 def test_stale_jobs_are_reaped_on_restart(tmp_path):
     store = ProjectStore(tmp_path)
     store.create_job("stuck", "p1", "run", state="running")   # never finished
-    # reopening the store (a restart) marks in-flight jobs interrupted
+    # merely reopening the store (an RQ worker does it per job) must NOT reap
     reopened = ProjectStore(tmp_path)
+    assert reopened.get_job("stuck")["state"] == "running"
+    # ... an in-process server starting up does
+    create_app(store=reopened)
     assert reopened.get_job("stuck")["state"] == "interrupted"
+
+
+def test_rq_server_start_does_not_reap(tmp_path):
+    from perfusion.api.jobs import RQJobManager
+
+    store = ProjectStore(tmp_path)
+    store.create_job("queued", "p1", "run", state="pending")
+    create_app(store=store, jobs=RQJobManager(store, queue=None))
+    assert store.get_job("queued")["state"] == "pending"
 
 
 def test_multiple_inlets_and_outlets(client):
@@ -2214,3 +2226,183 @@ def test_explorer_grow_closes_loops(client):
     assert plain["artery"]["loops"] == plain["vein"]["loops"] == 0
     assert looped["stats"]["artery"]["loops"] > 0
     assert looped["inflow"] > 0
+
+
+# --------------------------------------------------------------------------- #
+# Robustness (code review): stale jobs, result invalidation, input bounds
+# --------------------------------------------------------------------------- #
+def _solved_project(client, **params):
+    pid = client.post("/projects", json={"name": "r", "grid": SMALL_GRID,
+                                         "params": {**FAST_PARAMS, **params}}).json()["id"]
+    jid = client.post(f"/projects/{pid}/run", json={}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    return pid
+
+
+def test_a_job_finishing_after_an_edit_does_not_overwrite_it(tmp_path):
+    # the job loaded the project, an edit was saved, then the job's result came back:
+    # it used to write its stale copy of the whole project over the edit
+    from perfusion.api import runner
+    from perfusion.api.schemas import RunRequest
+    from perfusion.api.store import StaleProjectError
+
+    store = ProjectStore(tmp_path)
+    client = TestClient(create_app(store=store))
+    pid = client.post("/projects", json={"name": "s", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    in_flight = store.get(pid)                       # what the job started from
+    region = [[-60, 5], [60, 5], [60, 150], [-60, 150]]
+    assert client.put(f"/projects/{pid}/mask", json={"regions": [region]}).status_code == 200
+    with pytest.raises(StaleProjectError, match="changed while this job ran"):
+        runner.run_project(store, in_flight, RunRequest())
+    after = store.get(pid)
+    assert after.regions == [region]                 # the edit survived
+    assert not after.has_result                      # and no stale result was kept
+    # ... and through the job runner it is a clean, user-facing job error
+    from perfusion.api.jobs import execute_job
+
+    store.create_job("j1", pid, "run")
+    store.get = lambda _pid, _p=in_flight: _p        # the job sees the old copy
+    execute_job(store, "j1", pid, "run", {})
+    job = ProjectStore(tmp_path).get_job("j1")
+    assert job["state"] == "error"
+    assert "run it again" in job["error"]
+    assert "where:" not in job["error"]              # no traceback for this case
+
+
+def test_saves_bump_the_revision(tmp_path):
+    store = ProjectStore(tmp_path)
+    from perfusion.api.schemas import GridIn, ParametersIn
+
+    p = store.create("rev", ParametersIn(), GridIn())
+    r0 = p.revision
+    store.save(p)
+    assert p.revision == r0 + 1 == store.get(p.id).revision
+
+
+def test_edits_drop_the_stale_result_only_when_they_change_something(client):
+    pid = _solved_project(client)
+    regions = client.get(f"/projects/{pid}/mask").json()["regions"]
+    assert client.put(f"/projects/{pid}/mask", json={"regions": regions}).status_code == 200
+    assert client.get(f"/projects/{pid}").json()["has_result"]          # unchanged: kept
+    region = [[-60, 5], [60, 5], [60, 150], [-60, 150]]
+    client.put(f"/projects/{pid}/mask", json={"regions": [region]})
+    assert not client.get(f"/projects/{pid}").json()["has_result"]      # changed: dropped
+
+    pid = _solved_project(client)
+    client.put(f"/projects/{pid}/io", json={"inlets": [[0, 0]], "outlets": []})
+    assert not client.get(f"/projects/{pid}").json()["has_result"]
+    pid = _solved_project(client)
+    client.put(f"/projects/{pid}/vessels",
+               json={"arteries": [{"points": [[0, 5], [0, 60]], "radius": 2}], "veins": []})
+    assert not client.get(f"/projects/{pid}").json()["has_result"]
+
+
+def test_2d_view3d_after_a_direct_run(client):
+    pid = client.post("/projects", json={"name": "d", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    jid = client.post(f"/projects/{pid}/run", json={"model": "direct"}).json()["id"]
+    assert _wait_for_job(client, jid)["state"] == "done"
+    r = client.get(f"/projects/{pid}/view3d")
+    assert r.status_code == 200                      # was a FileNotFoundError 500
+    assert r.json()["segments"]
+
+
+@pytest.mark.parametrize(("body", "what"), [
+    ({"grid": {**SMALL_GRID, "nx": 0}}, "nx"),
+    ({"grid": {**SMALL_GRID, "nx": 100000}}, "nx"),
+    ({"grid": {**SMALL_GRID, "lx": -1}}, "lx"),
+    ({"grid": {**SMALL_GRID, "domain_limit": [70, -70, 0, 160]}}, "min < max"),
+    ({"params": {"r_min_frac": 0}}, "r_min_frac"),
+    ({"params": {"mu": 0}}, "mu"),
+    ({"params": {"radius_to_um": -2}}, "radius_to_um"),
+])
+def test_project_inputs_are_bounded(client, body, what):
+    r = client.post("/projects", json={"name": "x", **body})
+    assert r.status_code == 422
+    assert what in r.text
+
+
+def test_nan_and_degenerate_geometry_is_rejected(client):
+    pid = client.post("/projects", json={"name": "n", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    nan_edit = '{"artery": {"node_x": [0, NaN], "node_y": [5, 60], "seg_radius": [2], ' \
+               '"seg_start": [0], "seg_end": [1], "inlet_nodes": [0]}}'
+    r = client.put(f"/projects/{pid}/editable", content=nan_edit,
+                   headers={"content-type": "application/json"})
+    assert r.status_code == 422
+    for bad in ({"seg_start": [0], "seg_end": [0]},             # self-loop
+                {"seg_start": [0], "seg_end": [5]},             # node out of range
+                {"seg_start": [0, 1], "seg_end": [1, 0]}):      # radius count mismatch
+        edit = {"artery": {"node_x": [0, 0], "node_y": [5, 60], "seg_radius": [2],
+                           "inlet_nodes": [0], **bad}}
+        assert client.put(f"/projects/{pid}/editable", json=edit).status_code == 422, bad
+    one_point = {"arteries": [{"points": [[0, 5]], "radius": 2}], "veins": []}
+    assert client.put(f"/projects/{pid}/vessels", json=one_point).status_code == 422
+    assert client.get(f"/projects/{pid}/document").status_code == 200   # still downloads
+
+
+def test_bad_project_documents_are_422(client):
+    good = {"name": "doc", "grid": SMALL_GRID}
+    assert client.post("/projects/import", json=good).status_code == 200
+    for bad in (
+        {"mask": {"shape": [3, 3], "data": [True]}},                        # wrong length
+        {"mask": {"shape": [60, 71], "data": [True] * (60 * 71)}},           # wrong grid
+        {"artery_network": {"node_x": [0], "node_y": [0], "node_role": [9],
+                            "seg_start": [0], "seg_end": [5], "seg_length": [1],
+                            "seg_radius": [1], "seg_angle": [0]}},           # bad index
+        {"lesions": [{"center": [0, 50, 3], "radius": 5}]},                  # 3-D on 2-D
+    ):
+        assert client.post("/projects/import", json={**good, **bad}).status_code == 422, bad
+
+
+def test_query_and_request_bounds(client):
+    pid = _solved_project(client)
+    assert client.get(f"/projects/{pid}/transient", params={"period": 0}).status_code == 422
+    assert client.get(f"/projects/{pid}/transient", params={"pulse": 2}).status_code == 422
+    assert client.post(f"/projects/{pid}/run", json={"model": "Direct"}).status_code == 422
+    assert client.post(f"/projects/{pid}/tracer", json={"duration": -1}).status_code == 422
+    assert client.post(f"/projects/{pid}/grow", json={"step": 0}).status_code == 422
+    assert client.get(f"/projects/{pid}/morphometry",
+                      params={"target": "nerve"}).status_code == 422
+    # a bad option to a synchronous re-solve is a 4xx, not a 500
+    r = client.get(f"/projects/{pid}/multicompartment", params={"beta": 0})
+    assert r.status_code == 422
+    assert "exchange" in r.text
+
+
+def test_exports_use_private_temp_files_that_are_removed(client):
+    import tempfile
+    from pathlib import Path
+
+    pid = _solved_project(client)
+    tmp = Path(tempfile.gettempdir())
+    before = set(tmp.glob("perfusion-export-*"))
+    for fmt in ("csv", "vtk", "vtp"):
+        r = client.get(f"/projects/{pid}/export", params={"fmt": fmt})
+        assert r.status_code == 200
+        assert r.content
+    assert client.get(f"/projects/{pid}/bundle").status_code == 200
+    assert set(tmp.glob("perfusion-export-*")) == before          # all cleaned up
+    assert not list(tmp.glob(f"perfusion_{pid}*"))                # no fixed-name leftovers
+
+
+def test_image_upload_size_is_capped(client, monkeypatch):
+    pytest.importorskip("skimage")
+    from perfusion.api import routes_geometry
+
+    pid = client.post("/projects", json={"name": "u", "grid": SMALL_GRID}).json()["id"]
+    monkeypatch.setattr(routes_geometry, "MAX_UPLOAD_BYTES", 100)
+    r = client.post(f"/projects/{pid}/image", content=b"x" * 101)
+    assert r.status_code == 413
+
+
+def test_grow_folds_the_strokes_into_the_tree(client):
+    pid = client.post("/projects", json={"name": "g", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    client.put(f"/projects/{pid}/vessels",
+               json={"arteries": [{"points": [[0, 5], [0, 60]], "radius": 2}], "veins": []})
+    first = client.post(f"/projects/{pid}/grow", json={"n_points": 200}).json()
+    assert client.get(f"/projects/{pid}/vessels").json()["arteries"] == []
+    second = client.post(f"/projects/{pid}/grow", json={"n_points": 200, "seed": 1}).json()
+    assert second["n_segments"] >= first["n_segments"]      # grew on, not restarted

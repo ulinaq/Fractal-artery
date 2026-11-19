@@ -4,10 +4,23 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel as _PydanticModel
+from pydantic import ConfigDict, Field, model_validator
 
 from ..core.darcy import Grid
 from ..core.parameters import Parameters
+
+# checked at the request boundary, so a typo is a 422 *before* an expensive solve
+FieldName = Literal["pressure", "flux", "tof"]
+ObjectiveKind = Literal["flux_range", "flux_std", "flux_l2", "flux_mean", "tof_std",
+                        "tof_max"]
+
+
+class BaseModel(_PydanticModel):
+    """Every API model rejects NaN / ±inf: a NaN coordinate or parameter used to be
+    stored and then break later solves and the JSON project download."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
 
 
 class ParametersIn(BaseModel):
@@ -15,19 +28,47 @@ class ParametersIn(BaseModel):
 
     p_in: float = 10.0
     p_out: float = 0.0
-    mu: float = 1.0
-    hematocrit: float = 0.45
-    r0: float = 2.0
-    length_to_radius: float = 10.0
-    exponent: float = 2.8
-    r_min_frac: float = 0.15
-    rv_scale: float = 1.2
+    mu: float = Field(1.0, gt=0)
+    hematocrit: float = Field(0.45, ge=0, lt=1)
+    r0: float = Field(2.0, gt=0)
+    length_to_radius: float = Field(10.0, gt=0)
+    exponent: float = Field(2.8, gt=1)
+    # tree depth: branching stops below r_min_frac·r0. The node count grows
+    # geometrically as it shrinks (0.06 → ~8k nodes), so a floor keeps it bounded.
+    r_min_frac: float = Field(0.15, ge=0.05, le=1)
+    rv_scale: float = Field(1.2, gt=0)
     seed: int | None = 0
     fahraeus_lindqvist: bool = False
-    radius_to_um: float = 1.0
+    radius_to_um: float = Field(1.0, gt=0)
 
     def to_core(self) -> Parameters:
         return Parameters(**self.model_dump())
+
+
+def _check_graph(n_nodes: int, seg_start, seg_end, *, per_node=(), per_segment=(),
+                 nodes=()) -> None:
+    """Validate a node/segment graph payload: matching array lengths, segment and node
+    indices in range, no self-loops. Raises ``ValueError`` (→ a 422)."""
+    for name, arr in per_node:
+        if arr is not None and len(arr) != n_nodes:
+            raise ValueError(f"{name} has {len(arr)} values for {n_nodes} nodes")
+    if seg_start is None and seg_end is None:
+        return
+    if seg_start is None or seg_end is None or len(seg_start) != len(seg_end):
+        raise ValueError("seg_start and seg_end must both be given, with equal lengths")
+    m = len(seg_start)
+    for name, arr in per_segment:
+        if arr is not None and len(arr) != m:
+            raise ValueError(f"{name} has {len(arr)} values for {m} segments")
+    for a, b in zip(seg_start, seg_end, strict=True):
+        if not (0 <= a < n_nodes and 0 <= b < n_nodes):
+            raise ValueError(f"segment ({a}, {b}) refers to a node outside 0..{n_nodes - 1}")
+        if a == b:
+            raise ValueError(f"segment ({a}, {b}) joins a node to itself")
+    for name, idx in nodes:
+        for i in idx or ():
+            if not 0 <= i < n_nodes:
+                raise ValueError(f"{name} {i} is outside 0..{n_nodes - 1}")
 
 
 class GridIn(BaseModel):
@@ -38,10 +79,10 @@ class GridIn(BaseModel):
     ``(nx, ny, nz)`` and ``tissue`` names the organ it came from (display only).
     """
 
-    nx: int = 140
-    ny: int = 160
-    lx: float = 140.0
-    ly: float = 160.0
+    nx: int = Field(140, ge=2, le=1024)
+    ny: int = Field(160, ge=2, le=1024)
+    lx: float = Field(140.0, gt=0)
+    ly: float = Field(160.0, gt=0)
     permeability: float = Field(1.0, gt=0)   # homogeneous capillary-bed permeability (x)
     permeability_y: float | None = Field(None, gt=0)   # y-permeability; None => isotropic
     domain_limit: tuple[float, ...] = (-70.0, 70.0, 0.0, 160.0)
@@ -55,6 +96,9 @@ class GridIn(BaseModel):
         if len(self.domain_limit) != want:
             raise ValueError(f"domain_limit needs {want} values for a "
                              f"{'3' if self.nz is not None else '2'}-D grid")
+        lo, hi = self.domain_limit[0::2], self.domain_limit[1::2]
+        if any(b <= a for a, b in zip(lo, hi, strict=True)):
+            raise ValueError("domain_limit must be (min, max) pairs with min < max")
         if self.nz is not None and self.lz is None:
             self.lz = float(self.domain_limit[5] - self.domain_limit[4])
         return self
@@ -78,8 +122,8 @@ class GridIn(BaseModel):
 class Polyline(BaseModel):
     """A hand-drawn vessel: an ordered list of ``[x, y]`` points and a radius."""
 
-    points: list[tuple[float, float]]
-    radius: float = 1.0
+    points: list[tuple[float, float]] = Field(..., min_length=2)
+    radius: float = Field(1.0, gt=0)
 
 
 class VesselsIn(BaseModel):
@@ -171,7 +215,7 @@ class ProjectInfo(BaseModel):
 
 
 class RunRequest(BaseModel):
-    model: str = "hybrid"                          # "hybrid" (Darcy bed) | "direct" (connections)
+    model: Literal["hybrid", "direct"] = "hybrid"   # Darcy bed | terminal connections
     nonlinear: bool = False
     use_vessels: bool = False
     max_iter: int = Field(100, ge=1, le=100000)   # nonlinear fixed-point iteration cap
@@ -199,8 +243,8 @@ class ExploreRequest(BaseModel):
     length_to_radius: float = Field(10.0, ge=4.0, le=18.0)
     exponent: float = Field(2.8, ge=2.0, le=3.5)         # Murray bifurcation exponent
     rv_scale: float = Field(1.2, ge=0.8, le=1.8)         # venous radius scale
-    kind: str = "tof_std"                                # objective (flux_*/tof_*)
-    field: str = "flux"                                  # field to render (pressure/flux/tof)
+    kind: ObjectiveKind = "tof_std"                      # homogeneity objective
+    field: FieldName = "flux"                            # field to render
     nx: int = Field(60, ge=20, le=140)
     ny: int = Field(70, ge=20, le=160)
 
@@ -261,8 +305,8 @@ class ExploreGrowRequest(BaseModel):
     leaf_radius: float | None = Field(None, gt=0, le=100)
     seed: int = 0
     solve: bool = True
-    field: str = "flux"                       # 2-D field to render (pressure/flux/tof)
-    kind: str = "tof_std"                     # 2-D homogeneity objective
+    field: FieldName = "flux"                 # field to render
+    kind: ObjectiveKind = "tof_std"           # homogeneity objective
     nx: int = Field(60, ge=12, le=200)        # 2-D grid (3-D uses n³ with n = nx, ≤ 48)
     ny: int = Field(70, ge=12, le=230)
 
@@ -311,11 +355,11 @@ class GrowRequest(BaseModel):
     method: str = "colonization"                  # "colonization" | "cco"
     n_points: int = Field(400, ge=1, le=20000)   # attraction points / CCO terminals
     seed: int = 0
-    step: float | None = None                    # colonisation: None -> auto
-    influence_radius: float | None = None
-    kill_radius: float | None = None
-    d_min: float | None = None                   # cco: min terminal spacing
-    leaf_radius: float | None = None
+    step: float | None = Field(None, gt=0)       # colonisation: None -> auto
+    influence_radius: float | None = Field(None, gt=0)
+    kill_radius: float | None = Field(None, gt=0)
+    d_min: float | None = Field(None, gt=0)      # cco: min terminal spacing
+    leaf_radius: float | None = Field(None, gt=0)
     from_segments: list[int] | None = None       # colonisation: grow from these tips
     close_loops: bool = False                    # colonisation: tips fuse with other branches
     fuse_radius: float | None = Field(None, gt=0)   # ... within this distance (None = 2 × step)
@@ -404,8 +448,8 @@ class TracerRequest(BaseModel):
     """Animate a contrast-agent bolus washing through the tissue."""
 
     n_frames: int = Field(48, ge=2, le=200)
-    duration: float | None = None   # total time; auto from time-of-flight if None
-    aif_t0: float | None = None      # bolus arrival time; auto (~8% of duration)
+    duration: float | None = Field(None, gt=0)   # total time; auto from time-of-flight
+    aif_t0: float | None = Field(None, ge=0)     # bolus arrival; auto (~8% of duration)
 
 
 class TracerInfo(BaseModel):
@@ -435,6 +479,21 @@ class NetworkModel(BaseModel):
     root_node: int = 0
     inlet_nodes: list[int] | None = None
     node_z: list[float] | None = None
+
+    @model_validator(mode="after")
+    def _consistent(self):
+        n = len(self.node_x)
+        _check_graph(n, self.seg_start, self.seg_end,
+                     per_node=[("node_y", self.node_y), ("node_role", self.node_role),
+                               ("node_z", self.node_z)],
+                     per_segment=[("seg_length", self.seg_length),
+                                  ("seg_radius", self.seg_radius),
+                                  ("seg_angle", self.seg_angle)],
+                     nodes=[("root_node", [self.root_node] if n else []),
+                            ("inlet node", self.inlet_nodes)])
+        if any(r <= 0 for r in self.seg_radius):
+            raise ValueError("every segment radius must be > 0")
+        return self
 
     @classmethod
     def from_core(cls, net) -> NetworkModel:
@@ -476,6 +535,17 @@ class MaskModel(BaseModel):
 
     shape: tuple[int, ...]                 # (nx, ny) or (nx, ny, nz) for a 3-D project
     data: list[bool]
+
+    @model_validator(mode="after")
+    def _fits_shape(self):
+        import math
+
+        if len(self.shape) not in (2, 3) or any(n < 1 for n in self.shape):
+            raise ValueError("mask shape must be (nx, ny) or (nx, ny, nz), each ≥ 1")
+        if len(self.data) != math.prod(self.shape):
+            raise ValueError(f"mask data has {len(self.data)} values for shape "
+                             f"{tuple(self.shape)}")
+        return self
 
     @classmethod
     def from_core(cls, mask) -> MaskModel:
@@ -533,6 +603,18 @@ class NetworkEditIn(BaseModel):
     inlet_nodes: list[int] | None = None   # prescribed-pressure nodes (new indices)
     root_node: int | None = None
     node_z: list[float] | None = None      # 3-D trees (3-D projects): every node's z
+
+    @model_validator(mode="after")
+    def _consistent(self):
+        n = len(self.node_x)
+        _check_graph(n, self.seg_start, self.seg_end,
+                     per_node=[("node_y", self.node_y), ("node_z", self.node_z)],
+                     per_segment=[("seg_radius", self.seg_radius)],
+                     nodes=[("inlet node", self.inlet_nodes),
+                            ("root_node", [] if self.root_node is None else [self.root_node])])
+        if any(r <= 0 for r in self.seg_radius):
+            raise ValueError("every segment radius must be > 0")
+        return self
 
 
 class NetworksEditIn(BaseModel):
