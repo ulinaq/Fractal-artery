@@ -817,10 +817,13 @@ are being fixed in four PRs.
   multi-compartment (`with_permeability`); masks coerced to bool; segmented vessel length
   is the arc length (diagonals √2); CCO keeps base loops and reversed segments; the 3-D
   oxygen view honours `k`.
-- ☐ **API state & robustness** — jobs saving a stale copy over concurrent edits, RQ jobs
-  reaping each other, edits not invalidating results, input bounds (grid size,
-  `r_min_frac`, NaN coordinates, documents), 500 → 4xx, atomic blob writes, export temp
-  files.
+- ✅ **API state & robustness** — project revisions (a job's result commits only onto
+  the revision it started from, never overwriting a concurrent edit); job reaping only
+  on thread-pool server start (RQ workers no longer interrupt each other); edits that
+  change the model clear the result; NaN/inf rejected, grid / `r_min_frac` / physics
+  bounded, documents + graph edits validated (422 instead of a later 500); synchronous
+  re-solves return 400/422; atomic blob writes; per-export temp dirs cleaned after the
+  response; upload size / pixel caps; grow folds the strokes it started from.
 - ☐ **Frontend** — one shared job poller (stops on `interrupted` / HTTP errors), HTML
   escaping of user names, per-project state reset, request-race guards.
 - ☐ **MCP** — shared input validation and an organ-model helper (mcp_server.py ~1,000

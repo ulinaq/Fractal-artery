@@ -33,6 +33,32 @@ def _default_jobs(store: ProjectStore):
     return JobManager(store)
 
 
+def _json_safe(value):
+    """Replace non-finite floats (which strict JSON cannot carry) by their repr."""
+    import math
+
+    if isinstance(value, float) and not math.isfinite(value):
+        return repr(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+def _install_validation_handler(app: FastAPI) -> None:
+    """422s that echo a rejected NaN / inf input back: FastAPI's default handler cannot
+    serialise it and turned the 422 into a 500."""
+    from fastapi.encoders import jsonable_encoder
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.responses import JSONResponse
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error(_request, exc: RequestValidationError):
+        detail = _json_safe(jsonable_encoder(exc.errors()))
+        return JSONResponse(status_code=422, content={"detail": detail})
+
+
 def create_app(store: ProjectStore | None = None,
                jobs: JobManager | None = None) -> FastAPI:
     """Build the FastAPI app; inject a store/job-manager for testing."""
@@ -41,10 +67,14 @@ def create_app(store: ProjectStore | None = None,
 
     store = store or ProjectStore()
     jobs = jobs or _default_jobs(store)
+    if isinstance(jobs, JobManager):
+        # in-process jobs died with the previous server; RQ jobs live on in workers
+        store.reap_interrupted()
     app = FastAPI(title="perfusion API", version=__version__,
                   summary="Multiscale blood-flow & perfusion modelling service")
     app.state.store = store       # reached by the route deps (get_store / get_jobs)
     app.state.jobs = jobs
+    _install_validation_handler(app)
 
     @app.get("/health")
     def health() -> dict:

@@ -50,8 +50,9 @@ def _describe_error(exc: Exception) -> str:
     """A useful error string for the UI: a clean message for known input problems,
     otherwise the exception type + message + a short traceback tail for debugging."""
     from .runner import InputError
+    from .store import StaleProjectError
 
-    if isinstance(exc, InputError):
+    if isinstance(exc, (InputError, StaleProjectError)):
         return str(exc)                       # already user-facing and actionable
     import traceback
 

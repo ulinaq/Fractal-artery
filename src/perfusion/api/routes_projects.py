@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from . import helpers
-from .deps import get_project, get_store, project_info
+from .deps import check_document, get_project, get_store, project_info
 from .schemas import GridIn, ParametersIn, ProjectCreate, ProjectDocument, ProjectInfo
 from .store import (
     Project,
@@ -45,6 +45,7 @@ def export_document(project: Project = Depends(get_project)):
 @router.post("/projects/import", response_model=ProjectInfo)
 def import_document(doc: ProjectDocument, store: ProjectStore = Depends(get_store)) -> ProjectInfo:
     """Restore a saved project document as a *new* project (continue later)."""
+    check_document(doc)
     project = project_from_document(doc, uuid.uuid4().hex[:12])
     store.save(project)
     return project_info(project)

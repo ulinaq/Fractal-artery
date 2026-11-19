@@ -40,6 +40,31 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+class StaleProjectError(RuntimeError):
+    """A job finished after the project was edited: its result belongs to the old
+    geometry, so it is dropped instead of overwriting the newer state."""
+
+    def __init__(self, pid: str):
+        super().__init__("the project changed while this job ran (an edit, or another "
+                         "run finished first) — its result was discarded; run it again")
+        self.pid = pid
+
+
+def _atomic_write(path: Path, write) -> None:
+    """``write(tmp)`` into a temporary sibling, then rename it over ``path`` — a
+    reader never sees a half-written blob, and a failed write leaves the old one."""
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.tmp{path.suffix}")
+    try:
+        write(tmp)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _savez_atomic(path: Path, **arrays) -> None:
+    _atomic_write(path, lambda tmp: np.savez(tmp, **arrays))
+
+
 @dataclass
 class Project:
     id: str
@@ -59,6 +84,7 @@ class Project:
     summary: dict | None = None
     has_result: bool = False              # set from blob existence on load
     has_tracer: bool = False              # set from blob existence on load
+    revision: int = 0                     # bumped on every committed change (see save)
 
     @property
     def has_vessels(self) -> bool:
@@ -172,9 +198,21 @@ class ProjectStore:
             for col in ("regions", "lesions", "hotspots", "inlets", "outlets"):
                 if col not in cols:
                     con.execute(f"ALTER TABLE projects ADD COLUMN {col} TEXT NOT NULL DEFAULT '[]'")
-            # a restart killed any in-flight jobs -> mark them interrupted
-            con.execute("UPDATE jobs SET state='interrupted', updated_at=? "
-                        "WHERE state IN ('pending','running')", (_now(),))
+            if "revision" not in cols:
+                con.execute("ALTER TABLE projects ADD COLUMN revision INTEGER NOT NULL "
+                            "DEFAULT 0")
+
+    def reap_interrupted(self) -> int:
+        """Mark every pending/running job ``interrupted`` — call once when an
+        in-process server starts (its thread pool died with the old process).
+
+        Deliberately *not* done on construction: an RQ worker reopens the store for
+        every job, and a second server process shares it — either would otherwise
+        flag jobs that are alive in another process."""
+        with self._txn() as con:
+            cur = con.execute("UPDATE jobs SET state='interrupted', updated_at=? "
+                              "WHERE state IN ('pending','running')", (_now(),))
+            return cur.rowcount
 
     # -- connections / blob paths ------------------------------------------- #
     @contextmanager
@@ -224,6 +262,7 @@ class ProjectStore:
             inlets=json.loads(row["inlets"]) if row["inlets"] else [],
             outlets=json.loads(row["outlets"]) if row["outlets"] else [],
             summary=json.loads(row["summary"]) if row["summary"] else None,
+            revision=int(row["revision"]),
         )
         artery = self._artery_path(pid)
         if artery.exists():
@@ -258,43 +297,95 @@ class ProjectStore:
         return [self._row_to_project(r) for r in rows]
 
     def save(self, project: Project) -> None:
-        """Persist metadata + vessels, and sync the artery-network blob."""
-        with self._lock, self._txn() as con:
-            con.execute(
-                """INSERT INTO projects
-                       (id, name, params, grid, arteries, veins, regions, lesions,
-                        hotspots, inlets, outlets, summary)
-                       VALUES (:id, :name, :params, :grid, :arteries, :veins,
-                               :regions, :lesions, :hotspots, :inlets, :outlets, :summary)
-                   ON CONFLICT(id) DO UPDATE SET
-                       name=:name, params=:params, grid=:grid, arteries=:arteries,
-                       veins=:veins, regions=:regions, lesions=:lesions, hotspots=:hotspots,
-                       inlets=:inlets, outlets=:outlets, summary=:summary""",
-                {
-                    "id": project.id, "name": project.name,
-                    "params": project.params.model_dump_json(),
-                    "grid": project.grid.model_dump_json(),
-                    "arteries": json.dumps([p.model_dump() for p in project.arteries]),
-                    "veins": json.dumps([p.model_dump() for p in project.veins]),
-                    "regions": json.dumps(project.regions),
-                    "lesions": json.dumps(project.lesions),
-                    "hotspots": json.dumps(project.hotspots),
-                    "inlets": json.dumps(project.inlets),
-                    "outlets": json.dumps(project.outlets),
-                    "summary": json.dumps(project.summary) if project.summary else None,
-                },
-            )
-        for path, net in ((self._artery_path(project.id), project.artery_network),
-                          (self._vein_path(project.id), project.vein_network)):
-            if net is not None:
-                io.save_network(net, path)
+        """Persist metadata + vessels, sync the network/mask blobs, bump the revision.
+
+        Every save is a new *revision*; a job remembers the revision it loaded and
+        its result is only committed if nothing was saved in between (see
+        :meth:`_commit_result`)."""
+        with self._lock:
+            with self._txn() as con:
+                con.execute(
+                    """INSERT INTO projects
+                           (id, name, params, grid, arteries, veins, regions, lesions,
+                            hotspots, inlets, outlets, summary, revision)
+                           VALUES (:id, :name, :params, :grid, :arteries, :veins,
+                                   :regions, :lesions, :hotspots, :inlets, :outlets,
+                                   :summary, 1)
+                       ON CONFLICT(id) DO UPDATE SET
+                           name=:name, params=:params, grid=:grid, arteries=:arteries,
+                           veins=:veins, regions=:regions, lesions=:lesions,
+                           hotspots=:hotspots, inlets=:inlets, outlets=:outlets,
+                           summary=:summary, revision=projects.revision + 1""",
+                    {
+                        "id": project.id, "name": project.name,
+                        "params": project.params.model_dump_json(),
+                        "grid": project.grid.model_dump_json(),
+                        "arteries": json.dumps([p.model_dump() for p in project.arteries]),
+                        "veins": json.dumps([p.model_dump() for p in project.veins]),
+                        "regions": json.dumps(project.regions),
+                        "lesions": json.dumps(project.lesions),
+                        "hotspots": json.dumps(project.hotspots),
+                        "inlets": json.dumps(project.inlets),
+                        "outlets": json.dumps(project.outlets),
+                        "summary": json.dumps(project.summary) if project.summary else None,
+                    },
+                )
+                project.revision = int(con.execute(
+                    "SELECT revision FROM projects WHERE id=?", (project.id,)).fetchone()[0])
+            for path, net in ((self._artery_path(project.id), project.artery_network),
+                              (self._vein_path(project.id), project.vein_network)):
+                if net is not None:
+                    _atomic_write(path, lambda tmp, net=net: io.save_network(net, tmp))
+                else:
+                    path.unlink(missing_ok=True)
+            mask_path = self._mask_path(project.id)
+            if project.mask is not None:
+                _savez_atomic(mask_path, mask=np.asarray(project.mask, dtype=bool))
             else:
-                path.unlink(missing_ok=True)
-        mask_path = self._mask_path(project.id)
-        if project.mask is not None:
-            np.savez(mask_path, mask=np.asarray(project.mask, dtype=bool))
-        else:
-            mask_path.unlink(missing_ok=True)
+                mask_path.unlink(missing_ok=True)
+
+    def _commit_result(self, project: Project, summary, staged: dict, drop=()) -> None:
+        """Commit a job's output — but only onto the revision the job started from.
+
+        ``staged`` maps final blob paths to already-written temporary files; they are
+        renamed into place (and ``drop`` paths removed) inside the same transaction
+        that checks and bumps the revision, so a job that finishes after an edit
+        raises :class:`StaleProjectError` and leaves the newer state untouched.
+        ``summary=...`` (Ellipsis) keeps the stored summary."""
+        try:
+            with self._lock, self._txn() as con:
+                if summary is ...:
+                    cur = con.execute("UPDATE projects SET revision = revision + 1 "
+                                      "WHERE id=? AND revision=?",
+                                      (project.id, project.revision))
+                else:
+                    cur = con.execute(
+                        "UPDATE projects SET summary=?, revision = revision + 1 "
+                        "WHERE id=? AND revision=?",
+                        (json.dumps(summary) if summary else None, project.id,
+                         project.revision))
+                if cur.rowcount == 0:
+                    raise StaleProjectError(project.id)
+                for final, tmp in staged.items():
+                    os.replace(tmp, final)
+                for path in drop:
+                    path.unlink(missing_ok=True)
+                project.revision += 1
+                if summary is not ...:
+                    project.summary = summary
+        finally:
+            for tmp in staged.values():
+                Path(tmp).unlink(missing_ok=True)
+
+    def _stage(self, path: Path, write) -> Path:
+        """Write a blob to a temporary sibling of ``path`` (for :meth:`_commit_result`)."""
+        tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.tmp{path.suffix}")
+        try:
+            write(tmp)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        return tmp
 
     def save_result(self, project: Project, result, notes=None) -> None:
         """Write the result blob + summary and persist (invalidating any tracer).
@@ -302,17 +393,16 @@ class ProjectStore:
         ``notes`` (e.g. a non-convergence warning) are stored in the summary so the
         UI can surface them.
         """
-        io.save_results(result, self.result_path(project.id))
-        self.tracer_path(project.id).unlink(missing_ok=True)   # stale
-        self._nettracer_path(project.id).unlink(missing_ok=True)
-        self._direct_path(project.id).unlink(missing_ok=True)  # switching model → drop direct blob
+        pid = project.id
         summary = io.results_summary(result)
         if notes:
             summary["notes"] = list(notes)
-        project.summary = summary
+        tmp = self._stage(self.result_path(pid), lambda t: io.save_results(result, t))
+        self._commit_result(project, summary, {self.result_path(pid): tmp},
+                            drop=(self.tracer_path(pid), self._nettracer_path(pid),
+                                  self._direct_path(pid)))   # stale tracer / other model
         project.has_result = True
         project.has_tracer = False
-        self.save(project)
 
     def clear_result(self, project: Project) -> None:
         """Invalidate a stale result + tracer (e.g. after regrowing the tree)."""
@@ -337,21 +427,21 @@ class ProjectStore:
                                  ven.positions([c.venous_terminal for c in conns]),
                                  np.abs(sol.q_c)]).astype(float)
                 if conns else np.zeros((0, width)))
-        np.savez(self._direct_path(project.id), artery=seg_lines(art, sol.q_a),
-                 vein=seg_lines(ven, sol.q_v), conn=conn)
-        self.result_path(project.id).unlink(missing_ok=True)   # not a field result
-        self.tracer_path(project.id).unlink(missing_ok=True)
-        self._nettracer_path(project.id).unlink(missing_ok=True)   # stale animation
+        pid = project.id
+        tmp = self._stage(self._direct_path(pid), lambda t: np.savez(
+            t, artery=seg_lines(art, sol.q_a), vein=seg_lines(ven, sol.q_v), conn=conn))
         perfusion = float(np.abs(sol.q_c).sum())
         p_all = np.concatenate([sol.p_a, sol.p_v])
-        project.summary = {
+        summary = {
             "model": "direct", "arterial_inflow": perfusion, "venous_outflow": perfusion,
             "n_connections": len(sol.connections), "pressure_max": float(p_all.max()),
             "flux_mean": float(conn[:, -1].mean() if len(conn) else 0.0),
         }
+        self._commit_result(project, summary, {self._direct_path(pid): tmp},
+                            drop=(self.result_path(pid), self.tracer_path(pid),
+                                  self._nettracer_path(pid)))   # not a field result; stale
         project.has_result = True
         project.has_tracer = False
-        self.save(project)
 
     def load_direct(self, pid: str) -> dict:
         with np.load(self._direct_path(pid)) as d:
@@ -361,11 +451,12 @@ class ProjectStore:
                             arrivals, vmax) -> None:
         """Persist the direct-model network-transit animation (element lines +
         per-element concentration frames); the direct model has no grid field."""
-        np.savez(self._nettracer_path(project.id),
-                 lines=np.asarray(lines, dtype=float), kind=np.asarray(kind, dtype=np.int8),
-                 frames=np.asarray(frames, dtype=np.float32),
-                 times=np.asarray(times, dtype=float),
-                 arrivals=np.asarray(arrivals, dtype=float), vmax=float(vmax))
+        path = self._nettracer_path(project.id)
+        tmp = self._stage(path, lambda t: np.savez(
+            t, lines=np.asarray(lines, dtype=float), kind=np.asarray(kind, dtype=np.int8),
+            frames=np.asarray(frames, dtype=np.float32), times=np.asarray(times, dtype=float),
+            arrivals=np.asarray(arrivals, dtype=float), vmax=float(vmax)))
+        self._commit_result(project, ..., {path: tmp})
 
     def load_network_tracer(self, pid: str) -> dict:
         with np.load(self._nettracer_path(pid)) as d:
@@ -376,7 +467,7 @@ class ProjectStore:
         return self.blobs / f"{pid}.dcefit.json"
 
     def save_dce_fit(self, pid: str, payload: dict) -> None:
-        self._dcefit_path(pid).write_text(json.dumps(payload))
+        _atomic_write(self._dcefit_path(pid), lambda t: t.write_text(json.dumps(payload)))
 
     def load_dce_fit(self, pid: str) -> dict | None:
         p = self._dcefit_path(pid)
@@ -488,7 +579,9 @@ class ProjectStore:
                       mask=np.asarray(mask, dtype=bool))
         if aif is not None:
             arrays["aif"] = np.asarray(aif, dtype=float)
-        np.savez(self.tracer_path(project.id), **arrays)
+        path = self.tracer_path(project.id)
+        tmp = self._stage(path, lambda t: np.savez(t, **arrays))
+        self._commit_result(project, ..., {path: tmp})
         project.has_tracer = True
 
     def load_tracer(self, pid: str) -> dict:
