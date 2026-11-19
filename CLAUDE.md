@@ -120,6 +120,9 @@ network with resistive links instead of a porous bed.
   vessel may point either way and a leaf root has no incoming segment. Both the hybrid
   (`_Layout.terminal_flux_columns`) and direct solvers use it; the direct model pins
   every `inlet_nodes` entry, like the hybrid (tested with reversed segments + leaf inlets).
+- **Off-mask cells are NaN** in pressure-derived 2-D *and* 3-D fields (flux, TOF);
+  statistics filter with `np.isfinite`. `runner.validate_run` returns the trees as
+  solved (legacy inlet points snapped onto nodes) — solve paths must use its trees.
 - **Terminals map to the cell containing them** (`floor`, both trees, 2-D and 3-D) —
   the MATLAB `ceil` on 1-based indices was one cell off once carried over.
 - **Incidence-matrix assembly**: Poiseuille and mass conservation are built from

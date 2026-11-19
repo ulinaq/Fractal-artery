@@ -2406,3 +2406,24 @@ def test_grow_folds_the_strokes_into_the_tree(client):
     assert client.get(f"/projects/{pid}/vessels").json()["arteries"] == []
     second = client.post(f"/projects/{pid}/grow", json={"n_points": 200, "seed": 1}).json()
     assert second["n_segments"] >= first["n_segments"]      # grew on, not restarted
+
+
+def test_every_solve_path_gets_the_snapped_legacy_inlets(tmp_path):
+    # validate_run snapped the legacy inlet points only to check them; adapt / UQ /
+    # calibration then solved without them. It now returns the trees as solved.
+    from perfusion.api import runner
+
+    store = ProjectStore(tmp_path)
+    client = TestClient(create_app(store=store))
+    pid = client.post("/projects", json={"name": "io", "grid": SMALL_GRID,
+                                         "params": FAST_PARAMS}).json()["id"]
+    base_art = runner.validate_run(store.get(pid), use_vessels=True)[1]
+    leaf = int(base_art.terminal_nodes[0])
+    point = [float(base_art.node_x[leaf]), float(base_art.node_y[leaf])]
+    root = [float(base_art.node_x[base_art.root_node]),
+            float(base_art.node_y[base_art.root_node])]
+    client.put(f"/projects/{pid}/io", json={"inlets": [root, point], "outlets": []})
+    _, art, _ = runner.validate_run(store.get(pid), use_vessels=True)
+    assert leaf in art.inlet_nodes.tolist()
+    ad = runner.adapt_network(store.get(pid), n_iter=2)
+    assert leaf in ad.art.inlet_nodes.tolist()

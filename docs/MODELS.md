@@ -115,9 +115,12 @@ x₀ = 0.4/d_parent,   A = −6.96 ln(d_α/d_β)/d_p,   B = 1 + 6.98(1−H_D)/d_
 logit(FQ_E) = A + B · logit( (FQ_B − x₀)/(1 − 2x₀) )
 ```
 
-with `FQ_E = 0` below `x₀` and `1` above `1 − x₀`. Propagated through the tree by
-`segment_hematocrit`, then fed back into the F–L viscosity as a fixed point
-(`run_hybrid(phase_separation=True)`).
+with `FQ_E = 0` below `x₀` and `1` above `1 − x₀`. Propagated by `segment_hematocrit`
+**with the flow** (signed segment flows; nodes in topological flow order): each node
+pools the RBC flux of every feeding segment — so a loop node mixes both parents —
+and splits it by the law above at a binary divergence (parent diameter = the widest
+feeder), well-mixed otherwise. Fed back into the F–L viscosity as a fixed point
+(`run_hybrid(phase_separation=True)`, also combined with elasticity).
 
 ---
 

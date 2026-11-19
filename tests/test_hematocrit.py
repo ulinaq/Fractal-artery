@@ -91,3 +91,34 @@ def test_single_vessel_hematocrit_unchanged():
         root_node=0,
     )
     assert segment_hematocrit(net, np.array([1.0]), inlet_hd=0.4)[0] == pytest.approx(0.4)
+
+
+def test_hematocrit_follows_the_flow_not_the_drawing():
+    # the same Y tree with a daughter drawn backwards and its flow signed accordingly
+    net = _y_tree()
+    flow = np.array([1.0, 0.9, 0.1])
+    ref = segment_hematocrit(net, flow, inlet_hd=0.45, radius_to_um=10.0)
+    rev = Network(node_x=net.node_x, node_y=net.node_y, node_role=net.node_role,
+                  seg_start=np.array([0, 2, 1]), seg_end=np.array([1, 1, 3]),
+                  seg_length=net.seg_length, seg_radius=net.seg_radius,
+                  seg_angle=net.seg_angle, root_node=0)
+    hd = segment_hematocrit(rev, np.array([1.0, -0.9, 0.1]), inlet_hd=0.45,
+                            radius_to_um=10.0)
+    assert np.allclose(hd, ref)
+
+
+def test_a_loop_node_mixes_the_red_cells_of_both_feeds():
+    # 0 → 1 splits to 2 and 3; both rejoin at 4 (an anastomosis) which drains to 5.
+    # The node with two parents used to take only one of them (incoming_segment).
+    net = Network(
+        node_x=np.array([0.0, 0, -1, 1, 0, 0]), node_y=np.array([0.0, 1, 2, 2, 3, 4]),
+        node_role=np.zeros(6, int),
+        seg_start=np.array([0, 1, 1, 2, 3, 4]), seg_end=np.array([1, 2, 3, 4, 4, 5]),
+        seg_length=np.ones(6), seg_radius=np.array([2.0, 1.4, 1.0, 1.4, 1.0, 2.0]),
+        seg_angle=np.zeros(6), root_node=0)
+    q = np.array([1.0, 0.8, 0.2, 0.8, 0.2, 1.0])
+    hd = segment_hematocrit(net, q, inlet_hd=0.45, radius_to_um=10.0)
+    assert hd[1] != pytest.approx(hd[2])                       # skimmed at the split
+    rbc_in = hd[3] * q[3] + hd[4] * q[4]
+    assert hd[5] * q[5] == pytest.approx(rbc_in)               # both feeds mixed at node 4
+    assert hd[5] == pytest.approx(0.45)                        # RBC flux conserved overall

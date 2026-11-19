@@ -257,18 +257,24 @@ def validate_run(project, use_vessels):
         raise InputError(
             f"p_in equals p_out ({prm.p_in}); there is no pressure drop to drive flow. "
             "Set p_in above p_out in Parameters.")
+    effective = []
     for net, points, name, word in ((art, project.inlets, "arterial", "inlet"),
                                     (ven, project.outlets, "venous", "outlet")):
         if net is None:
+            effective.append(net)
             continue
         snapped = snap_io(net, points)
         eff = net if snapped is None else replace(net, inlet_nodes=snapped)
+        effective.append(eff)
         if eff.terminal_nodes.size == 0:
             raise InputError(
                 f"The {name} tree has no free ends: every end is marked as an {word}, so "
                 "it cannot exchange blood with the tissue and no flow can pass. In the "
                 f"Vessels tab, select an end node and unset {word} (I) so it couples to "
                 "the capillary bed.")
+    # the trees *as solved*: legacy inlet/outlet points already snapped onto nodes, so
+    # every caller (run, adapt, sweeps) uses the same boundary nodes
+    art, ven = effective
     return grid, art, ven
 
 
@@ -321,9 +327,7 @@ def solve(project, *, use_vessels, nonlinear=False, max_iter=100, tol=1e-10,
                              max_iter=max_iter, tol=tol,
                              phase_separation=phase_separation, elasticity=elasticity)
     return run_hybrid(prm, grid, domain_limit=domain_limit, nonlinear=nonlinear,
-                      art=art, ven=ven,
-                      art_inlets=snap_io(art, project.inlets),
-                      ven_outlets=snap_io(ven, project.outlets),
+                      art=art, ven=ven,          # inlets already snapped by validate_run
                       max_iter=max_iter, tol=tol,
                       phase_separation=phase_separation, elasticity=elasticity)
 

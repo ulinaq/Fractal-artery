@@ -223,7 +223,7 @@ def solve_flow(prm: Parameters, art: Network, ven: Network, response, *,
         """New arterial hematocrit (Pries skimming) and how far it moved."""
         if not couple_hct:
             return hd, 0.0
-        new = segment_hematocrit(a, np.abs(sol.q_a), prm.hematocrit, prm.radius_to_um)
+        new = segment_hematocrit(a, sol.q_a, prm.hematocrit, prm.radius_to_um)   # signed
         return new, float(np.max(np.abs(new - hd)))
 
     if elasticity and prm.compliance:
@@ -353,7 +353,8 @@ def run_adaptation(prm: Parameters, grid, target_exponent: float = 3.0,
                    domain_limit: tuple = (-70, 70, 0, 160),
                    rate: float = 0.05, n_iter: int = 60,
                    art: Network | None = None, ven: Network | None = None,
-                   eps: float | None = None) -> AdaptationResult:
+                   eps: float | None = None, art_inlets=None,
+                   ven_outlets=None) -> AdaptationResult:
     """Structurally adapt vessel radii toward Murray's law (reduced Pries–Secomb).
 
     Iterates: solve the hybrid flow → compute each segment's wall shear → nudge radii
@@ -367,9 +368,16 @@ def run_adaptation(prm: Parameters, grid, target_exponent: float = 3.0,
     ``grid`` may be a 2-D :class:`Grid` or a :class:`~perfusion.core.darcy3d.Grid3D`
     (then ``art``/``ven`` are 3-D trees and ``domain_limit`` the 6-value window);
     ``eps`` defaults to each path's mollifier radius (4 in 2-D, 2 in 3-D).
+    ``art_inlets`` / ``ven_outlets`` set the prescribed-pressure nodes as in
+    :func:`run_hybrid` — applied *before* the reused Darcy response is built, so the
+    terminal set (and hence the response) matches every solve in the loop.
     """
     art = geometry.arterial_tree(prm) if art is None else art
     ven = geometry.venous_tree(prm) if ven is None else ven
+    if art_inlets is not None:
+        art = replace(art, inlet_nodes=np.asarray(art_inlets, dtype=int))
+    if ven_outlets is not None:
+        ven = replace(ven, inlet_nodes=np.asarray(ven_outlets, dtype=int))
     r0a, r0v = np.asarray(art.seg_radius, float), np.asarray(ven.seg_radius, float)
 
     def exponent(a, v, sol):
